@@ -32,6 +32,7 @@ set -e
 BF_HOSTNAME="localhost"
 SDIR="/root/workspace"
 BFB="${BFB:-/lib/firmware/mellanox/boot/default.bfb}"
+CAPSULE="${SDIR}/update.cap"
 verbose=0
 kdir=$(/bin/ls -1d /lib/modules/4.20* /lib/modules/5.* 2> /dev/null | head -1)
 if [ -n "$kdir" ]; then
@@ -197,6 +198,12 @@ for tool in `dpkg -L mlxbf-scripts | grep bin/` \
 		`dpkg -L dosfstools` \
 		`dpkg -L e2fsprogs` \
 		`dpkg -L fdisk` \
+		`dpkg -L kmod | grep -v share` \
+		`dpkg -L pciutils | grep -v share` \
+		`dpkg -L usbutils | grep -v share` \
+		`dpkg -L mft` \
+		`dpkg -L mft-oem` \
+		`dpkg -L kernel-mft-modules` \
 		`dpkg -L tar`
 do
 	if [ -d $tool ]; then
@@ -209,21 +216,27 @@ for tool in `dpkg -L mlxbf-scripts | grep bin/` \
 		`dpkg -L dosfstools | grep -v share` \
 		`dpkg -L e2fsprogs | grep -v share` \
 		`dpkg -L fdisk | grep -v share` \
+		`dpkg -L kmod | grep -v share` \
+		`dpkg -L pciutils | grep -v share` \
+		`dpkg -L usbutils | grep -v share` \
+		`dpkg -L mft` \
+		`dpkg -L mft-oem` \
+		`dpkg -L kernel-mft-modules` \
 		`dpkg -L tar | grep -v share` \
 		xz efibootmgr bash getopt hexdump mstflint lspci perl \
 		lsblk watchdog shutdown systemctl strings aarch64-linux-gnu-strings \
-		mlxbf-bootctl
+		mlxbf-bootctl id
 do
 	if [ -d $tool ]; then
 		continue
 	fi
 	copy_bin $tool
 done
+sudo depmod -a -b ./ $kernel
 sudo mkdir -p usr/share/misc/ bin/ var/log/watchdog
 sudo cp /usr/share/misc/pci.ids usr/share/misc/
 sudo cp /etc/watchdog.conf etc
 # Make sure we can load mlx-bootctl
-sudo ln -s /bin/kmod usr/sbin/insmod
 bootctl_ko=`modinfo -F filename -k $kernel mlx-bootctl`
 sudo cp $bootctl_ko .
 sudo cp /lib/modules/$kernel/kernel/drivers/watchdog/sbsa_gwdt.ko .
@@ -279,7 +292,6 @@ find . -print0 | sudo cpio --null -o --format=newc | gzip -9 > "$initramfs"
 
 # Make bfb
 cd ..
-CAPSULE=/lib/firmware/mellanox/boot/capsule/MmcBootCap
 if [ ! -e $CAPSULE ]; then
 	echo "ERROR: Capsule file $CAPSULE does not exist"
 	exit 1

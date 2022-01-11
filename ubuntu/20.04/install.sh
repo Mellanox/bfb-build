@@ -40,7 +40,7 @@ log()
 #
 # Check PXE installation
 #
-bfpxe
+if [ ! -e /tmp/bfpxe.done ]; then touch /tmp/bfpxe.done; bfpxe; fi
 
 #
 # Check auto configuration passed from boot-fifo
@@ -49,7 +49,7 @@ boot_fifo_path="/sys/bus/platform/devices/MLNXBF04:00/bootfifo"
 if [ -e "${boot_fifo_path}" ]; then
 	cfg_file=$(mktemp)
 	# Get 16KB assuming it's big enough to hold the config file.
-	dd if=${boot_fifo_path} of=${cfg_file} bs=4096 count=4
+	dd if=${boot_fifo_path} of=${cfg_file} bs=4096 count=4 > /dev/null 2>&1
 
 	#
 	# Check the .xz signature {0xFD, '7', 'z', 'X', 'Z', 0x00} and extract the
@@ -81,6 +81,8 @@ function_exists()
 	declare -f -F "$1" > /dev/null
 	return $?
 }
+
+DHCP_CLASS_ID=${PXE_DHCP_CLASS_ID:-""}
 
 log "INFO: $distro installation started"
 
@@ -122,12 +124,14 @@ fi
 
 # Customisations per PSID
 FLINT=""
-if [ -x /usr/bin/mstflint ]; then
-	FLINT=/usr/bin/mstflint
-elif [ -x /usr/bin/flint ]; then
+if [ -x /usr/bin/flint ]; then
 	FLINT=/usr/bin/flint
-elif [ -x /mnt/usr/bin/mstflint ]; then
-	FLINT=/mnt/usr/bin/mstflint
+elif [ -x /usr/bin/mstflint ]; then
+	FLINT=/usr/bin/mstflint
+fi
+
+if [ -x /usr/bin/mst ]; then
+	/usr/bin/mst start > /dev/null 2>&1
 fi
 
 # Flash image
@@ -365,11 +369,17 @@ EOF
 	# Update HW-dependant files
 	if (/usr/bin/lspci -n -d 15b3: | grep -wq 'a2d2'); then
 		# BlueField-1
+		if [ ! -n "$DHCP_CLASS_ID" ]; then
+			DHCP_CLASS_ID="BF1Client"
+		fi
 		ln -snf snap_rpc_init_bf1.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
 		# OOB interface does not exist on BlueField-1
 		sed -i -e '/oob_net0/,+1d' /mnt/var/lib/cloud/seed/nocloud-net/network-config
 	elif (/usr/bin/lspci -n -d 15b3: | grep -wq 'a2d6'); then
 		# BlueField-2
+		if [ ! -n "$DHCP_CLASS_ID" ]; then
+			DHCP_CLASS_ID="BF2Client"
+		fi
 		ln -snf snap_rpc_init_bf2.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
 	fi
 
@@ -434,6 +444,10 @@ EOF
 		perl -ni -e "print unless /plain_text_passwd/" /mnt/var/lib/cloud/seed/nocloud-net/user-data
 	fi
 
+	mkdir -p /mnt/etc/dhcp
+	cat >> /mnt/etc/dhcp/dhclient.conf << EOF
+send vendor-class-identifier "$DHCP_CLASS_ID";
+EOF
 
 	if function_exists bfb_modify_os; then
 		log "INFO: Running bfb_modify_os from bf.cfg"
@@ -480,6 +494,7 @@ blockdev --rereadpt ${device} > /dev/null 2>&1
 sync
 
 bfbootmgr --cleanall > /dev/null 2>&1
+/bin/rm -f /sys/firmware/efi/efivars/Boot* > /dev/null 2>&1
 
 # Make it the boot partition
 mounted_efivarfs=0
@@ -492,6 +507,45 @@ if efibootmgr | grep ${UBUNTU_CODENAME}; then
 	efibootmgr -b "$(efibootmgr | grep ${UBUNTU_CODENAME} | cut -c 5-8)" -B > /dev/null 2>&1
 fi
 efibootmgr -c -d "$device" -p $((1 + 2*$NEXT_OS_IMAGE)) -L ${UBUNTU_CODENAME}${NEXT_OS_IMAGE} -l "\EFI\ubuntu\shimaa64.efi" > /dev/null 2>&1
+
+BFCFG=`which bfcfg 2> /dev/null`
+if [ -n "$BFCFG" ]; then
+	# Create PXE boot entries
+	if [ -e /etc/bf.cfg ]; then
+		mv /etc/bf.cfg /etc/bf.cfg.orig
+	fi
+
+	cat > /etc/bf.cfg << EOF
+BOOT0=DISK
+BOOT1=NET-NIC_P0-IPV4
+BOOT2=NET-NIC_P0-IPV6
+BOOT3=NET-NIC_P1-IPV4
+BOOT4=NET-NIC_P1-IPV6
+BOOT5=NET-OOB-IPV4
+BOOT6=NET-OOB-IPV6
+PXE_DHCP_CLASS_ID=$DHCP_CLASS_ID
+EOF
+
+	$BFCFG
+
+	# Restore the original bf.cfg
+	/bin/rm -f /etc/bf.cfg
+	if [ -e /etc/bf.cfg.orig ]; then
+		mv /etc/bf.cfg.orig /etc/bf.cfg
+	fi
+fi
+
+if ! (efibootmgr | grep ${UBUNTU_CODENAME}); then
+	log "ERROR: Failed to add ${UBUNTU_CODENAME}${NEXT_OS_IMAGE} boot entry. Retrying..."
+	efibootmgr -c -d "$device" -p $((1 + 2*$NEXT_OS_IMAGE)) -L ${UBUNTU_CODENAME}${NEXT_OS_IMAGE} -l "\EFI\ubuntu\shimaa64.efi" > /dev/null 2>&1
+	if ! (efibootmgr | grep ${UBUNTU_CODENAME}); then
+		bfbootmgr --cleanall > /dev/null 2>&1
+		efibootmgr -c -d "$device" -p $((1 + 2*$NEXT_OS_IMAGE)) -L ${UBUNTU_CODENAME}${NEXT_OS_IMAGE} -l "\EFI\ubuntu\shimaa64.efi" > /dev/null 2>&1
+		if ! (efibootmgr | grep ${UBUNTU_CODENAME}); then
+			log "ERROR: Failed to add ${UBUNTU_CODENAME}${NEXT_OS_IMAGE} boot entry."
+		fi
+	fi
+fi
 
 if [ $mounted_efivarfs -eq 1 ]; then
 	umount /sys/firmware/efi/efivars > /dev/null 2>&1

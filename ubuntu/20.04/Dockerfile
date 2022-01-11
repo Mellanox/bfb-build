@@ -38,6 +38,8 @@ RUN apt update || true
 RUN apt install -y -f doca-runtime doca-tools doca-sdk || true
 RUN apt --fix-broken install -y || true
 RUN /bin/rm -f /etc/apt/sources.list.d/doca.tmp.list
+RUN apt update || true
+RUN /usr/sbin/dpkg-reconfigure bf-release || true
 RUN mkdir -p /etc/kubelet.d
 RUN mkdir -p /workspace
 

@@ -21,6 +21,19 @@ DISTRO="ubuntu"
 DISTRO_VERSION="20.04"
 DISTRO_BASE_URL="http://cloud-images.ubuntu.com/releases/focal/release/${DISTRO}-${DISTRO_VERSION}-server-cloudimg-arm64-root.tar.xz"
 
+WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
+
+mkdir -p $WDIR
+cp	Dockerfile \
+	vmlinuz \
+	create_bfb \
+	install.sh \
+	../../common/tools/qemu-aarch64-static \
+	../../common/3.8.5/update.cap \
+	$WDIR
+
+cd $WDIR
+
 wget $DISTRO_BASE_URL
 
 docker build -t bfb_runtime_${DISTRO}${DISTRO_VERSION} -f Dockerfile .

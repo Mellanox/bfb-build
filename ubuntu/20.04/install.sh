@@ -551,7 +551,6 @@ if [ $mounted_efivarfs -eq 1 ]; then
 	umount /sys/firmware/efi/efivars > /dev/null 2>&1
 fi
 
-BFCFG=`which bfcfg 2> /dev/null`
 if [ -n "$BFCFG" ]; then
 	$BFCFG
 fi

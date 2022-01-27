@@ -32,10 +32,26 @@ RUN echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] htt
 RUN apt update
 RUN apt install -y kubelet runc containerd
 RUN apt upgrade -y
-RUN wget -qO - https://linux.mellanox.com/public/repo/doca/1.2.0/ubuntu20.04/aarch64/GPG-KEY-Mellanox.pub | sudo apt-key add -
-RUN echo "deb [trusted=yes] https://linux.mellanox.com/public/repo/doca/1.2.0/ubuntu20.04/\$(ARCH) ./" | tee /etc/apt/sources.list.d/doca.tmp.list
+RUN wget -qO - https://linux.mellanox.com/public/repo/doca/1.2.1/ubuntu20.04/aarch64/GPG-KEY-Mellanox.pub | sudo apt-key add -
+RUN echo "deb [trusted=yes] https://linux.mellanox.com/public/repo/doca/1.2.1/ubuntu20.04/\$(ARCH) ./" | tee /etc/apt/sources.list.d/doca.tmp.list
 RUN apt update || true
+
+# Avoid running flash-kernel post install
+RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
+RUN apt install -y -f \
+	linux-bluefield=5.4.0.1023.24 \
+	linux-bluefield-headers-5.4.0-1023=5.4.0-1023.26 \
+	linux-bluefield-tools-5.4.0-1023=5.4.0-1023.26 \
+	linux-headers-5.4.0-1023-bluefield=5.4.0-1023.26 \
+	linux-headers-bluefield=5.4.0.1023.24 \
+	linux-image-5.4.0-1023-bluefield=5.4.0-1023.26 \
+	linux-image-bluefield=5.4.0.1023.24 \
+	linux-modules-5.4.0-1023-bluefield=5.4.0-1023.26 \
+	linux-tools-5.4.0-1023-bluefield=5.4.0-1023.26 \
+	linux-tools-bluefield=5.4.0.1023.24
+
 RUN apt install -y -f doca-runtime doca-tools doca-sdk || true
+RUN apt-mark hold linux-tools-bluefield linux-image-bluefield linux-bluefield linux-headers-bluefield linux-image-bluefield linux-libc-dev linux-tools-common
 RUN apt --fix-broken install -y || true
 RUN /bin/rm -f /etc/apt/sources.list.d/doca.tmp.list
 RUN apt update || true
@@ -98,4 +114,4 @@ RUN mkdir -p /boot/efi/EFI/ubuntu/; \
 	/boot/efi/EFI/BOOT/
 
 
-CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1022-bluefield"]
+CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1023-bluefield"]

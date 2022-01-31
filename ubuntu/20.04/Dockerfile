@@ -7,12 +7,14 @@ WORKDIR /root/workspace
 ADD install.sh .
 ADD create_bfb .
 ADD update.cap .
+ADD mlxbf-bootimages_3.8.5-12027_arm64.deb .
 ADD vmlinuz .
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV FLASH_KERNEL_SKIP=yes
 ENV RUN_FW_UPDATER=no
 
+RUN dpkg -i mlxbf-bootimages_3.8.5-12027_arm64.deb
 RUN apt update
 RUN apt remove --purge -y snapd plymouth
 RUN apt autoremove -y

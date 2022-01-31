@@ -5,11 +5,13 @@ WORKDIR /root/workspace
 ADD install.sh .
 ADD create_bfb .
 ADD update.cap .
+ADD mlxbf-bootimages-3.8.5-12027.aarch64.rpm .
 ADD parted-3.2-39.el7.aarch64.rpm .
 
 ENV RUN_FW_UPDATER=no
 
 RUN rpm -Uhv parted-3.2-39.el7.aarch64.rpm
+RUN rpm -ihv mlxbf-bootimages-3.8.5-12027.aarch64.rpm
 
 RUN yum install -y \
 		--enablerepo=updates \

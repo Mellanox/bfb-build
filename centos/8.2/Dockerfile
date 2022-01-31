@@ -5,9 +5,11 @@ WORKDIR /root/workspace
 ADD install.sh .
 ADD create_bfb .
 ADD update.cap .
+ADD mlxbf-bootimages-3.8.5-12027.aarch64.rpm .
 
 ENV RUN_FW_UPDATER=no
 
+RUN rpm -ihv mlxbf-bootimages-3.8.5-12027.aarch64.rpm
 RUN yum install -y \
 		grub2-tools grub2 grubby grub2-tools-minimal grub2-efi-aa64 grub2-efi-aa64-modules grub2-common grub2-tools-extra \
 		efibootmgr tcpdump nvme-cli rsync binutils sg3_utils libnl3 bison flex libmnl perl lsof \

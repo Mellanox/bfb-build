@@ -1,7 +1,14 @@
 To build a BlueField boot stream (BFB), run:
 
+For production cards:
 ````
-<distro>/<version>/bfb-build
+IMAGE_TYPE=prod <distro>/<version>/bfb-build
+````
+
+or for engineering samples (ES)
+
+````
+IMAGE_TYPE=dev <distro>/<version>/bfb-build
 ````
 
 The BFB is created under `/tmp/<distro>/<version>.<pid>` directory.

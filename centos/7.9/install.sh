@@ -363,6 +363,10 @@ umount /mnt
 
 sync
 
+if [ -e /lib/firmware/mellanox/boot/capsule/update.cap ]; then
+	bfrec --capsule /lib/firmware/mellanox/boot/capsule/update.cap
+fi
+
 # Clean up actual boot entries.
 bfbootmgr --cleanall > /dev/null 2>&1
 /bin/rm -f /sys/firmware/efi/efivars/Boot* > /dev/null 2>&1

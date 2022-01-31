@@ -19,15 +19,19 @@ fi
 
 DISTRO="centos"
 DISTRO_VERSION="7.6"
+VERSION="3.8.5"
+IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 
 WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
 
 mkdir -p $WDIR
+wget -P $WDIR https://linux.mellanox.com/public/repo/bluefield/${VERSION}/bootimages/${IMAGE_TYPE}/update.cap
+wget -P $WDIR https://linux.mellanox.com/public/repo/bluefield/${VERSION}/bootimages/${IMAGE_TYPE}/mlxbf-bootimages-3.8.5-12027.aarch64.rpm
+
 cp	Dockerfile \
 	create_bfb \
 	install.sh \
 	../../common/tools/qemu-aarch64-static \
-	../../common/3.8.5/update.cap \
 	../../common/packages/parted-3.2-39.el7.aarch64.rpm \
 	$WDIR
 

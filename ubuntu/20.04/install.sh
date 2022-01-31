@@ -493,6 +493,10 @@ blockdev --rereadpt ${device} > /dev/null 2>&1
 
 sync
 
+if [ -e /lib/firmware/mellanox/boot/capsule/update.cap ]; then
+	bfrec --capsule /lib/firmware/mellanox/boot/capsule/update.cap
+fi
+
 bfbootmgr --cleanall > /dev/null 2>&1
 /bin/rm -f /sys/firmware/efi/efivars/Boot* > /dev/null 2>&1
 

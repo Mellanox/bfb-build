@@ -42,6 +42,11 @@ log()
 }
 
 #
+# Check PXE installation
+#
+if [ ! -e /tmp/bfpxe.done ]; then touch /tmp/bfpxe.done; bfpxe; fi
+
+#
 # Check auto configuration passed from boot-fifo
 #
 boot_fifo_path="/sys/bus/platform/devices/MLNXBF04:00/bootfifo"

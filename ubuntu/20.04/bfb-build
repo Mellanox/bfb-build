@@ -20,17 +20,15 @@ fi
 DISTRO="ubuntu"
 DISTRO_VERSION="20.04"
 DISTRO_BASE_URL="http://cloud-images.ubuntu.com/releases/focal/release/${DISTRO}-${DISTRO_VERSION}-server-cloudimg-arm64-root.tar.xz"
-VERSION="3.8.5"
+VERSION="3.9.0"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 
 WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
 
 mkdir -p $WDIR
-wget -P $WDIR https://linux.mellanox.com/public/repo/bluefield/${VERSION}/bootimages/${IMAGE_TYPE}/update.cap
-wget -P $WDIR https://linux.mellanox.com/public/repo/bluefield/${VERSION}/bootimages/${IMAGE_TYPE}/mlxbf-bootimages_3.8.5-12027_arm64.deb
+wget -P $WDIR -r --no-verbose --no-directories -l1 --no-parent -A 'mlxbf-bootimages_*_arm64.deb' https://linux.mellanox.com/public/repo/bluefield/${VERSION}/bootimages/${IMAGE_TYPE}/
 
 cp	Dockerfile \
-	vmlinuz \
 	create_bfb \
 	install.sh \
 	../../common/tools/qemu-aarch64-static \
@@ -49,4 +47,4 @@ docker run -t --rm --privileged -e container=docker \
 	--mount type=bind,source=/proc,target=/proc \
 	bfb_runtime_${DISTRO}${DISTRO_VERSION}
 
-readlink -f *aarch64.bfb
+readlink -f *.bfb

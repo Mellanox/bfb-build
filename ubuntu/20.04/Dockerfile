@@ -6,24 +6,28 @@ ADD qemu-aarch64-static /usr/bin/
 WORKDIR /root/workspace
 ADD install.sh .
 ADD create_bfb .
-ADD update.cap .
-ADD mlxbf-bootimages_3.8.5-12027_arm64.deb .
-ADD vmlinuz .
+ADD mlxbf-bootimages_3.9.0-12175_arm64.deb .
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV FLASH_KERNEL_SKIP=yes
 ENV RUN_FW_UPDATER=no
 
-RUN dpkg -i mlxbf-bootimages_3.8.5-12027_arm64.deb
+RUN dpkg -i mlxbf-bootimages_3.9.0-12175_arm64.deb
 RUN apt update
 RUN apt remove --purge -y snapd plymouth
 RUN apt autoremove -y
-RUN apt install -y grub-efi-arm64-signed grub-efi-arm64-bin shim-signed watchdog binutils sbsigntool rasdaemon net-tools nfs-common iptables-persistent rsync tcpdump nvme-cli iputils-arping iputils-ping iputils-tracepath bridge-utils iperf3 bc lm-sensors ifenslave acpid network-manager kexec-tools i2c-tools dc lldpad
+RUN apt install -y grub-efi-arm64-signed grub-efi-arm64-bin shim-signed watchdog binutils sbsigntool rasdaemon net-tools nfs-common iptables-persistent rsync tcpdump nvme-cli iputils-arping iputils-ping iputils-tracepath bridge-utils iperf3 bc lm-sensors ifenslave acpid network-manager kexec-tools i2c-tools dc lldpad unzip
 RUN apt install -y docker.io; systemctl disable docker.service || true; systemctl disable docker.socket || true
 RUN apt install -y python3-pip
 RUN apt install -y build-essential
 RUN apt install -y libpam-pwquality; echo "minlen = 8" >> /etc/security/pwquality.conf; echo "minclass = 3" >> /etc/security/pwquality.conf
 RUN apt install -y python2.7 python3.8
+
+# Grub password
+RUN echo 'set superusers="admin"' >> /etc/grub.d/40_custom; \
+	echo 'password_pbkdf2 admin grub.pbkdf2.sha512.10000.5EB1FF92FDD89BDAF3395174282C77430656A6DBEC1F9289D5F5DAD17811AD0E2196D0E49B49EF31C21972669D180713E265BB2D1D4452B2EA9C7413C3471C53.F533423479EE7465785CC2C79B637BDF77004B5CC16C1DDE806BCEA50BF411DE04DFCCE42279E2E1F605459F1ABA3A0928CE9271F2C84E7FE7BF575DC22935B1' >> /etc/grub.d/40_custom; \
+	sed -i -e "s@'gnulinux-simple-\$boot_device_id'@'gnulinux-simple-\$boot_device_id' --unrestricted@" \
+	       -e "s@'gnulinux-\$version-\$type-\$boot_device_id'@'gnulinux-\$version-\$type-\$boot_device_id' --users ''@" /etc/grub.d/10_linux
 
 # Set python2.7 as a default
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.8 1
@@ -32,25 +36,28 @@ RUN update-alternatives --install /usr/bin/python python /usr/bin/python2.7 10
 RUN curl -fsSLo /usr/share/keyrings/kubernetes-archive-keyring.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg
 RUN echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | tee /etc/apt/sources.list.d/kubernetes.list
 RUN apt update
-RUN apt install -y kubelet runc containerd
+RUN apt install -y kubelet runc containerd cri-tools
 RUN apt upgrade -y
-RUN wget -qO - https://linux.mellanox.com/public/repo/doca/1.2.1/ubuntu20.04/aarch64/GPG-KEY-Mellanox.pub | sudo apt-key add -
-RUN echo "deb [trusted=yes] https://linux.mellanox.com/public/repo/doca/1.2.1/ubuntu20.04/\$(ARCH) ./" | tee /etc/apt/sources.list.d/doca.tmp.list
+RUN wget -qO - https://linux.mellanox.com/public/repo/doca/1.3.0/ubuntu20.04/aarch64/GPG-KEY-Mellanox.pub | sudo apt-key add -
+RUN echo "deb [trusted=yes] https://linux.mellanox.com/public/repo/doca/1.3.0/ubuntu20.04/\$(ARCH) ./" | tee /etc/apt/sources.list.d/doca.tmp.list
 RUN apt update || true
 
 # Avoid running flash-kernel post install
 RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
 RUN apt install -y -f \
-	linux-bluefield=5.4.0.1023.24 \
-	linux-bluefield-headers-5.4.0-1023=5.4.0-1023.26 \
-	linux-bluefield-tools-5.4.0-1023=5.4.0-1023.26 \
-	linux-headers-5.4.0-1023-bluefield=5.4.0-1023.26 \
-	linux-headers-bluefield=5.4.0.1023.24 \
-	linux-image-5.4.0-1023-bluefield=5.4.0-1023.26 \
-	linux-image-bluefield=5.4.0.1023.24 \
-	linux-modules-5.4.0-1023-bluefield=5.4.0-1023.26 \
-	linux-tools-5.4.0-1023-bluefield=5.4.0-1023.26 \
-	linux-tools-bluefield=5.4.0.1023.24
+	linux-bluefield=5.4.0.1035.36 \
+	linux-bluefield-headers-5.4.0-1035=5.4.0-1035.38 \
+	linux-bluefield-tools-5.4.0-1035=5.4.0-1035.38 \
+	linux-headers-5.4.0-1035-bluefield=5.4.0-1035.38 \
+	linux-headers-bluefield=5.4.0.1035.36 \
+	linux-image-5.4.0-1035-bluefield=5.4.0-1035.38 \
+	linux-image-bluefield=5.4.0.1035.36 \
+	linux-libc-dev:arm64=5.4.0-110.124 \
+	linux-modules-5.4.0-1035-bluefield=5.4.0-1035.38 \
+	linux-tools-5.4.0-1035-bluefield=5.4.0-1035.38 \
+	linux-tools-bluefield=5.4.0.1035.36 \
+	linux-tools-common=5.4.0-110.124
+
 
 RUN apt install -y -f doca-runtime doca-tools doca-sdk || true
 RUN apt-mark hold linux-tools-bluefield linux-image-bluefield linux-bluefield linux-headers-bluefield linux-image-bluefield linux-libc-dev linux-tools-common
@@ -83,19 +90,6 @@ RUN systemctl disable kubelet.service || true
 RUN systemctl disable containerd.service || true
 RUN systemctl disable mosquitto.service || true
 RUN systemctl disable ztp.service || true
-RUN systemctl disable nvsm-api-gateway.service || true
-RUN systemctl disable nvsm-core.service || true
-RUN systemctl disable nvsm-mqtt.service || true
-RUN systemctl disable nvsm-notifier.service || true
-RUN systemctl disable nvsm.service || true
-RUN sed -i -e  '/configure/a exit 0' /usr/share/nvsm/pkgscripts/postinst
-RUN /bin/rm -f /etc/nvsm/nvsm-ca.crt \
-				/etc/nvsm/nvsm-ca.key \
-				/etc/nvsm/nvsm-ca.srl \
-				/etc/nvsm/nvsm-server.crt \
-				/etc/nvsm/nvsm-server.csr \
-				/etc/nvsm/nvsm-server.key
-
 
 # Copy boot bits from rootfs to EFI partition
 RUN mkdir -p /boot/efi/EFI/ubuntu/; \
@@ -116,4 +110,4 @@ RUN mkdir -p /boot/efi/EFI/ubuntu/; \
 	/boot/efi/EFI/BOOT/
 
 
-CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1023-bluefield"]
+CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1035-bluefield"]

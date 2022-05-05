@@ -32,7 +32,7 @@ set -e
 BF_HOSTNAME="localhost"
 SDIR="/root/workspace"
 BFB="${BFB:-/lib/firmware/mellanox/boot/default.bfb}"
-CAPSULE="${SDIR}/update.cap"
+CAPSULE="${CAPSULE:-/lib/firmware/mellanox/boot/capsule/boot_update2.cap}"
 verbose=0
 kdir=$(/bin/ls -1d /lib/modules/4.20* /lib/modules/5.* 2> /dev/null | head -1)
 if [ -n "$kdir" ]; then
@@ -131,7 +131,7 @@ echo ${BF_HOSTNAME} > /etc/hostname
 
 hostname ${BF_HOSTNAME}
 
-/usr/sbin/update-initramfs -u -k $kernel || true
+/usr/sbin/update-initramfs -u -k $kernel
 
 ex mkdir -p ${WDIR}
 ex cd ${WDIR}
@@ -192,6 +192,29 @@ copy_bin()
 	done
 }
 
+module_exist()
+{
+	mod=`find ./lib/modules/$kernel -name "${1}.ko*" 2> /dev/null`
+	test -n "$mod"
+	return $?
+}
+
+copy_module()
+{
+	if module_exist $1; then
+		return
+	fi
+
+	for mod in `modinfo -F depends -k $kernel $1 | tr -s ',' ' '`
+	do
+		copy_module $mod
+	done
+
+	mod_ko=`modinfo -F filename -k $kernel $1`
+	mkdir -p ./`dirname ${mod_ko}`
+	sudo cp ${mod_ko} ./${mod_ko}
+}
+
 (cd usr/bin; sudo ln -s xz xzcat)
 # Remove tools coming with busybox
 for tool in `dpkg -L mlxbf-scripts | grep bin/` \
@@ -232,7 +255,13 @@ do
 	fi
 	copy_bin $tool
 done
+
+for mod in nvme-rdma nvme-tcp nvme mlx5_ib ib_ipoib ib_iser
+do
+	copy_module $mod
+done
 sudo depmod -a -b ./ $kernel
+
 sudo mkdir -p usr/share/misc/ bin/ var/log/watchdog
 sudo cp /usr/share/misc/pci.ids usr/share/misc/
 sudo cp /etc/watchdog.conf etc
@@ -243,12 +272,17 @@ sudo cp /lib/modules/$kernel/kernel/drivers/watchdog/sbsa_gwdt.ko .
 sudo mkdir -p ./lib/firmware/mellanox/boot/
 sudo cp /lib/firmware/mellanox/boot/default.bfb ./lib/firmware/mellanox/boot/default.bfb
 sudo cp -a /lib/firmware/mellanox/boot/capsule ./lib/firmware/mellanox/boot/
-sudo cp $CAPSULE ./lib/firmware/mellanox/boot/capsule/
+
+sudo mkdir -p ./lib/udev/rules.d
+sudo cp /lib/udev/rules.d/82-net-setup-link.rules ./lib/udev/rules.d/82-net-setup-link.rules
+sudo mkdir -p ./etc/infiniband
+sudo cp /etc/infiniband/vf-net-link-name.sh ./etc/infiniband/vf-net-link-name.sh
+
 sudo mkdir -p mnt
 
 ex mkdir -p ubuntu
 # Tar the image
-XZ_OPT="--threads=0 -9 --verbose" tar -cJp --exclude='./workspace' --exclude='./root/workspace' --exclude='./tmp/*' --exclude='./run/*' --exclude='./sys/*' --exclude='./proc/*' --exclude='./dev/*' --exclude='./.dockerenv' --exclude='./root/.bash_history' --exclude='./var/tmp/*' --exclude='./bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-arm-static' --exclude='./var/cache/apt/*' -f ./ubuntu/image.tar.xz -C / .
+XZ_OPT="--threads=0 -9 --verbose" tar -cJp --exclude='./workspace' --exclude='./signing-local' --exclude='./signing-shared' --exclude='./var/run/docker.sock' --exclude='./root/workspace' --exclude='./tmp/*' --exclude='./run/*' --exclude='./sys/*' --exclude='./proc/*' --exclude='./dev/*' --exclude='./.dockerenv' --exclude='./root/.bash_history' --exclude='./var/tmp/*' --exclude='./bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-arm-static' --exclude='./var/cache/apt/*' -f ./ubuntu/image.tar.xz -C / .
 ex install -m 0755 ${SDIR}/install.sh ./ubuntu/install.sh
 
 cat > scripts/initrd-install << EOF

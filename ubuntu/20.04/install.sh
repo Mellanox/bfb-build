@@ -38,11 +38,6 @@ log()
 }
 
 #
-# Check PXE installation
-#
-if [ ! -e /tmp/bfpxe.done ]; then touch /tmp/bfpxe.done; bfpxe; fi
-
-#
 # Check auto configuration passed from boot-fifo
 #
 boot_fifo_path="/sys/bus/platform/devices/MLNXBF04:00/bootfifo"
@@ -63,9 +58,18 @@ if [ -e "${boot_fifo_path}" ]; then
 	rm -f $cfg_file
 fi
 
+#
+# Check PXE installation
+#
+if [ ! -e /tmp/bfpxe.done ]; then touch /tmp/bfpxe.done; bfpxe; fi
+
 DUAL_BOOT="no"
 if [ -e /etc/bf.cfg ]; then
-	. /etc/bf.cfg
+	if ( bash -n /etc/bf.cfg ); then
+		. /etc/bf.cfg
+	else
+		log "INFO: Invalid bf.cfg"
+	fi
 fi
 
 if [ "X${DEBUG}" == "Xyes" ]; then
@@ -112,9 +116,11 @@ NEXT_OS_IMAGE=0
 if [ "X$current_root" == "X${device}p2" ]; then
     mode="upgrade"
     NEXT_OS_IMAGE=1
+    DUAL_BOOT="yes"
 elif [ "X$current_root" == "X${device}p4" ]; then
     mode="upgrade"
     NEXT_OS_IMAGE=0
+    DUAL_BOOT="yes"
 elif [ "X$current_root" == "Xrootfs" ]; then
     mode="manufacturing"
 else
@@ -149,13 +155,7 @@ disk_sectors=`fdisk -l $device 2> /dev/null | grep "Disk $device:" | awk '{print
 disk_size=`fdisk -l $device 2> /dev/null | grep "Disk $device:" | awk '{print $5}'`
 disk_end=$((disk_sectors - reserved))
 
-
-if [ "X$mode" == "Xmanufacturing" ]; then
-
-pciids=`/usr/bin/lspci -nD -d 15b3:a2d2 2> /dev/null | awk '{print $1}'`
-if [ ! -n "$pciids" ]; then
-	pciids=`/usr/bin/lspci -nD -d 15b3:a2d6 2> /dev/null | awk '{print $1}'`
-fi
+pciids=`lspci -nD 2> /dev/null | grep 15b3:a2d[26c] | awk '{print $1}'`
 
 set -- $pciids
 pciid=$1
@@ -170,6 +170,8 @@ if [ -n "$FLINT" ]; then
 		;;
 	esac
 fi
+
+if [ "X$mode" == "Xmanufacturing" ]; then
 
 if [ $disk_size -lt $MIN_DISK_SIZE4DUAL_BOOT ]; then
 	if [ "X$DUAL_BOOT" == "Xyes" ]; then
@@ -284,8 +286,8 @@ EOF
 		cat >> /mnt/etc/fstab << EOF
 `lsblk -o UUID -P $COMMON_PARTITION` /common auto defaults 0 0
 EOF
-		mkdir /mnt/common
-		mkdir /tmp/common
+		mkdir -p /mnt/common
+		mkdir -p /tmp/common
 		mount $COMMON_PARTITION /tmp/common
 		if [ -e /mnt/etc/bfb_version.json ]; then
 			/bin/rm -f /tmp/common/$((2 + 2*$OS_IMAGE)).version.json
@@ -297,6 +299,10 @@ EOF
 
 	if (grep -qE "MemTotal:\s+16" /proc/meminfo > /dev/null 2>&1); then
 		sed -i -r -e "s/(net.netfilter.nf_conntrack_max).*/\1 = 500000/" /mnt/usr/lib/sysctl.d/90-bluefield.conf
+	fi
+
+	if [ -n "${grub_admin_PASSWORD}" ]; then
+		sed -i -r -e "s/(password_pbkdf2 admin).*/\1 ${grub_admin_PASSWORD}/" /mnt/etc/grub.d/40_custom
 	fi
 
 	mount --bind /proc /mnt/proc
@@ -367,7 +373,7 @@ EOF
 	done
 
 	# Update HW-dependant files
-	if (/usr/bin/lspci -n -d 15b3: | grep -wq 'a2d2'); then
+	if (lspci -n -d 15b3: | grep -wq 'a2d2'); then
 		# BlueField-1
 		if [ ! -n "$DHCP_CLASS_ID" ]; then
 			DHCP_CLASS_ID="BF1Client"
@@ -375,12 +381,22 @@ EOF
 		ln -snf snap_rpc_init_bf1.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
 		# OOB interface does not exist on BlueField-1
 		sed -i -e '/oob_net0/,+1d' /mnt/var/lib/cloud/seed/nocloud-net/network-config
-	elif (/usr/bin/lspci -n -d 15b3: | grep -wq 'a2d6'); then
+	elif (lspci -n -d 15b3: | grep -wq 'a2d6'); then
 		# BlueField-2
 		if [ ! -n "$DHCP_CLASS_ID" ]; then
 			DHCP_CLASS_ID="BF2Client"
 		fi
 		ln -snf snap_rpc_init_bf2.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
+	elif (lspci -n -d 15b3: | grep -wq 'a2dc'); then
+		# BlueField-3
+		if [ ! -n "$DHCP_CLASS_ID" ]; then
+			DHCP_CLASS_ID="BF3Client"
+		fi
+		if [ -e /mnt/etc/mlnx_snap/snap_rpc_init_bf3.conf ]; then
+			ln -snf snap_rpc_init_bf3.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
+		else
+			ln -snf snap_rpc_init_bf2.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
+		fi
 	fi
 
 	pciid=`echo $pciids | awk '{print $1}' | head -1`
@@ -410,6 +426,7 @@ EOF
 			sed -r -i -e 's@("max_namespaces":).*([a-zA-Z0-9]+)@\1 30@' \
 					  -e 's@("quirks":).*([a-zA-Z0-9]+)@\1 0x8@' \
 					  /mnt/etc/mlnx_snap/mlnx_snap.json.example
+			sed -i -e "s/bdev_nvme_set_options.*/bdev_nvme_set_options --bdev-retry-count 10 --transport-retry-count 7 --transport-ack-timeout 0 --timeout-us 0 --timeout-admin-us 0 --action-on-timeout none --reconnect-delay-sec 10 --ctrlr-loss-timeout-sec -1 --fast-io-fail-timeout-sec 0/" /mnt/etc/mlnx_snap/spdk_rpc_init.conf
 
 	cat >> /mnt/lib/udev/mlnx_bf_udev << EOF
 
@@ -493,8 +510,9 @@ blockdev --rereadpt ${device} > /dev/null 2>&1
 
 sync
 
-if [ -e /lib/firmware/mellanox/boot/capsule/update.cap ]; then
-	bfrec --capsule /lib/firmware/mellanox/boot/capsule/update.cap
+bfrec --bootctl --policy dual 2> /dev/null || true
+if [ -e /lib/firmware/mellanox/boot/capsule/boot_update2.cap ]; then
+	bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap --policy dual
 fi
 
 bfbootmgr --cleanall > /dev/null 2>&1

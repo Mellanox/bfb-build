@@ -84,27 +84,27 @@ After installing the customized kernel and kernel-devel packages, download and
 build MLNX_OFED drivers:
 
 ````
-wget https://linux.mellanox.com/public/repo/bluefield/3.8.5/extras/mlnx_ofed/5.5-2.1.7.0/MLNX_OFED_SRC-5.5-2.1.7.0.tgz
-tar xzf MLNX_OFED_SRC-5.5-2.1.7.0.tgz
-cd MLNX_OFED_SRC-5.5-2.1.7.0
+wget https://linux.mellanox.com/public/repo/bluefield/3.9.0/extras/mlnx_ofed/5.6-1.0.3.3/MLNX_OFED_SRC-5.6-1.0.3.3.tgz
+tar xzf MLNX_OFED_SRC-5.6-1.0.3.3.tgz
+cd MLNX_OFED_SRC-5.6-1.0.3.3
 ./install.pl -k <kernel version> --kernel-sources /lib/modules/<kernel version>/build \
 	--kernel-extra-args '--with-sf-cfg-drv --without-xdp --without-odp' \
 	--kernel-only --build-only
 cd ..
 ````
 
-Binary RPMS can be found under `MLNX_OFED_SRC-5.5-2.1.7.0/RPMS` directory. 
+Binary RPMS can be found under `MLNX_OFED_SRC-5.6-1.0.3.3/RPMS` directory.
 ````
-find MLNX_OFED_SRC-5.5-2.1.7.0/RPMS -name '*rpm' -a ! -name '*debuginfo*rpm' -exec rpm -ihv '{}' \;
+find MLNX_OFED_SRC-5.6-1.0.3.3/RPMS -name '*rpm' -a ! -name '*debuginfo*rpm' -exec rpm -ihv '{}' \;
 ````
 
 Build and install BlueField SoC drivers:
 
 ````
-cd /tmp && wget -r -np -nH --cut-dirs=3 -R "index.html*" https://linux.mellanox.com/public/repo/bluefield/3.8.5/extras/SRPMS/
-mkdir -p /tmp/3.8.5/extras/{SPECS,RPMS,SOURCES,BUILD}
-for p in 3.8.5/extras/SRPMS/*.src.rpm; do rpmbuild --rebuild -D "debug_package %{nil}" -D "KVERSION <kernel version>" --define "_topdir /tmp/3.8.5/extras" $p;done
-rpm -ivh --force /tmp/3.8.5/extras/RPMS/aarch64/*.rpm
+cd /tmp && wget -r -np -nH --cut-dirs=3 -R "index.html*" https://linux.mellanox.com/public/repo/bluefield/3.9.0/extras/SRPMS/
+mkdir -p /tmp/3.9.0/extras/{SPECS,RPMS,SOURCES,BUILD}
+for p in 3.9.0/extras/SRPMS/*.src.rpm; do rpmbuild --rebuild -D "debug_package %{nil}" -D "KVERSION <kernel version>" --define "_topdir /tmp/3.9.0/extras" $p;done
+rpm -ivh --force /tmp/3.9.0/extras/RPMS/aarch64/*.rpm
 ````
 
 After installing MLNX_OFED drivers and BlueField SoC drivers, install DOCA user
@@ -113,31 +113,19 @@ space packages individually:
 **DOCA runtime packages:**
 
 ````
-yum install -y libpka mlxbf-bootctl rxp-compiler mlx-OpenIPMI mlnx-libsnap \
-mlnx-dpdk mlx-regex spdk hyperscan mlxbf-bfscripts libvma mlnx-snap doca-dpi \
-doca-flow doca-utils doca-apsh doca-regex dpcp rxpbench virtio-net-controller \
-mlnx-iproute2 rdma-core mlnx-nvme ucx-rdmacm ibacm ofed-scripts ucx-knem \
-mstflint iser isert libxpmem mlnx-ethtool perftest mlnx-tools knem ucx ucx-cma \
-openvswitch python3-openvswitch python3-grpcio python3-protobuf \
-openvswitch-ipsec ucx-xpmem libibverbs librdmacm xpmem ucx-ib libibumad mft-oem \
-mft mlnx-fw-updater mlxbf-bootimages collectx-clxapi bf-release
+yum install -y doca-runtime-user
 ````
 
 **DOCA SDK packages:**
 
 ````
-yum install -y librxpcompiler-devel mlnx-dpdk-devel hyperscan-devel \
-libvma-devel doca-utils-devel doca-flow-devel doca-dpi-devel doca-apsh-devel \
-grpc-devel openvswitch-devel ucx-devel opensm-devel rdma-core-devel \
-libxpmem-devel
+yum install -y doca-sdk-user
 ````
 
 **DOCA tools packages:**
 
 ````
-yum install -y libvma-utils doca-dpi-tools librdmacm-utils opensm-libs opensm \
-srp_daemon infiniband-diags-compat opensm-static libibverbs-utils \
-infiniband-diags
+yum install -y doca-tools
 ````
 
 Update the kernel version parameter for the `create_bfb` command at the end of the

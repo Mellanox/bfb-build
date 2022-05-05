@@ -19,14 +19,13 @@ fi
 
 DISTRO="centos"
 DISTRO_VERSION="7.6"
-VERSION="3.8.5"
+VERSION="3.9.0"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 
 WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
 
 mkdir -p $WDIR
-wget -P $WDIR https://linux.mellanox.com/public/repo/bluefield/${VERSION}/bootimages/${IMAGE_TYPE}/update.cap
-wget -P $WDIR https://linux.mellanox.com/public/repo/bluefield/${VERSION}/bootimages/${IMAGE_TYPE}/mlxbf-bootimages-3.8.5-12027.aarch64.rpm
+wget -P $WDIR https://linux.mellanox.com/public/repo/bluefield/${VERSION}/bootimages/${IMAGE_TYPE}/mlxbf-bootimages-3.9.0-12175.aarch64.rpm
 
 cp	Dockerfile \
 	create_bfb \
@@ -46,4 +45,4 @@ docker run -t --rm --privileged -e container=docker \
 	--mount type=bind,source=/proc,target=/proc \
 	bfb_runtime_${DISTRO}${DISTRO_VERSION}
 
-readlink -f *aarch64.bfb
+readlink -f *.bfb

@@ -33,7 +33,7 @@ LANG=C
 BF_HOSTNAME="localhost"
 SDIR="/root/workspace"
 BFB="${BFB:-/lib/firmware/mellanox/boot/default.bfb}"
-CAPSULE="${SDIR}/update.cap"
+CAPSULE="${CAPSULE:-/lib/firmware/mellanox/boot/capsule/boot_update2.cap}"
 verbose=0
 kdir=$(/bin/ls -1d /lib/modules/4.19* /lib/modules/4.20* /lib/modules/5.* 2> /dev/null | head -1)
 if [ -n "$kdir" ]; then
@@ -46,7 +46,6 @@ usage() {
 cat << EOF
 Usage: `basename $0` [ OPTIONS ]
 OPTIONS:
--i, -install_bfb,    --install_bfb <BFB>        Installation BFB to be used as a basis for the target BFB. Default: $BFB
 -H, -hostname,       --hostname <hostname>      Hostname for the SmartNIC. Default: $BF_HOSTNAME
 -k, -kernel,         --kernel <kernel version>  Kernel version for the SmartNIC. Default: $kernel
 -v, -verbose,   --verbose                       Run script in verbose mode. Will print out each step of execution.
@@ -57,7 +56,7 @@ EOF
 }
 
 
-options=$(getopt -l "install_bfb:,hostname:,kernel:,help,verbose" -o "i:H:k:hv" -a -- "$@")
+options=$(getopt -l "hostname:,kernel:,help,verbose" -o "H:k:hv" -a -- "$@")
 
 eval set -- "$options"
 
@@ -68,10 +67,6 @@ do
                     usage
                     exit 0
                     ;;
-				-i|--install_bfb)
-					shift
-					BFB=$1
-					;;
 				-H|--hostname)
 					shift
 					BF_HOSTNAME=$1
@@ -128,17 +123,24 @@ echo ${BF_HOSTNAME} > /etc/hostname
 
 hostname ${BF_HOSTNAME}
 
+ex /bin/rm -rf ${WDIR}
 ex mkdir -p ${WDIR}
 ex cd ${WDIR}
-ex rm -rf initramfs
+ex /bin/rm -rf initramfs
 
 initramfs=$WDIR/dump-initramfs-v0
-# if [ ! -e /boot/initramfs-${kernel}.img ]; then
-# 	ex dracut --kver ${kernel} --force --omit-drivers 'mlx4_core mlx4_en' /boot/initramfs-${kernel}.img ${kernel}
-# fi
-# cp /boot/initramfs-${kernel}.img $initramfs
 
-yum install -y dracut-tools
+if ! ( rpm -q dracut-tools > /dev/null 2>&1 ); then
+	yum install -y dracut-tools
+fi
+
+if ! ( rpm -q parted-3.2 > /dev/null 2>&1 ); then
+	if [ ! -e /tmp/parted-3.2-39.el7.aarch64.rpm ]; then
+		wget -P /tmp https://github.com/Mellanox/bfb-build/raw/master/common/packages/parted-3.2-39.el7.aarch64.rpm
+	fi
+	rpm -Uhv /tmp/parted-3.2-39.el7.aarch64.rpm || true
+fi
+
 ex dracut --no-hostonly -m "bash network base shutdown" --gzip $initramfs ${kernel}
 
 cat > /etc/default/grub << EOF
@@ -154,10 +156,6 @@ GRUB_TIMEOUT_STYLE=countdown
 GRUB_DISABLE_OS_PROBER=false
 EOF
 
-# initramfs=/boot/initramfs-$kernel.img
-# initramfs=$(realpath $initramfs)
-# cp $initramfs $WDIR/dump-initramfs-v0
-# initramfs=$WDIR/dump-initramfs-v0
 
 case "$(file --brief --mime-type "$initramfs")" in
 	"application/x-lzma")
@@ -250,7 +248,7 @@ copy_rpm()
 }
 
 # Copy the content of RPM packages
-for package in  mlxbf-bfscripts util-linux dosfstools e2fsprogs kmod pciutils usbutils chkconfig mft mft-oem kernel-mft tar xfsprogs coreutils parted
+for package in mlxbf-bfscripts util-linux dosfstools e2fsprogs kmod pciutils usbutils chkconfig mft mft-oem kernel-mft tar xfsprogs coreutils parted which
 do
 	copy_rpm $package
 done
@@ -279,11 +277,12 @@ sudo cp -a /lib/firmware/mellanox/boot/capsule ./lib/firmware/mellanox/boot/
 sudo cp $CAPSULE ./lib/firmware/mellanox/boot/capsule/
 sudo mkdir -p mnt
 
-ex mkdir -p centos
+# CVE-2021-4034 workaround
+chmod 0755 /usr/bin/pkexec
 
 ex mkdir -p centos
 # Tar the image
-XZ_OPT="--threads=0 -9 --verbose" tar -cJp --exclude='./workspace'  --exclude='./root/workspace' --exclude='./tmp/*' --exclude='./run/*' --exclude='./sys/*' --exclude='./proc/*' --exclude='./dev/*' --exclude='./.dockerenv' --exclude='./root/rpmbuild' --exclude='./root/.rpmmacros' --exclude='./root/.bash_history' --exclude='./var/tmp/*rpm' --exclude='./bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-arm-static' --exclude='./var/lib/yum/*' --exclude='./var/cache/yum/*' -f ./centos/image.tar.xz -C / .
+XZ_OPT="--threads=0 -9 --verbose" tar -cJp --exclude='./workspace' --exclude='./signing-local' --exclude='./signing-shared' --exclude='./var/run/docker.sock' --exclude='./root/workspace' --exclude='./tmp/*' --exclude='./run/*' --exclude='./sys/*' --exclude='./proc/*' --exclude='./dev/*' --exclude='./.dockerenv' --exclude='./root/rpmbuild' --exclude='./root/.rpmmacros' --exclude='./root/.bash_history' --exclude='./var/tmp/*rpm' --exclude='./bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-arm-static' --exclude='./var/lib/yum/*' --exclude='./var/cache/yum/*' -f ./centos/image.tar.xz -C / .
 ex install -m 0755 ${SDIR}/install.sh ./centos/install.sh
 
 mkdir scripts

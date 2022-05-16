@@ -12,7 +12,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV FLASH_KERNEL_SKIP=yes
 ENV RUN_FW_UPDATER=no
 
-RUN dpkg -i mlxbf-bootimages_3.9.0-12175_arm64.deb
 RUN apt update
 RUN apt remove --purge -y snapd plymouth
 RUN apt autoremove -y
@@ -67,6 +66,7 @@ RUN apt update || true
 RUN /usr/sbin/dpkg-reconfigure bf-release || true
 RUN mkdir -p /etc/kubelet.d
 RUN mkdir -p /workspace
+RUN dpkg -i /root/workspace/mlxbf-bootimages_3.9.0-12175_arm64.deb
 
 # Manage system services
 RUN systemctl enable mlx-regex.service || true
@@ -109,5 +109,6 @@ RUN mkdir -p /boot/efi/EFI/ubuntu/; \
 	   /usr/lib/shim/fbaa64.efi \
 	/boot/efi/EFI/BOOT/
 
+RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
 
 CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1035-bluefield"]

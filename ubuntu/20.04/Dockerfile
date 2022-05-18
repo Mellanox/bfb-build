@@ -12,6 +12,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV FLASH_KERNEL_SKIP=yes
 ENV RUN_FW_UPDATER=no
 
+# Avoid running flash-kernel post install
+RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
+
 RUN apt update
 RUN apt remove --purge -y snapd plymouth
 RUN apt autoremove -y
@@ -41,8 +44,6 @@ RUN wget -qO - https://linux.mellanox.com/public/repo/doca/1.3.0/ubuntu20.04/aar
 RUN echo "deb [trusted=yes] https://linux.mellanox.com/public/repo/doca/1.3.0/ubuntu20.04/\$(ARCH) ./" | tee /etc/apt/sources.list.d/doca.tmp.list
 RUN apt update || true
 
-# Avoid running flash-kernel post install
-RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
 RUN apt install -y -f \
 	linux-bluefield=5.4.0.1035.36 \
 	linux-bluefield-headers-5.4.0-1035=5.4.0-1035.38 \

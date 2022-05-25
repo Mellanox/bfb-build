@@ -52,11 +52,11 @@ RUN apt install -y -f \
 	linux-headers-bluefield=5.4.0.1035.36 \
 	linux-image-5.4.0-1035-bluefield=5.4.0-1035.38 \
 	linux-image-bluefield=5.4.0.1035.36 \
-	linux-libc-dev:arm64=5.4.0-110.124 \
 	linux-modules-5.4.0-1035-bluefield=5.4.0-1035.38 \
 	linux-tools-5.4.0-1035-bluefield=5.4.0-1035.38 \
 	linux-tools-bluefield=5.4.0.1035.36 \
-	linux-tools-common=5.4.0-110.124
+	linux-libc-dev:arm64 \
+	linux-tools-common
 
 
 RUN apt install -y -f doca-runtime doca-tools doca-sdk || true

@@ -133,3 +133,8 @@ Dockerfile.
 
 To change the resulted BFB name and version edit `/etc/mlnx-release` file after
 bf-release RPM installation.
+
+Requirements:
+To build Ubuntu 22.04 BFB on CentOS host Docker >= 20.10.9 is required.
+For more details see:
+https://askubuntu.com/questions/1408090/cannot-run-apt-update-on-ubuntu-22-docker-image-on-a-centos-host

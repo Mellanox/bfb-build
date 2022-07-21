@@ -148,6 +148,8 @@ case "$(file --brief --mime-type "$initramfs")" in
 		cat_initrd="lzcat" ;;
 	"application/x-lz4")
 		cat_initrd="lz4cat" ;;
+	"application/zstd")
+		cat_initrd="zstdcat" ;;
 	*)
 		cat_initrd="zcat" ;;
 esac
@@ -248,7 +250,7 @@ for tool in `dpkg -L mlxbf-scripts | grep bin/` \
 		`dpkg -L tar | grep -v share` \
 		xz efibootmgr bash getopt hexdump mstflint lspci perl \
 		lsblk watchdog shutdown systemctl strings aarch64-linux-gnu-strings \
-		mlxbf-bootctl id
+		mlxbf-bootctl id dirname
 do
 	if [ -d $tool ]; then
 		continue

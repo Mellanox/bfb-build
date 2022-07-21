@@ -6,7 +6,8 @@ ADD qemu-aarch64-static /usr/bin/
 WORKDIR /root/workspace
 ADD install.sh .
 ADD create_bfb .
-ADD mlxbf-bootimages_3.9.0-12175_arm64.deb .
+ADD mlxbf-bootimages_3.9.2-12271_arm64.deb .
+ADD doca-repo.deb .
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV FLASH_KERNEL_SKIP=yes
@@ -19,6 +20,9 @@ RUN apt update
 RUN apt remove --purge -y snapd plymouth
 RUN apt autoremove -y
 RUN apt install -y grub-efi-arm64-signed grub-efi-arm64-bin shim-signed watchdog binutils sbsigntool rasdaemon net-tools nfs-common iptables-persistent rsync tcpdump nvme-cli iputils-arping iputils-ping iputils-tracepath bridge-utils iperf3 bc lm-sensors ifenslave acpid network-manager kexec-tools i2c-tools dc lldpad unzip
+# Install ipmitool and ignore default OpenIPMI due to possible conflicts with mlx-openipmi (notice the - in openipmi-)
+# Ref: https://serverfault.com/questions/250224/how-do-i-get-apt-get-to-ignore-some-dependencies
+RUN apt install -y ipmitool openipmi-
 RUN apt install -y docker.io; systemctl disable docker.service || true; systemctl disable docker.socket || true
 RUN apt install -y python3-pip
 RUN apt install -y build-essential
@@ -40,26 +44,30 @@ RUN echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] htt
 RUN apt update
 RUN apt install -y kubelet runc containerd cri-tools
 RUN apt upgrade -y
-RUN wget -qO - https://linux.mellanox.com/public/repo/doca/1.3.0/ubuntu20.04/aarch64/GPG-KEY-Mellanox.pub | sudo apt-key add -
-RUN echo "deb [trusted=yes] https://linux.mellanox.com/public/repo/doca/1.3.0/ubuntu20.04/\$(ARCH) ./" | tee /etc/apt/sources.list.d/doca.tmp.list
+RUN wget -qO - https://linux.mellanox.com/public/repo/doca/1.4.0/ubuntu20.04/aarch64/GPG-KEY-Mellanox.pub | sudo apt-key add -
+RUN echo "deb [trusted=yes] https://linux.mellanox.com/public/repo/doca/1.4.0/ubuntu20.04/\$(ARCH) ./" | tee /etc/apt/sources.list.d/doca.tmp.list
+RUN dpkg -i /root/workspace/doca-repo.deb
 RUN apt update || true
 
 RUN apt install -y -f \
-	linux-bluefield=5.4.0.1035.36 \
-	linux-bluefield-headers-5.4.0-1035=5.4.0-1035.38 \
-	linux-bluefield-tools-5.4.0-1035=5.4.0-1035.38 \
-	linux-headers-5.4.0-1035-bluefield=5.4.0-1035.38 \
-	linux-headers-bluefield=5.4.0.1035.36 \
-	linux-image-5.4.0-1035-bluefield=5.4.0-1035.38 \
-	linux-image-bluefield=5.4.0.1035.36 \
-	linux-modules-5.4.0-1035-bluefield=5.4.0-1035.38 \
-	linux-tools-5.4.0-1035-bluefield=5.4.0-1035.38 \
-	linux-tools-bluefield=5.4.0.1035.36 \
+	linux-bluefield=5.4.0.1042.41 \
+	linux-bluefield-headers-5.4.0-1042=5.4.0-1042.47 \
+	linux-bluefield-tools-5.4.0-1042=5.4.0-1042.47 \
+	linux-headers-5.4.0-1042-bluefield=5.4.0-1042.47 \
+	linux-headers-bluefield=5.4.0.1042.41 \
+	linux-image-5.4.0-1042-bluefield=5.4.0-1042.47 \
+	linux-image-bluefield=5.4.0.1042.41 \
+	linux-modules-5.4.0-1042-bluefield=5.4.0-1042.47 \
+	linux-tools-5.4.0-1042-bluefield=5.4.0-1042.47 \
+	linux-tools-bluefield=5.4.0.1042.41 \
 	linux-libc-dev:arm64 \
 	linux-tools-common
 
 
 RUN apt install -y -f doca-runtime doca-tools doca-sdk || true
+RUN cd /var/doca-repo-aarch64-ubuntu2004-local; for dr in *modules*deb; do dpkg -i $dr || true;done
+RUN apt remove --purge -y doca-repo-aarch64-ubuntu2004-local || true
+RUN apt --fix-broken install -y || true
 RUN apt-mark hold linux-tools-bluefield linux-image-bluefield linux-bluefield linux-headers-bluefield linux-image-bluefield linux-libc-dev linux-tools-common
 RUN apt --fix-broken install -y || true
 RUN /bin/rm -f /etc/apt/sources.list.d/doca.tmp.list
@@ -67,7 +75,7 @@ RUN apt update || true
 RUN /usr/sbin/dpkg-reconfigure bf-release || true
 RUN mkdir -p /etc/kubelet.d
 RUN mkdir -p /workspace
-RUN dpkg -i /root/workspace/mlxbf-bootimages_3.9.0-12175_arm64.deb
+RUN dpkg -i /root/workspace/mlxbf-bootimages_3.9.2-12271_arm64.deb
 
 # Manage system services
 RUN systemctl enable mlx-regex.service || true
@@ -90,7 +98,6 @@ RUN systemctl disable docker.socket || true
 RUN systemctl disable kubelet.service || true
 RUN systemctl disable containerd.service || true
 RUN systemctl disable mosquitto.service || true
-RUN systemctl disable ztp.service || true
 
 # Copy boot bits from rootfs to EFI partition
 RUN mkdir -p /boot/efi/EFI/ubuntu/; \
@@ -112,4 +119,4 @@ RUN mkdir -p /boot/efi/EFI/ubuntu/; \
 
 RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
 
-CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1035-bluefield"]
+CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1042-bluefield"]

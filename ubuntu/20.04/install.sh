@@ -278,13 +278,13 @@ install_os_image()
 	UBUNTU_CODENAME=`grep UBUNTU_CODENAME /mnt/etc/os-release | cut -d '=' -f 2`
 
 	cat > /mnt/etc/fstab << EOF
-`lsblk -o UUID -P $ROOT_PARTITION` / auto defaults 0 0
-`lsblk -o UUID -P $BOOT_PARTITION` /boot/efi vfat umask=0077 0 1
+`lsblk -o UUID -P $ROOT_PARTITION` / auto defaults 0 1
+`lsblk -o UUID -P $BOOT_PARTITION` /boot/efi vfat umask=0077 0 2
 EOF
 
 	if [ "X$DUAL_BOOT" == "Xyes" ]; then
 		cat >> /mnt/etc/fstab << EOF
-`lsblk -o UUID -P $COMMON_PARTITION` /common auto defaults 0 0
+`lsblk -o UUID -P $COMMON_PARTITION` /common auto defaults 0 2
 EOF
 		mkdir -p /mnt/common
 		mkdir -p /tmp/common
@@ -451,7 +451,7 @@ EOF
 		print q@users:
   - name: ubuntu
     lock_passwd: False
-    groups: [adm, audio, cdrom, dialout, dip, floppy, lxd, netdev, plugdev, sudo, video]
+    groups: adm, audio, cdrom, dialout, dip, floppy, lxd, netdev, plugdev, sudo, video
     sudo: ALL=(ALL) NOPASSWD:ALL
     shell: /bin/bash
     passwd: $ubuntu_PASSWORD
@@ -515,8 +515,11 @@ if [ -e /lib/firmware/mellanox/boot/capsule/boot_update2.cap ]; then
 	bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap --policy dual
 fi
 
+if [ “X$ENROLL_KEYS” = “Xyes” ]; then
+	bfrec --capsule /lib/firmware/mellanox/boot/capsule/EnrollKeysCap
+fi
+
 bfbootmgr --cleanall > /dev/null 2>&1
-/bin/rm -f /sys/firmware/efi/efivars/Boot* > /dev/null 2>&1
 
 # Make it the boot partition
 mounted_efivarfs=0
@@ -524,6 +527,8 @@ if [ ! -d /sys/firmware/efi/efivars ]; then
 	mount -t efivarfs none /sys/firmware/efi/efivars
 	mounted_efivarfs=1
 fi
+
+/bin/rm -f /sys/firmware/efi/efivars/Boot* > /dev/null 2>&1
 
 if efibootmgr | grep ${UBUNTU_CODENAME}; then
 	efibootmgr -b "$(efibootmgr | grep ${UBUNTU_CODENAME} | cut -c 5-8)" -B > /dev/null 2>&1

@@ -1,0 +1,54 @@
+#!/bin/bash -e
+
+cd ${0%*/*}
+
+if [ ! -e Dockerfile ]; then
+	echo "ERROR: Dockerfile is missing."
+	exit 1
+fi
+
+if ! (which wget > /dev/null 2>&1); then
+	echo "wget is required to build BFB"
+	exit 1
+fi
+
+if ! (which docker > /dev/null 2>&1); then
+	echo "docker is required to build BFB"
+	exit 1
+fi
+
+DISTRO="ubuntu"
+DISTRO_VERSION="22.04"
+DISTRO_BASE_URL="https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-arm64-root.tar.xz"
+VERSION="4.0.0-alpha"
+IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
+CUSTOM_VERSION=${CUSTOM_VERSION:-""}
+
+WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
+
+mkdir -p $WDIR
+wget --no-verbose -O $WDIR/mlxbf-bootimages.deb https://linux.mellanox.com/public/repo/doca/tmp/ubuntu22.04/aarch64/mlxbf-bootimages_4.0.bu1-12263_arm64.deb
+wget --no-verbose -O $WDIR/doca-repo.deb https://linux.mellanox.com/public/repo/doca/tmp/ubuntu22.04/aarch64/doca-repo-aarch64-ubuntu2204-local_1.4.0078-1.5.7.0.3.2.0.bf.4.0.bu1.12263_arm64.deb
+
+cp	Dockerfile \
+	create_bfb \
+	install.sh \
+	../../common/tools/qemu-aarch64-static \
+	$WDIR
+
+cd $WDIR
+
+wget --no-check-certificate $DISTRO_BASE_URL
+
+sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/" Dockerfile
+
+docker build -t bfb_runtime_${DISTRO}${DISTRO_VERSION} -f Dockerfile .
+docker run -t --rm --privileged -e container=docker \
+	-v $PWD:/workspace \
+	--name BlueField_OS_${DISTRO}_${DISTRO_VERSION} \
+	--mount type=bind,source=/dev,target=/dev \
+	--mount type=bind,source=/sys,target=/sys \
+	--mount type=bind,source=/proc,target=/proc \
+	bfb_runtime_${DISTRO}${DISTRO_VERSION}
+
+readlink -f *.bfb

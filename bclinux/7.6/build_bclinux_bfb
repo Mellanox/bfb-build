@@ -46,13 +46,13 @@ yum update --nogpgcheck -y kernel-bek-core kernel-bek kernel-bek-modules kernel-
 
 kernel=`/bin/ls -1tr /lib/modules | tail -1`
 
-ex yum install -y \
+yum install -y \
 	NetworkManager \
 	grub2-tools grub2 grubby grub2-tools-minimal grub2-efi-aa64 grub2-efi-aa64-modules grub2-common grub2-tools-extra \
 	efibootmgr tcpdump nvme-cli rsync binutils sg3_utils libnl3 bison flex meson libmnl libnuma perl lsof \
 	python-netifaces libreswan python36 python36-devel python36-idle python36-libs python36-test python36-tkinter python36-Cython \
 	device-mapper-persistent-data lvm2 acpid perf popt-devel bc edac-utils lm_sensors lm_sensors-sensord re2c ninja-build \
-	cryptsetup rasdaemon pciutils-devel watchdog python3-sphinx python36-six kexec-tools jq python3-pip libnghttp2 wget sudo uriparser
+	cryptsetup rasdaemon pciutils-devel watchdog python3-sphinx python36-six kexec-tools jq python3-pip libnghttp2 wget sudo uriparser || true
 
 # Set python2.7 as a default
 update-alternatives --install /usr/bin/python python /usr/bin/python3.6 1

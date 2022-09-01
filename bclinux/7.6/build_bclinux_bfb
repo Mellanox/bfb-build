@@ -90,4 +90,6 @@ ex yum install --nogpgcheck -y doca-runtime-user doca-sdk-user doca-tools
 
 ex rpm -ihv --force /root/workspace/mlxbf-bootimages-3.9.0-12175.aarch64.rpm
 
+/usr/sbin/update-pciids || true
+
 ex /root/workspace/create_bfb -k $kernel

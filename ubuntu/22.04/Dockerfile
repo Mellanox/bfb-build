@@ -83,6 +83,8 @@ RUN systemctl disable containerd.service || true
 RUN systemctl disable mosquitto.service || true
 RUN systemctl disable ModemManager.service || true
 
+RUN /usr/sbin/update-pciids || true
+
 RUN /bin/rm -f /var/lib/dbus/machine-id /etc/machine-id; touch /var/lib/dbus/machine-id /etc/machine-id
 
 # Copy boot bits from rootfs to EFI partition

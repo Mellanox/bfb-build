@@ -82,6 +82,8 @@ RUN systemctl disable kubelet.service || true
 RUN systemctl disable containerd.service || true
 RUN systemctl disable mosquitto.service || true
 
+RUN /usr/sbin/update-pciids || true
+
 # Copy boot bits from rootfs to EFI partition
 RUN mkdir -p /boot/efi/EFI/debian/; \
 	cp /usr/lib/grub/arm64-efi-signed/grubaa64.efi.signed \

@@ -36,5 +36,6 @@ RUN yum-config-manager --nogpgcheck --add-repo https://linux.mellanox.com/public
 
 RUN yum install --nogpgcheck -y doca-runtime doca-tools doca-sdk
 RUN rpm -ihv --force mlxbf-bootimages-3.9.2-12271.aarch64.rpm
+RUN /usr/sbin/update-pciids || true
 
 CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1042.48.g040f5c3-bluefield"]

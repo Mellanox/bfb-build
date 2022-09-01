@@ -40,5 +40,6 @@ RUN yum-config-manager --nogpgcheck --add-repo https://download-ib01.fedoraproje
 RUN yum-config-manager --nogpgcheck --add-repo https://linux.mellanox.com/public/repo/doca/1.2.1/centos7.9/aarch64/
 
 RUN yum install --nogpgcheck -y doca-runtime doca-tools doca-sdk
+RUN /usr/sbin/update-pciids || true
 
 CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1023.24.gd30084e-bluefield"]

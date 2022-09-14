@@ -15,6 +15,11 @@ $ sudo yum install qemu-system-arm
 
 On Fedora:
 $ sudo yum install qemu-system-aarch64
+
+Alternatively, install qemu-user-static using docker container:
+  $ docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+  See more info under: https://github.com/multiarch/qemu-user-static
+
 ```
 
 To build a BlueField boot stream (BFB), run:
@@ -122,7 +127,7 @@ Binary RPMS can be found under `MLNX_OFED_SRC-5.6-1.0.3.3/RPMS` directory.
 find MLNX_OFED_SRC-5.6-1.0.3.3/RPMS -name '*rpm' -a ! -name '*debuginfo*rpm' -exec rpm -ihv '{}' \;
 ````
 
-Build and install BlueField SoC drivers:
+**Build and install BlueField SoC drivers:**
 
 ````
 cd /tmp && wget -r -np -nH --cut-dirs=3 -R "index.html*" https://linux.mellanox.com/public/repo/bluefield/3.9.0/extras/SRPMS/
@@ -158,12 +163,35 @@ Dockerfile.
 To change the resulted BFB name and version edit `/etc/mlnx-release` file after
 bf-release RPM installation.
 
-Requirements:
+**Requirements:**
 To build Ubuntu 22.04 BFB on CentOS host Docker >= 20.10.9 is required.
 For more details see:
 https://askubuntu.com/questions/1408090/cannot-run-apt-update-on-ubuntu-22-docker-image-on-a-centos-host
 
-Notes:
+**Notes:**
+```
 This environment was tested on:
 - Ubuntu 20.04.5 x86_64 with Docker version 20.10.12
 - RHEL 7.6 aarch64 with Docker version 20.10.17, build 100c701
+```
+
+**Known issues:**
+```
+bfb-build fails on the following OSes due to qemu issue:
+- CentOS Linux release 8.2.2004 x86_64
+  Error:
+  qemu: uncaught target signal 11 (Segmentation fault) - core dumped
+  Segmentation fault (core dumped)
+- Fedora 31 x86_64
+  Error:
+  qemu: uncaught target signal 11 (Segmentation fault) - core dumped
+  Segmentation fault (core dumped)
+
+  As a workaround to the issues above install qemu-user-static package using:
+  $ docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+  See more info under: https://github.com/multiarch/qemu-user-static
+```
+
+**Additional information**
+
+NVIDIA BLUEFIELD DPU PLATFORM OPERATING SYSTEM DOCUMENTATION: https://docs.nvidia.com/networking/display/BlueFieldDPUOSLatest

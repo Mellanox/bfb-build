@@ -1,8 +1,7 @@
 #!/bin/bash
-
 ###############################################################################
 #
-# Copyright 2020 NVIDIA Corporation
+# Copyright 2022 NVIDIA Corporation
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of
 # this software and associated documentation files (the "Software"), to deal in

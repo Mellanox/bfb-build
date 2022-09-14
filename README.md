@@ -1,10 +1,28 @@
 ```
+Requirements:
 Make sure you have the latest version of docker installed on your server!
 To install docker on your x86_64 or aarch64 server please refer to https://docs.docker.com/get-docker/
 Note: It is expected that these docker images will run faster on ARM (aarch64) server (without qemu)
+
+In case of using x86_64 server install and configure qemu:
+
+On Ubuntu server:
+$ sudo apt install qemu-user-static
+
+On CentOS:
+$ sudo yum install epel-release
+$ sudo yum install qemu-system-arm
+
+On Fedora:
+$ sudo yum install qemu-system-aarch64
 ```
 
 To build a BlueField boot stream (BFB), run:
+
+```
+git clone https://github.com/Mellanox/bfb-build
+cd bfb-build
+```
 
 For production cards:
 ````
@@ -144,3 +162,8 @@ Requirements:
 To build Ubuntu 22.04 BFB on CentOS host Docker >= 20.10.9 is required.
 For more details see:
 https://askubuntu.com/questions/1408090/cannot-run-apt-update-on-ubuntu-22-docker-image-on-a-centos-host
+
+Notes:
+This environment was tested on:
+- Ubuntu 20.04.5 x86_64 with Docker version 20.10.12
+- RHEL 7.6 aarch64 with Docker version 20.10.17, build 100c701

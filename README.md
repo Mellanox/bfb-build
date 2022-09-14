@@ -1,3 +1,9 @@
+```
+Make sure you have the latest version of docker installed on your server!
+To install docker on your x86_64 or aarch64 server please refer to https://docs.docker.com/get-docker/
+Note: It is expected that these docker images will run faster on ARM (aarch64) server (without qemu)
+```
+
 To build a BlueField boot stream (BFB), run:
 
 For production cards:

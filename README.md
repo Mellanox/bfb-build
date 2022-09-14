@@ -163,6 +163,12 @@ Dockerfile.
 To change the resulted BFB name and version edit `/etc/mlnx-release` file after
 bf-release RPM installation.
 
+**See the example of BCLinux under:**
+
+https://github.com/Mellanox/bfb-build/blob/master/bclinux/7.6/Dockerfile
+
+https://github.com/Mellanox/bfb-build/blob/master/bclinux/7.6/build_bclinux_bfb
+
 **Requirements:**
 To build Ubuntu 22.04 BFB on CentOS host Docker >= 20.10.9 is required.
 For more details see:

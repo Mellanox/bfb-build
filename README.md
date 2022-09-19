@@ -169,10 +169,19 @@ https://github.com/Mellanox/bfb-build/blob/master/bclinux/7.6/Dockerfile
 
 https://github.com/Mellanox/bfb-build/blob/master/bclinux/7.6/build_bclinux_bfb
 
-**Requirements:**
-To build Ubuntu 22.04 BFB on CentOS host Docker >= 20.10.9 is required.
-For more details see:
-https://askubuntu.com/questions/1408090/cannot-run-apt-update-on-ubuntu-22-docker-image-on-a-centos-host
+# 3. Building your own OS Image
+bfb-build environment use [APT/YUM repositories](https://linux.mellanox.com/public/repo/doca/) with DOCA binary packages built
+for the specific OS.
+If the required OS is binary compatible with one of the supported OS that have
+prebuilt DOCA binaries then BFB can be created based on existing packages.
+Use the Dockerfile for the compatible OS.<br />
+E.g.:<br />
+For OS binary compatible with CentOS7.6:<br />
+Use [centos/7.6/Dockerfile](https://github.com/Mellanox/bfb-build/blob/master/centos/7.6/Dockerfile) as a
+template and change the base container in the Dockerfile to use the required OS:<br />
+[from mellanox/bluefield:bfb_builder_centos7.](https://github.com/Mellanox/bfb-build/blob/master/centos/7.6/Dockerfile#L1)<br />
+For the kernel part refer to the [Kernel changes](https://github.com/Mellanox/bfb-build#22-kernel-changes) section above.
+
 
 **Notes:**
 ```
@@ -182,6 +191,12 @@ This environment was tested on:
 ```
 
 **Known issues:**
+```
+To build Ubuntu 22.04 BFB on CentOS host Docker >= 20.10.9 is required.
+For more details see:
+https://askubuntu.com/questions/1408090/cannot-run-apt-update-on-ubuntu-22-docker-image-on-a-centos-host
+```
+
 ```
 bfb-build fails on the following OSes due to qemu issue:
 - CentOS Linux release 8.2.2004 x86_64

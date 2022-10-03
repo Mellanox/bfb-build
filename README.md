@@ -1,4 +1,9 @@
 ```
+Overview:
+bfb-build project is meant to be used by bluefield customers wishing to build
+their own BlueField bootstream (BFB) image for OS deployment on the BlueField
+DPUs.
+
 Requirements:
 Make sure you have the latest version of docker installed on your server!
 To install docker on your x86_64 or aarch64 server please refer to https://docs.docker.com/get-docker/

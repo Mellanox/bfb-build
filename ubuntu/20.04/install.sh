@@ -1,7 +1,8 @@
 #!/bin/bash
+
 ###############################################################################
 #
-# Copyright 2022 NVIDIA Corporation
+# Copyright 2020 NVIDIA Corporation
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of
 # this software and associated documentation files (the "Software"), to deal in
@@ -27,12 +28,60 @@ CHROOT_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 rshimlog=`which bfrshlog 2> /dev/null`
 distro="Ubuntu"
+NIC_FW_UPDATE_DONE=0
+
+fspath=$(readlink -f `dirname $0`)
 
 log()
 {
 	echo "$*"
 	if [ -n "$rshimlog" ]; then
 		$rshimlog "$*"
+	fi
+}
+
+fw_update()
+{
+	FW_UPDATER=/opt/mellanox/mlnx-fw-updater/mlnx_fw_updater.pl
+	FW_DIR=/opt/mellanox/mlnx-fw-updater/firmware/
+
+	if [[ -x /mnt/${FW_UPDATER} && -d /mnt/${FW_DIR} ]]; then
+		log "INFO: Updating NIC firmware..."
+		chroot /mnt ${FW_UPDATER} \
+			--force-fw-update \
+			--fw-dir ${FW_DIR}
+		if [ $? -eq 0 ]; then
+			log "INFO: NIC firmware update done"
+		else
+			log "INFO: NIC firmware update failed"
+		fi
+	else
+		log "WARNING: NIC Firmware files were not found"
+	fi
+}
+
+fw_reset()
+{
+	mst start > /dev/null 2>&1 || true
+	chroot /mnt /sbin/mlnx_bf_configure > /dev/null 2>&1
+
+    MLXFWRESET_TIMEOUT=${MLXFWRESET_TIMEOUT:-180}
+    SECONDS=0
+    while ! (chroot /mnt mlxfwreset -d /dev/mst/mt*_pciconf0 q 2>&1 | grep -w "Driver is the owner" | grep -qw "\-Supported")
+    do
+        if [ $SECONDS -gt $MLXFWRESET_TIMEOUT ]; then
+            log "INFO: NIC Firmware reset is not supported. Host power cycle is required."
+            return
+        fi
+        sleep 1
+    done
+
+	msg=`chroot /mnt mlxfwreset -d /dev/mst/mt*_pciconf0 -y -l 3 --sync 1 r 2>&1`
+	if [ $? -ne 0 ]; then
+		log "INFO: NIC Firmware reset failed"
+		log "INFO: $msg"
+	else
+		log "INFO: NIC Firmware reset done"
 	fi
 }
 
@@ -86,10 +135,20 @@ function_exists()
 }
 
 DHCP_CLASS_ID=${PXE_DHCP_CLASS_ID:-""}
+DHCP_CLASS_ID_OOB=${DHCP_CLASS_ID_OOB:-"NVIDIA/BF/OOB"}
+DHCP_CLASS_ID_DP=${DHCP_CLASS_ID_DP:-"NVIDIA/BF/DP"}
+FACTORY_DEFAULT_DHCP_BEHAVIOR=${FACTORY_DEFAULT_DHCP_BEHAVIOR:-"true"}
+
+if [ "${FACTORY_DEFAULT_DHCP_BEHAVIOR}" == "true" ]; then
+	# Set factory defaults
+	DHCP_CLASS_ID="NVIDIA/BF/PXE"
+	DHCP_CLASS_ID_OOB="NVIDIA/BF/OOB"
+	DHCP_CLASS_ID_DP="NVIDIA/BF/DP"
+fi
 
 log "INFO: $distro installation started"
 
-device=/dev/mmcblk0
+device=${device:-/dev/mmcblk0}
 
 echo 0 > /proc/sys/kernel/hung_task_timeout_secs
 
@@ -241,6 +300,23 @@ sync
 blockdev --rereadpt ${device} > /dev/null 2>&1
 fi # manufacturing mode
 
+bind_partitions()
+{
+	mount --bind /proc /mnt/proc
+	mount --bind /dev /mnt/dev
+	mount --bind /sys /mnt/sys
+}
+
+unmount_partitions()
+{
+	umount /mnt/sys/fs/fuse/connections > /dev/null 2>&1 || true
+	umount /mnt/sys > /dev/null 2>&1
+	umount /mnt/dev > /dev/null 2>&1
+	umount /mnt/proc > /dev/null 2>&1
+	umount /mnt/boot/efi > /dev/null 2>&1
+	umount /mnt > /dev/null 2>&1
+}
+
 install_os_image()
 {
 	OS_IMAGE=$1
@@ -271,7 +347,7 @@ install_os_image()
 
 	echo "Extracting /..."
 	export EXTRACT_UNSAFE_SYMLINKS=1
-	tar Jxf /ubuntu/image.tar.xz --warning=no-timestamp -C /mnt
+	tar Jxf $fspath/image.tar.xz --warning=no-timestamp -C /mnt
 	sync
 
 	UBUNTU_CODENAME=`grep UBUNTU_CODENAME /mnt/etc/os-release | cut -d '=' -f 2`
@@ -300,16 +376,7 @@ EOF
 		sed -i -r -e "s/(net.netfilter.nf_conntrack_max).*/\1 = 500000/" /mnt/usr/lib/sysctl.d/90-bluefield.conf
 	fi
 
-	if [ -n "${grub_admin_PASSWORD}" ]; then
-		sed -i -r -e "s/(password_pbkdf2 admin).*/\1 ${grub_admin_PASSWORD}/" /mnt/etc/grub.d/40_custom
-	fi
-
-	mount --bind /proc /mnt/proc
-	mount --bind /dev /mnt/dev
-	mount --bind /sys /mnt/sys
-	chroot /mnt env PATH=$CHROOT_PATH /usr/sbin/grub-install ${device} > /dev/null 2>&1
-	chroot /mnt env PATH=$CHROOT_PATH /usr/sbin/grub-mkconfig -o /boot/grub/grub.cfg > /dev/null 2>&1
-	chroot /mnt env PATH=$CHROOT_PATH /usr/sbin/grub-set-default 0
+	bind_partitions
 
 	vmlinuz=`cd /mnt/boot; /bin/ls -1 vmlinuz-* | tail -1`
 	initrd=`cd /mnt/boot; /bin/ls -1 initrd.img-* | tail -1 | sed -e "s/.old-dkms//"`
@@ -334,9 +401,11 @@ ff02::2 ip6-allrouters
 ff02::3 ip6-allhosts
 EOF
 
-	cat > /mnt/etc/hostname << EOF
-localhost.localdomain
-EOF
+	# Remove /etc/hostname to get hostname from DHCP server
+	/bin/rm -f /mnt/etc/hostname
+
+	/bin/rm -f /mnt/var/lib/dbus/machine-id /etc/machine-id
+	touch /mnt/var/lib/dbus/machine-id /mnt/etc/machine-id
 
 	perl -ni -e 'print unless /PasswordAuthentication no/' /mnt/etc/ssh/sshd_config
 	echo "PasswordAuthentication yes" >> /mnt/etc/ssh/sshd_config
@@ -374,23 +443,14 @@ EOF
 	# Update HW-dependant files
 	if (lspci -n -d 15b3: | grep -wq 'a2d2'); then
 		# BlueField-1
-		if [ ! -n "$DHCP_CLASS_ID" ]; then
-			DHCP_CLASS_ID="BF1Client"
-		fi
 		ln -snf snap_rpc_init_bf1.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
 		# OOB interface does not exist on BlueField-1
 		sed -i -e '/oob_net0/,+1d' /mnt/var/lib/cloud/seed/nocloud-net/network-config
 	elif (lspci -n -d 15b3: | grep -wq 'a2d6'); then
 		# BlueField-2
-		if [ ! -n "$DHCP_CLASS_ID" ]; then
-			DHCP_CLASS_ID="BF2Client"
-		fi
 		ln -snf snap_rpc_init_bf2.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
 	elif (lspci -n -d 15b3: | grep -wq 'a2dc'); then
 		# BlueField-3
-		if [ ! -n "$DHCP_CLASS_ID" ]; then
-			DHCP_CLASS_ID="BF3Client"
-		fi
 		if [ -e /mnt/etc/mlnx_snap/snap_rpc_init_bf3.conf ]; then
 			ln -snf snap_rpc_init_bf3.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
 		else
@@ -462,8 +522,33 @@ EOF
 
 	mkdir -p /mnt/etc/dhcp
 	cat >> /mnt/etc/dhcp/dhclient.conf << EOF
-send vendor-class-identifier "$DHCP_CLASS_ID";
+send vendor-class-identifier "$DHCP_CLASS_ID_DP";
+interface "oob_net0" {
+  send vendor-class-identifier "$DHCP_CLASS_ID_OOB";
+}
 EOF
+
+	if [ "$WITH_NIC_FW_UPDATE" == "yes" ]; then
+		if [ $NIC_FW_UPDATE_DONE -eq 0 ]; then
+			fw_update
+			NIC_FW_UPDATE_DONE=1
+		fi
+	fi
+
+	if [ "X$ENABLE_SFC_HBN" == "Xyes" ]; then
+		NUM_SFs_ECPF0=${NUM_SFs_ECPF0:-18}
+		NUM_SFs_ECPF1=${NUM_SFs_ECPF1:-2}
+		log "INFO: Installing SFC HBN environment"
+		chroot /mnt /opt/mellanox/sfc-hbn/install.sh --ecpf0 $NUM_SFs_ECPF0 --ecpf1 $NUM_SFs_ECPF1
+	fi
+
+	if [ -n "${grub_admin_PASSWORD}" ]; then
+		sed -i -r -e "s/(password_pbkdf2 admin).*/\1 ${grub_admin_PASSWORD}/" /mnt/etc/grub.d/40_custom
+	fi
+
+	chroot /mnt env PATH=$CHROOT_PATH /usr/sbin/grub-install ${device} > /dev/null 2>&1
+	chroot /mnt env PATH=$CHROOT_PATH /usr/sbin/grub-mkconfig -o /boot/grub/grub.cfg > /dev/null 2>&1
+	chroot /mnt env PATH=$CHROOT_PATH /usr/sbin/grub-set-default 0
 
 	if function_exists bfb_modify_os; then
 		log "INFO: Running bfb_modify_os from bf.cfg"
@@ -472,12 +557,7 @@ EOF
 
 	sync
 
-	umount /mnt/sys/fs/fuse/connections > /dev/null 2>&1 || true
-	umount /mnt/sys > /dev/null 2>&1
-	umount /mnt/dev > /dev/null 2>&1
-	umount /mnt/proc > /dev/null 2>&1
-	umount /mnt/boot/efi > /dev/null 2>&1
-	umount /mnt > /dev/null 2>&1
+	unmount_partitions
 }
 
 if function_exists bfb_pre_install; then
@@ -557,7 +637,7 @@ EOF
 	# Restore the original bf.cfg
 	/bin/rm -f /etc/bf.cfg
 	if [ -e /etc/bf.cfg.orig ]; then
-		mv /etc/bf.cfg.orig /etc/bf.cfg
+		grep -v PXE_DHCP_CLASS_ID= /etc/bf.cfg.orig > /etc/bf.cfg
 	fi
 fi
 
@@ -587,6 +667,24 @@ if function_exists bfb_post_install; then
 fi
 
 log "INFO: Installation finished"
+
+if [ "$WITH_NIC_FW_UPDATE" == "yes" ]; then
+	if [ $NIC_FW_UPDATE_DONE -eq 1 ]; then
+		log "INFO: Running NIC Firmware reset"
+		if [ "X$mode" == "Xmanufacturing" ]; then
+			log "INFO: Rebooting..."
+		fi
+		# Wait for these messages to be pulled by the rshim service
+		# as mlxfwreset will restart the DPU
+		sleep 3
+		# Reset NIC FW
+		mount -t ext4 /dev/mmcblk0p2 /mnt
+		bind_partitions
+		fw_reset
+		unmount_partitions
+	fi
+fi
+
 if [ "X$mode" == "Xmanufacturing" ]; then
 	sleep 3
 	log "INFO: Rebooting..."

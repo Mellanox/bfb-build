@@ -218,24 +218,6 @@ copy_module()
 }
 
 (cd usr/bin; sudo ln -s xz xzcat)
-# Remove tools coming with busybox
-for tool in `dpkg -L mlxbf-scripts | grep bin/` \
-		`dpkg -L dosfstools` \
-		`dpkg -L e2fsprogs` \
-		`dpkg -L fdisk` \
-		`dpkg -L kmod | grep -v share` \
-		`dpkg -L pciutils | grep -v share` \
-		`dpkg -L usbutils | grep -v share` \
-		`dpkg -L mft` \
-		`dpkg -L mft-oem` \
-		`dpkg -L kernel-mft-modules` \
-		`dpkg -L tar`
-do
-	if [ -d $tool ]; then
-		continue
-	fi
-	/bin/rm -f .${tool}
-done
 
 for tool in `dpkg -L mlxbf-scripts | grep bin/` \
 		`dpkg -L dosfstools | grep -v share` \
@@ -250,15 +232,29 @@ for tool in `dpkg -L mlxbf-scripts | grep bin/` \
 		`dpkg -L tar | grep -v share` \
 		xz efibootmgr bash getopt hexdump mstflint lspci perl \
 		lsblk watchdog shutdown systemctl strings aarch64-linux-gnu-strings \
-		mlxbf-bootctl id dirname
+		mlxbf-bootctl id dirname curl $ADDON_TOOLS
 do
 	if [ -d $tool ]; then
 		continue
 	fi
+	# Remove tools coming with busybox
+	/bin/rm -f .${tool}
 	copy_bin $tool
 done
 
-for mod in nvme-rdma nvme-tcp nvme mlx5_ib ib_ipoib ib_iser
+for deb in $ADDON_DEBS
+do
+	for tool in `dpkg -L $deb | grep -v share`
+	do
+		if [ -d $tool ]; then
+			continue
+		fi
+		/bin/rm -f .${tool}
+		copy_bin $tool
+	done
+done
+
+for mod in nvme-rdma nvme-tcp nvme mlx5_ib ib_ipoib ib_iser $ADDON_KERNEL_MODULES
 do
 	copy_module $mod
 done
@@ -268,8 +264,19 @@ sudo mkdir -p usr/share/misc/ bin/ var/log/watchdog
 sudo cp /usr/share/misc/pci.ids usr/share/misc/
 sudo cp /etc/watchdog.conf etc
 # Make sure we can load mlx-bootctl
-bootctl_ko=`modinfo -F filename -k $kernel mlx-bootctl`
-sudo cp $bootctl_ko .
+bootctl_ko=""
+for driver in mlxbf-bootctl mlx-bootctl
+do
+	bootctl_ko=`modinfo -F filename -k $kernel $driver || true`
+	if [ ! -z $bootctl_ko ]; then
+		break
+	fi
+done
+if [ -z "$bootctl_ko" ]; then
+	echo "ERROR: Cannot find mlxbf-bootctl or mlx-bootctl drivers"
+	exit 1
+fi
+sudo cp $bootctl_ko ./mlx-bootctl.ko
 sudo cp /lib/modules/$kernel/kernel/drivers/watchdog/sbsa_gwdt.ko .
 sudo mkdir -p ./lib/firmware/mellanox/boot/
 sudo cp /lib/firmware/mellanox/boot/default.bfb ./lib/firmware/mellanox/boot/default.bfb

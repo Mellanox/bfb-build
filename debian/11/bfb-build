@@ -41,17 +41,18 @@ fi
 
 DISTRO="debian"
 DISTRO_VERSION="11"
-VERSION="3.9.2"
-DOCA_VERSION="1.4.0"
+VERSION="3.9.3"
+DOCA_VERSION="1.5.0"
 
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
+CUSTOM_VERSION=${CUSTOM_VERSION:-""}
 
 WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
 
 mkdir -p $WDIR
-wget -P $WDIR https://linux.mellanox.com/public/repo/bluefield/${VERSION}/bootimages/${IMAGE_TYPE}/mlxbf-bootimages_3.9.2-12271_arm64.deb
-wget -P $WDIR -r --no-verbose --no-directories -l1 --no-parent -A 'doca-repo-aarch64-debian11-local_*_arm64.deb' https://linux.mellanox.com/public/repo/doca/${DOCA_VERSION}/${DISTRO}${DISTRO_VERSION}/aarch64/
-mv $WDIR/doca-repo-aarch64-debian11-local_*_arm64.deb $WDIR/doca-repo.deb
+wget -P $WDIR -r --no-verbose --no-directories -l1 --no-parent -A 'mlxbf-bootimages_*_arm64.deb' https://linux.mellanox.com/public/repo/bluefield/${VERSION}/bootimages/${IMAGE_TYPE}/
+wget -P $WDIR -r --no-verbose --no-directories -l1 --no-parent -A 'doca-dpu-repo-debian11-local_*_arm64.deb' https://linux.mellanox.com/public/repo/doca/${DOCA_VERSION}/${DISTRO}${DISTRO_VERSION}/aarch64/
+mv $WDIR/doca-dpu-repo-debian11-local_*_arm64.deb $WDIR/doca-repo.deb
 
 cp	Dockerfile \
 	create_bfb \
@@ -62,6 +63,9 @@ cp	Dockerfile \
 
 cd $WDIR
 
+
+sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/" Dockerfile
+
 docker build -t bfb_runtime_${DISTRO}${DISTRO_VERSION} -f Dockerfile .
 docker run -t --rm --privileged -e container=docker \
 	-v $PWD:/workspace \
@@ -69,8 +73,8 @@ docker run -t --rm --privileged -e container=docker \
 	--mount type=bind,source=/dev,target=/dev \
 	--mount type=bind,source=/sys,target=/sys \
 	--mount type=bind,source=/proc,target=/proc \
-	bfb_runtime_${DISTRO}${DISTRO_VERSION}
+	bfb_runtime_${DISTRO}${DISTRO_VERSION} bash -c " bash -x /root/workspace/create_bfb -k 5.10.151-bf.72.gc34d1b2"
 
 readlink -f *.bfb
 
-echo "Default root password is: debian"
+echo "Default root password is: root"

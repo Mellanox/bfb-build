@@ -4,13 +4,16 @@ ADD qemu-aarch64-static /usr/bin/
 WORKDIR /root/workspace
 ADD install.sh .
 ADD create_bfb .
-ADD mlxbf-bootimages_3.9.2-12271_arm64.deb .
+ADD mlxbf-bootimages_3.9.3-12383_arm64.deb .
 ADD doca-repo.deb .
 ADD grubaa64.efi .
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV FLASH_KERNEL_SKIP=yes
 ENV RUN_FW_UPDATER=no
+
+# Avoid running flash-kernel post install
+RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
 
 RUN apt update
 RUN apt remove --purge -y snapd plymouth
@@ -50,35 +53,34 @@ RUN apt purge -y docker.io; \
         update-alternatives --set iptables /usr/sbin/iptables-legacy; \
         update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy;
 
-RUN wget -qO - https://linux.mellanox.com/public/repo/doca/1.4.0/debian11/aarch64/GPG-KEY-Mellanox.pub | apt-key add -
-RUN echo "deb [trusted=yes] https://linux.mellanox.com/public/repo/doca/1.4.0/debian11/\$(ARCH) ./" | tee /etc/apt/sources.list.d/doca.tmp.list
+RUN wget -qO - https://linux.mellanox.com/public/repo/doca/1.5.0/debian11/aarch64/GPG-KEY-Mellanox.pub | apt-key add -
+RUN echo "deb [trusted=yes] https://linux.mellanox.com/public/repo/doca/1.5.0/debian11/\$(ARCH) ./" | tee /etc/apt/sources.list.d/doca.tmp.list
 RUN apt update || true
-
-# Avoid running flash-kernel post install
-RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
 
 RUN dpkg -i /root/workspace/doca-repo.deb
 RUN apt update || true
 
 RUN apt install -y -f --allow-downgrades \
-		linux-image-5.10.133-bf.57.g5034934=5.10.133-bf.57.g5034934-1 \
-		linux-headers-5.10.133-bf.57.g5034934=5.10.133-bf.57.g5034934-1 \
-		linux-libc-dev=5.10.133-bf.57.g5034934-1
+		linux-image-5.10.151-bf.72.gc34d1b2=5.10.151-bf.72.gc34d1b2-1 \
+		linux-headers-5.10.151-bf.72.gc34d1b2=5.10.151-bf.72.gc34d1b2-1 \
+		linux-libc-dev=5.10.151-bf.72.gc34d1b2-1
 RUN apt install -y -f doca-runtime-user || true
 RUN apt install -y -f doca-runtime-kernel || true
 RUN apt install -y -f doca-sdk-user || true
 RUN apt install -y -f doca-sdk-kernel || true
 RUN apt install -y -f doca-tools || true
-RUN cd /var/doca-repo-aarch64-debian11-local; for dr in *modules*deb; do dpkg -i $dr || true;done
-RUN apt remove --purge -y doca-repo-aarch64-debian11-local || true
-
+RUN cd /var/doca-dpu-repo-debian11-local; for dr in *modules*deb; do dpkg -i $dr || true;done
 RUN apt --fix-broken install -y || true
-RUN apt install -y bf-release || true
+# RUN apt install -y bf-release mlxbf-scripts mstflint || true
+RUN apt install -y libvma libvma-dev libvma-utils || true
+RUN apt install -y mlnx-libsnap mlnx-snap || true
+RUN apt remove --purge -y doca-dpu-repo-debian11-local || true
 RUN /bin/rm -f /etc/apt/sources.list.d/doca.tmp.list
 RUN apt update || true
 RUN /usr/sbin/dpkg-reconfigure bf-release || true
 RUN mkdir -p /etc/kubelet.d
 RUN mkdir -p /workspace
+RUN dpkg -i /root/workspace/mlxbf-bootimages_*_arm64.deb
 
 # Manage system services
 RUN systemctl enable mlx-regex.service || true
@@ -104,8 +106,6 @@ RUN systemctl disable mosquitto.service || true
 
 RUN /usr/sbin/update-pciids || true
 
-RUN dpkg -i mlxbf-bootimages_3.9.2-12271_arm64.deb
-
 # Copy boot bits from rootfs to EFI partition
 RUN mkdir -p /boot/efi/EFI/debian/; \
 	rm -f /boot/efi/EFI/debian/grubaa64.efi; \
@@ -128,4 +128,6 @@ RUN mkdir -p /boot/efi/EFI/debian/; \
 	/boot/efi/EFI/BOOT/; \
 	chmod 700 /boot/efi/EFI/debian/grubaa64.efi
 
-CMD ["/root/workspace/create_bfb", "-k", "5.10.133-bf.57.g5034934"]
+RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
+
+CMD ["/root/workspace/create_bfb", "-k", "5.10.151-bf.72.gc34d1b2"]

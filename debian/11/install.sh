@@ -1,7 +1,8 @@
 #!/bin/bash
+
 ###############################################################################
 #
-# Copyright 2022 NVIDIA Corporation
+# Copyright 2020 NVIDIA Corporation
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of
 # this software and associated documentation files (the "Software"), to deal in
@@ -27,6 +28,7 @@ CHROOT_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 rshimlog=`which bfrshlog 2> /dev/null`
 distro="Debian"
+NIC_FW_UPDATE_DONE=0
 
 fspath=$(readlink -f `dirname $0`)
 
@@ -36,6 +38,56 @@ log()
 	if [ -n "$rshimlog" ]; then
 		$rshimlog "$*"
 	fi
+}
+
+fw_update()
+{
+	FW_UPDATER=/opt/mellanox/mlnx-fw-updater/mlnx_fw_updater.pl
+	FW_DIR=/opt/mellanox/mlnx-fw-updater/firmware/
+
+	if [[ -x /mnt/${FW_UPDATER} && -d /mnt/${FW_DIR} ]]; then
+		log "INFO: Updating NIC firmware..."
+		chroot /mnt ${FW_UPDATER} \
+			--force-fw-update \
+			--fw-dir ${FW_DIR}
+		if [ $? -eq 0 ]; then
+			log "INFO: NIC firmware update done"
+		else
+			log "INFO: NIC firmware update failed"
+		fi
+	else
+		log "WARNING: NIC Firmware files were not found"
+	fi
+}
+
+fw_reset()
+{
+	mst start > /dev/null 2>&1 || true
+	chroot /mnt /sbin/mlnx_bf_configure > /dev/null 2>&1
+	msg=`chroot /mnt mlxfwreset -d /dev/mst/mt*_pciconf0 -y -l 3 --sync 1 r 2>&1`
+	if [ $? -ne 0 ]; then
+		log "INFO: NIC Firmware reset failed"
+		log "INFO: $msg"
+	else
+		log "INFO: NIC Firmware reset done"
+	fi
+}
+
+bind_partitions()
+{
+	mount --bind /proc /mnt/proc
+	mount --bind /dev /mnt/dev
+	mount --bind /sys /mnt/sys
+}
+
+unmount_partitions()
+{
+	umount /mnt/sys/fs/fuse/connections > /dev/null 2>&1 || true
+	umount /mnt/sys > /dev/null 2>&1
+	umount /mnt/dev > /dev/null 2>&1
+	umount /mnt/proc > /dev/null 2>&1
+	umount /mnt/boot/efi > /dev/null 2>&1
+	umount /mnt > /dev/null 2>&1
 }
 
 #
@@ -101,7 +153,7 @@ fi
 
 log "INFO: $distro installation started"
 
-device=/dev/mmcblk0
+device=${device:-/dev/mmcblk0}
 
 # We cannot use wait-for-root as it expects the device to contain a
 # known filesystem, which might not be the case here.
@@ -128,24 +180,19 @@ root_size=$(($root_end - $root_start + 1))
 
 dd if=/dev/zero of="$device" bs="$bs" count=1
 
-# sfdisk -f "$device" << EOF
-# label: gpt
-# label-id: A2DF9E70-6329-4679-9C1F-1DAF38AE25AE
-# device: ${device}
-# unit: sectors
-# first-lba: $reserved
-# last-lba: $disk_end
+sfdisk -f "$device" << EOF
+label: gpt
+label-id: A2DF9E70-6329-4679-9C1F-1DAF38AE25AE
+device: ${device}
+unit: sectors
+first-lba: $reserved
+last-lba: $disk_end
 
-# ${device}p1 : start=$boot_start, size=$boot_size, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, uuid=CEAEF8AC-B559-4D83-ACB1-A4F45B26E7F0, name="EFI System", bootable
-# ${device}p2 : start=$root_start ,size=$root_size, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=F093FF4B-CC26-408F-81F5-FF2DD6AE139F, name="writable"
-# EOF
+${device}p1 : start=$boot_start, size=$boot_size, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, uuid=CEAEF8AC-B559-4D83-ACB1-A4F45B26E7F0, name="EFI System", bootable
+${device}p2 : start=$root_start ,size=$root_size, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, uuid=F093FF4B-CC26-408F-81F5-FF2DD6AE139F, name="writable"
+EOF
 
-parted --script $device -- \
-	mklabel gpt \
-	mkpart primary 1MiB 201MiB set 1 esp on \
-	mkpart primary 201MiB 100%
-
-partprobe "$device" > /dev/null 2>&1
+sync
 
 # Refresh partition table
 blockdev --rereadpt ${device} > /dev/null 2>&1
@@ -182,9 +229,7 @@ if (grep -qE "MemTotal:\s+16" /proc/meminfo > /dev/null 2>&1); then
 	sed -i -r -e "s/(net.netfilter.nf_conntrack_max).*/\1 = 500000/" /mnt/usr/lib/sysctl.d/90-bluefield.conf
 fi
 
-mount --bind /proc /mnt/proc
-mount --bind /dev /mnt/dev
-mount --bind /sys /mnt/sys
+bind_partitions
 chroot /mnt env PATH=$CHROOT_PATH /usr/sbin/grub-install ${device}
 chroot /mnt env PATH=$CHROOT_PATH /usr/sbin/grub-mkconfig -o /boot/grub/grub.cfg
 chroot /mnt env PATH=$CHROOT_PATH /usr/sbin/grub-set-default 0
@@ -302,8 +347,12 @@ if [ -n "$FLINT" ]; then
 	esac
 fi
 
-# Set the default root password
-echo -e "debian\ndebian" | chroot /mnt passwd root
+if [ "$WITH_NIC_FW_UPDATE" == "yes" ]; then
+	if [ $NIC_FW_UPDATE_DONE -eq 0 ]; then
+		fw_update
+		NIC_FW_UPDATE_DONE=1
+	fi
+fi
 
 if function_exists bfb_modify_os; then
 	log "INFO: Running bfb_modify_os from bf.cfg"
@@ -312,12 +361,7 @@ fi
 
 sync
 
-umount /mnt/sys/fs/fuse/connections || true
-umount /mnt/sys
-umount /mnt/dev
-umount /mnt/proc
-umount /mnt/boot/efi
-umount /mnt
+unmount_partitions
 
 blockdev --rereadpt ${device} > /dev/null 2>&1
 
@@ -376,11 +420,11 @@ EOF
 	# Restore the original bf.cfg
 	/bin/rm -f /etc/bf.cfg
 	if [ -e /etc/bf.cfg.orig ]; then
-		mv /etc/bf.cfg.orig /etc/bf.cfg
+		grep -v PXE_DHCP_CLASS_ID= /etc/bf.cfg.orig > /etc/bf.cfg
 	fi
 fi
 
-umount /sys/firmware/efi/efivars
+umount /sys/firmware/efi/efivars || true
 
 if [ -n "$BFCFG" ]; then
 	$BFCFG
@@ -392,6 +436,28 @@ if function_exists bfb_post_install; then
 fi
 
 log "INFO: Installation finished"
+
+if [ "$WITH_NIC_FW_UPDATE" == "yes" ]; then
+	if [ $NIC_FW_UPDATE_DONE -eq 1 ]; then
+		log "INFO: Running NIC Firmware reset"
+		if [ "X$mode" == "Xmanufacturing" ]; then
+			log "INFO: Rebooting..."
+		fi
+		# Wait for these messages to be pulled by the rshim service
+		# as mlxfwreset will restart the DPU
+		sleep 3
+		# Reset NIC FW
+		mount -t ext4 /dev/mmcblk0p2 /mnt
+		bind_partitions
+		fw_reset
+		unmount_partitions
+	fi
+fi
+
+echo
+echo "ROOT PASSWORD is \"root\""
+echo
+
 sleep 3
 log "INFO: Rebooting..."
 # Wait for these messages to be pulled by the rshim service

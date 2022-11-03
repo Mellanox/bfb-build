@@ -1,33 +1,30 @@
 #!/bin/bash
 
-# Copyright (c) 2018, Mellanox Technologies
-# All rights reserved.
+###############################################################################
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
+# Copyright 2020 NVIDIA Corporation
 #
-# 1. Redistributions of source code must retain the above copyright notice, this
-#    list of conditions and the following disclaimer.
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-#    this list of conditions and the following disclaimer in the documentation
-#    and/or other materials provided with the distribution.
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
-# ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
 #
-# The views and conclusions contained in the software and documentation are those
-# of the authors and should not be interpreted as representing official policies,
-# either expressed or implied, of the FreeBSD Project.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+###############################################################################
 
 PATH="/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:/opt/mellanox/scripts"
+NIC_FW_UPDATE_DONE=0
 
 fspath=$(readlink -f `dirname $0`)
 
@@ -41,31 +38,81 @@ log()
 	fi
 }
 
-#
-# Check PXE installation
-#
-if [ ! -e /tmp/bfpxe.done ]; then touch /tmp/bfpxe.done; bfpxe; fi
+fw_update()
+{
+	FW_UPDATER=/opt/mellanox/mlnx-fw-updater/mlnx_fw_updater.pl
+	FW_DIR=/opt/mellanox/mlnx-fw-updater/firmware/
+
+	if [[ -x /mnt/${FW_UPDATER} && -d /mnt/${FW_DIR} ]]; then
+		log "INFO: Updating NIC firmware..."
+		chroot /mnt ${FW_UPDATER} \
+			--force-fw-update \
+			--fw-dir ${FW_DIR}
+		if [ $? -eq 0 ]; then
+			log "INFO: NIC firmware update done"
+		else
+			log "INFO: NIC firmware update failed"
+		fi
+	else
+		log "WARNING: NIC Firmware files were not found"
+	fi
+}
+
+fw_reset()
+{
+	mst start > /dev/null 2>&1 || true
+	chroot /mnt /sbin/mlnx_bf_configure > /dev/null 2>&1
+	msg=`chroot /mnt mlxfwreset -d /dev/mst/mt*_pciconf0 -y -l 3 --sync 1 r 2>&1`
+	if [ $? -ne 0 ]; then
+		log "INFO: NIC Firmware reset failed"
+		log "INFO: $msg"
+	else
+		log "INFO: NIC Firmware reset done"
+	fi
+}
+
+bind_partitions()
+{
+	mount --bind /proc /mnt/proc
+	mount --bind /dev /mnt/dev
+	mount --bind /sys /mnt/sys
+}
+
+unmount_partitions()
+{
+	umount /mnt/sys/fs/fuse/connections > /dev/null 2>&1 || true
+	umount /mnt/sys > /dev/null 2>&1
+	umount /mnt/dev > /dev/null 2>&1
+	umount /mnt/proc > /dev/null 2>&1
+	umount /mnt/boot/efi > /dev/null 2>&1
+	umount /mnt > /dev/null 2>&1
+}
 
 #
 # Check auto configuration passed from boot-fifo
 #
 boot_fifo_path="/sys/bus/platform/devices/MLNXBF04:00/bootfifo"
 if [ -e "${boot_fifo_path}" ]; then
-    cfg_file=$(mktemp)
-    # Get 16KB assuming it's big enough to hold the config file.
-    dd if=${boot_fifo_path} of=${cfg_file} bs=4096 count=4 > /dev/null 2>&1
+	cfg_file=$(mktemp)
+	# Get 16KB assuming it's big enough to hold the config file.
+	dd if=${boot_fifo_path} of=${cfg_file} bs=4096 count=4 > /dev/null 2>&1
 
-    #
-    # Check the .xz signature {0xFD, '7', 'z', 'X', 'Z', 0x00} and extract the
-    # config file from it. Then start decompression in the background.
-    #
-    offset=$(strings -a -t d ${cfg_file} | grep -m 1 "7zXZ" | awk '{print $1}')
-    if [ -s "${cfg_file}" -a ."${offset}" != ."1" ]; then
-        log "INFO: Found bf.cfg"
-        cat ${cfg_file} | tr -d '\0' > /etc/bf.cfg
-    fi
-    rm -f $cfg_file
+	#
+	# Check the .xz signature {0xFD, '7', 'z', 'X', 'Z', 0x00} and extract the
+	# config file from it. Then start decompression in the background.
+	#
+	offset=$(strings -a -t d ${cfg_file} | grep -m 1 "7zXZ" | awk '{print $1}')
+	if [ -s "${cfg_file}" -a ."${offset}" != ."1" ]; then
+		log "INFO: Found bf.cfg"
+		cat ${cfg_file} | tr -d '\0' > /etc/bf.cfg
+	fi
+	rm -f $cfg_file
 fi
+
+#
+# Check PXE installation
+#
+if [ ! -e /tmp/bfpxe.done ]; then touch /tmp/bfpxe.done; bfpxe; fi
 
 PART_SCHEME="SCHEME_A"
 if [ -e /etc/bf.cfg ]; then
@@ -85,11 +132,21 @@ function_exists()
 }
 
 DHCP_CLASS_ID=${PXE_DHCP_CLASS_ID:-""}
+DHCP_CLASS_ID_OOB=${DHCP_CLASS_ID_OOB:-"NVIDIA/BF/OOB"}
+DHCP_CLASS_ID_DP=${DHCP_CLASS_ID_DP:-"NVIDIA/BF/DP"}
+FACTORY_DEFAULT_DHCP_BEHAVIOR=${FACTORY_DEFAULT_DHCP_BEHAVIOR:-"true"}
+
+if [ "${FACTORY_DEFAULT_DHCP_BEHAVIOR}" == "true" ]; then
+	# Set factory defaults
+	DHCP_CLASS_ID="NVIDIA/BF/PXE"
+	DHCP_CLASS_ID_OOB="NVIDIA/BF/OOB"
+	DHCP_CLASS_ID_DP="NVIDIA/BF/DP"
+fi
 
 log "INFO: $distro installation started"
 
 # Create the CentOS partitions.
-blkdev=/dev/mmcblk0
+device=${device:-/dev/mmcblk0}
 
 SUPPORTED_SCHEMES="SCHEME_A SCHEME_B"
 if ! (echo "$SUPPORTED_SCHEMES" | grep -wq "$PART_SCHEME"); then
@@ -98,30 +155,31 @@ if ! (echo "$SUPPORTED_SCHEMES" | grep -wq "$PART_SCHEME"); then
 	PART_SCHEME="SCHEME_A"
 fi
 
-dd if=/dev/zero of=$blkdev bs=512 count=1
+dd if=/dev/zero of=$device bs=512 count=1
 
 if [[ "${PART_SCHEME}" == "SCHEME_A" ]]; then
-	parted --script $blkdev -- \
+	parted --script $device -- \
 		mklabel gpt \
 		mkpart primary 1MiB 201MiB set 1 esp on \
 		mkpart primary 201MiB 1225MiB \
 		mkpart primary 1225MiB 100%
 elif [[ "${PART_SCHEME}" == "SCHEME_B" ]]; then
-	parted --script $blkdev -- \
+	parted --script $device -- \
 		mklabel gpt \
 		mkpart primary 1MiB 201MiB set 1 esp on \
-		mkpart primary 201MiB 5321MiB \
-		mkpart primary 5321MiB 12489MiB \
+		mkpart primary 201MiB 6000MiB \
+		mkpart primary 6000MiB 12489MiB \
 		mkpart primary 12489MiB 100%
 fi
 
 sync
 
-partprobe "$blkdev" > /dev/null 2>&1
+partprobe "$device" > /dev/null 2>&1
 
-blockdev --rereadpt "$blkdev" > /dev/null 2>&1
+blockdev --rereadpt "$device" > /dev/null 2>&1
 
 if function_exists bfb_pre_install; then
+	log "INFO: Running bfb_pre_install from bf.cfg"
 	bfb_pre_install
 fi
 
@@ -177,8 +235,8 @@ elif [[ "${PART_SCHEME}" == "SCHEME_B" ]]; then
 #
 #
 /dev/mmcblk0p2  /           xfs     defaults                   0 1
-/dev/mmcblk0p3  /home       xfs     defaults                   0 1
-/dev/mmcblk0p4  /var        xfs     defaults                   0 1
+/dev/mmcblk0p3  /home       xfs     defaults                   0 2
+/dev/mmcblk0p4  /var        xfs     defaults                   0 2
 /dev/mmcblk0p1  /boot/efi   vfat    umask=0077,shortname=winnt 0 2
 EOF
 fi
@@ -217,9 +275,7 @@ chmod 600 /mnt/etc/ssh/*
 /bin/rm -f /mnt/etc/systemd/system/multi-user.target.wants/firewalld.service
 /bin/rm -f /mnt/etc/systemd/system/dbus-org.fedoraproject.FirewallD1.service
 
-mount --bind /proc /mnt/proc
-mount --bind /dev /mnt/dev
-mount --bind /sys /mnt/sys
+bind_partitions
 
 /bin/rm -f /mnt/boot/vmlinux-*.bz2
 
@@ -233,24 +289,14 @@ chroot /mnt grub2-mkconfig -o /boot/efi/EFI/centos/grub.cfg
 kdir=$(/bin/ls -1d /mnt/lib/modules/4.18* /mnt/lib/modules/4.19* /mnt/lib/modules/4.20* /mnt/lib/modules/5.4* 2> /dev/null)
 kver=""
 if [ -n "$kdir" ]; then
-	kver=${kdir##*/}
-	chroot /mnt grub2-set-default 0
+    kver=${kdir##*/}
+    DRACUT_CMD=`chroot /mnt /bin/ls -1 /sbin/dracut /usr/bin/dracut 2> /dev/null`
+    chroot /mnt grub2-set-default 0
+    chroot /mnt $DRACUT_CMD --kver ${kver} --force --add-drivers "dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block mlxbf_tmfifo virtio_console" /boot/initramfs-${kver}.img
 else
-	kver=$(/bin/ls -1 /mnt/lib/modules/ | head -1)
+    kver=$(/bin/ls -1 /mnt/lib/modules/ | head -1)
 fi
 
-DRACUT_CMD=`chroot /mnt /bin/ls -1 /sbin/dracut /usr/bin/dracut 2> /dev/null`
-case "${kver}" in
-	4.14*el7*)
-	echo Running: chroot /mnt $DRACUT_CMD --kver ${kver} --force --add-drivers \"dw_mmc-bluefield dw_mmc dw_mmc-pltfm\"
-	chroot /mnt $DRACUT_CMD --kver ${kver} --force --add-drivers "dw_mmc-bluefield dw_mmc dw_mmc-pltfm" > /dev/null 2>&1
-	;;
-	4.18*el8*)
-	echo Running: chroot /mnt $DRACUT_CMD -f /boot/initramfs-${kver}.img ${kver}
-	chroot /mnt mount -a > /dev/null 2>&1
-	chroot /mnt $DRACUT_CMD -f /boot/initramfs-${kver}.img ${kver} > /dev/null 2>&1
-	;;
-esac
 
 echo centos | chroot /mnt passwd root --stdin
 
@@ -296,23 +342,14 @@ done
 # Update HW-dependant files
 if (lspci -n -d 15b3: | grep -wq 'a2d2'); then
 	# BlueField-1
-	if [ ! -n "$DHCP_CLASS_ID" ]; then
-		DHCP_CLASS_ID="BF1Client"
-	fi
 	ln -snf snap_rpc_init_bf1.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
 	# OOB interface does not exist on BlueField-1
 	/bin/rm -f /mnt/etc/sysconfig/network-scripts/ifcfg-oob_net0
 elif (lspci -n -d 15b3: | grep -wq 'a2d6'); then
 	# BlueField-2
-	if [ ! -n "$DHCP_CLASS_ID" ]; then
-		DHCP_CLASS_ID="BF2Client"
-	fi
 	ln -snf snap_rpc_init_bf2.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
 elif (lspci -n -d 15b3: | grep -wq 'a2dc'); then
 	# BlueField-3
-	if [ ! -n "$DHCP_CLASS_ID" ]; then
-		DHCP_CLASS_ID="BF3Client"
-	fi
 	if [ -e /mnt/etc/mlnx_snap/snap_rpc_init_bf3.conf ]; then
 		ln -snf snap_rpc_init_bf3.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
 	else
@@ -322,7 +359,10 @@ fi
 
 	mkdir -p /mnt/etc/dhcp
 	cat >> /mnt/etc/dhcp/dhclient.conf << EOF
-send vendor-class-identifier "$DHCP_CLASS_ID";
+send vendor-class-identifier "$DHCP_CLASS_ID_DP";
+interface "oob_net0" {
+  send vendor-class-identifier "$DHCP_CLASS_ID_OOB";
+}
 EOF
 
 # Customisations per PSID
@@ -349,6 +389,13 @@ if [ -n "$FLINT" ]; then
 	esac
 fi
 
+if [ "$WITH_NIC_FW_UPDATE" == "yes" ]; then
+	if [ $NIC_FW_UPDATE_DONE -eq 0 ]; then
+		fw_update
+		NIC_FW_UPDATE_DONE=1
+	fi
+fi
+
 # Clean up logs
 echo > /mnt/var/log/messages
 echo > /mnt/var/log/maillog
@@ -359,6 +406,7 @@ echo > /mnt/var/log/audit/audit.log
 /bin/rm -rf /mnt/tmp/*
 
 if function_exists bfb_modify_os; then
+	log "INFO: Running bfb_modify_os from bf.cfg"
 	bfb_modify_os
 fi
 
@@ -384,11 +432,15 @@ if [ -e /lib/firmware/mellanox/boot/capsule/boot_update2.cap ]; then
 	bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap --policy dual
 fi
 
+if [ “X$ENROLL_KEYS” = “Xyes” ]; then
+	bfrec --capsule /lib/firmware/mellanox/boot/capsule/EnrollKeysCap
+fi
+
 # Clean up actual boot entries.
 bfbootmgr --cleanall > /dev/null 2>&1
-/bin/rm -f /sys/firmware/efi/efivars/Boot* > /dev/null 2>&1
 
 mount -t efivarfs none /sys/firmware/efi/efivars
+/bin/rm -f /sys/firmware/efi/efivars/Boot* > /dev/null 2>&1
 efibootmgr -c -d /dev/mmcblk0 -p 1 -l "\EFI\centos\grubaa64.efi" -L $distro
 umount /sys/firmware/efi/efivars
 
@@ -415,7 +467,7 @@ EOF
 	# Restore the original bf.cfg
 	/bin/rm -f /etc/bf.cfg
 	if [ -e /etc/bf.cfg.orig ]; then
-		mv /etc/bf.cfg.orig /etc/bf.cfg
+		grep -v PXE_DHCP_CLASS_ID= /etc/bf.cfg.orig > /etc/bf.cfg
 	fi
 fi
 
@@ -428,11 +480,34 @@ echo "ROOT PASSWORD is \"centos\""
 echo
 
 if function_exists bfb_post_install; then
+	log "INFO: Running bfb_post_install from bf.cfg"
 	bfb_post_install
 fi
 
-sleep 3
 log "INFO: Installation finished"
+
+if [ "$WITH_NIC_FW_UPDATE" == "yes" ]; then
+	if [ $NIC_FW_UPDATE_DONE -eq 1 ]; then
+		log "INFO: Running NIC Firmware reset"
+		if [ "X$mode" == "Xmanufacturing" ]; then
+			log "INFO: Rebooting..."
+		fi
+		# Wait for these messages to be pulled by the rshim service
+		# as mlxfwreset will restart the DPU
+		sleep 3
+		# Reset NIC FW
+		if [[ "${PART_SCHEME}" == "SCHEME_A" ]]; then
+			mount /dev/mmcblk0p3 /mnt
+		else
+			mount /dev/mmcblk0p2 /mnt
+		fi
+		bind_partitions
+		fw_reset
+		unmount_partitions
+	fi
+fi
+
+sleep 3
 log "INFO: Rebooting..."
 # Wait for these messages to be pulled by the rshim service
 sleep 3

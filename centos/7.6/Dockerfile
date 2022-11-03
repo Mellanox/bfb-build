@@ -4,7 +4,7 @@ ADD qemu-aarch64-static /usr/bin/
 WORKDIR /root/workspace
 ADD install.sh .
 ADD create_bfb .
-ADD mlxbf-bootimages-3.9.2-12271.aarch64.rpm .
+ADD mlxbf-bootimages-3.9.3-12383.aarch64.rpm .
 ADD parted-3.2-39.el7.aarch64.rpm .
 
 ENV RUN_FW_UPDATER=no
@@ -32,10 +32,10 @@ RUN yum-config-manager --nogpgcheck --add-repo https://download-ib01.fedoraproje
      yum install -y epel-release; \
      yum install -y --nogpgcheck uriparser
 
-RUN yum-config-manager --nogpgcheck --add-repo https://linux.mellanox.com/public/repo/doca/1.4.0/centos7.6/aarch64/
+RUN yum-config-manager --nogpgcheck --add-repo https://linux.mellanox.com/public/repo/doca/1.5.0/centos7.6/aarch64/
 
 RUN yum install --nogpgcheck -y doca-runtime doca-tools doca-sdk
-RUN rpm -ihv --force mlxbf-bootimages-3.9.2-12271.aarch64.rpm
+RUN rpm -ihv --force mlxbf-bootimages-*.aarch64.rpm
 RUN /usr/sbin/update-pciids || true
 
-CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1042.48.g040f5c3-bluefield"]
+CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1050.95.gda12205-bluefield"]

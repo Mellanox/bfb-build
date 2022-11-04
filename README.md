@@ -174,6 +174,28 @@ https://github.com/Mellanox/bfb-build/blob/master/bclinux/7.6/Dockerfile
 
 https://github.com/Mellanox/bfb-build/blob/master/bclinux/7.6/build_bclinux_bfb
 
+## 2.3 Customization of the BFB installation environment
+As mentioned above, create_bfb creates the target BFB file.
+BFB includes a dump-initramfs-v0 file that represents a small Linux image that is
+loaded on DPU during the BFB installation. To add more tools or whole packages
+to this initramfs image, edit the corresponding Dockerfile and add the relevant
+lines below:
+
+**Add wget utility to the initramfs**
+```
+ENV ADDON_TOOLS="wget"
+```
+
+**Add mlnx-tools RPM to the initramgs (RPM based Distros)**
+```
+ENV ADDON_RPMS="mlnx-tools"
+```
+
+**Add mlnx-tools DEB to the initramgs (DEB based Distros)**
+```
+ENV ADDON_DEBS="mlnx-tools"
+```
+
 # 3. Building your own OS Image
 bfb-build environment use [APT/YUM repositories](https://linux.mellanox.com/public/repo/doca/) with DOCA binary packages built
 for the specific OS.

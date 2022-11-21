@@ -24,7 +24,7 @@
 
 set -e
 
-BF_HOSTNAME="localhost"
+BF_HOSTNAME=""
 SDIR="/root/workspace"
 BFB="${BFB:-/lib/firmware/mellanox/boot/default.bfb}"
 CAPSULE="${CAPSULE:-/lib/firmware/mellanox/boot/capsule/boot_update2.cap}"
@@ -41,7 +41,7 @@ cat << EOF
 Usage: `basename $0` [ OPTIONS ]
 OPTIONS:
 -i, -install_bfb,    --install_bfb <BFB>        Installation BFB to be used as a basis for the target BFB. Default: $BFB
--H, -hostname,       --hostname <hostname>      Hostname for the SmartNIC. Default: $BF_HOSTNAME
+-H, -hostname,       --hostname <hostname>      Hostname for the SmartNIC. Default: empty
 -k, -kernel,         --kernel <kernel version>  Kernel version for the SmartNIC. Default: $kernel
 -v, -verbose,   --verbose                       Run script in verbose mode. Will print out each step of execution.
 -h, -help,      --help                          Display help

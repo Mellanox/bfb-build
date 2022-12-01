@@ -29,6 +29,7 @@ CHROOT_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 rshimlog=`which bfrshlog 2> /dev/null`
 distro="Ubuntu"
 NIC_FW_UPDATE_DONE=0
+NIC_FW_RESET_REQUIRED=0
 
 fspath=$(readlink -f `dirname $0`)
 
@@ -65,16 +66,16 @@ fw_reset()
 	mst start > /dev/null 2>&1 || true
 	chroot /mnt /sbin/mlnx_bf_configure > /dev/null 2>&1
 
-    MLXFWRESET_TIMEOUT=${MLXFWRESET_TIMEOUT:-180}
-    SECONDS=0
-    while ! (chroot /mnt mlxfwreset -d /dev/mst/mt*_pciconf0 q 2>&1 | grep -w "Driver is the owner" | grep -qw "\-Supported")
-    do
-        if [ $SECONDS -gt $MLXFWRESET_TIMEOUT ]; then
-            log "INFO: NIC Firmware reset is not supported. Host power cycle is required."
-            return
-        fi
-        sleep 1
-    done
+	MLXFWRESET_TIMEOUT=${MLXFWRESET_TIMEOUT:-180}
+	SECONDS=0
+	while ! (chroot /mnt mlxfwreset -d /dev/mst/mt*_pciconf0 q 2>&1 | grep -w "Driver is the owner" | grep -qw "\-Supported")
+	do
+		if [ $SECONDS -gt $MLXFWRESET_TIMEOUT ]; then
+			log "INFO: NIC Firmware reset is not supported. Host power cycle is required"
+			return
+		fi
+		sleep 1
+	done
 
 	msg=`chroot /mnt mlxfwreset -d /dev/mst/mt*_pciconf0 -y -l 3 --sync 1 r 2>&1`
 	if [ $? -ne 0 ]; then
@@ -335,8 +336,8 @@ install_os_image()
 
 	# Generate some entropy
 	mke2fs -O 64bit $ROOT_PARTITION > /dev/null 2>&1
-	mkfs.fat $BOOT_PARTITION -n "system-boot$OS_IMAGE" > /dev/null 2>&1
-	mkfs.ext4 -F $ROOT_PARTITION -L "writable$OS_IMAGE" > /dev/null 2>&1
+	mkfs.fat $BOOT_PARTITION -n "EFI$OS_IMAGE" > /dev/null 2>&1
+	mkfs.ext4 -F $ROOT_PARTITION -L "OS$OS_IMAGE" > /dev/null 2>&1
 	sync
 	blockdev --rereadpt ${device} > /dev/null 2>&1
 
@@ -451,11 +452,7 @@ EOF
 		ln -snf snap_rpc_init_bf2.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
 	elif (lspci -n -d 15b3: | grep -wq 'a2dc'); then
 		# BlueField-3
-		if [ -e /mnt/etc/mlnx_snap/snap_rpc_init_bf3.conf ]; then
-			ln -snf snap_rpc_init_bf3.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
-		else
-			ln -snf snap_rpc_init_bf2.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
-		fi
+		chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge mlnx-snap || true
 	fi
 
 	pciid=`echo $pciids | awk '{print $1}' | head -1`
@@ -540,10 +537,16 @@ EOF
 		NUM_SFs_ECPF1=${NUM_SFs_ECPF1:-2}
 		log "INFO: Installing SFC HBN environment"
 		chroot /mnt /opt/mellanox/sfc-hbn/install.sh --ecpf0 $NUM_SFs_ECPF0 --ecpf1 $NUM_SFs_ECPF1
+		NIC_FW_RESET_REQUIRED=1
 	fi
 
 	if [ -n "${grub_admin_PASSWORD}" ]; then
 		sed -i -r -e "s/(password_pbkdf2 admin).*/\1 ${grub_admin_PASSWORD}/" /mnt/etc/grub.d/40_custom
+	fi
+
+	if (lspci -n -d 15b3: | grep -wq 'a2dc'); then
+		# BlueField-3
+		sed -i -e "s/0x01000000/0x13010000/g" /mnt/etc/default/grub
 	fi
 
 	chroot /mnt env PATH=$CHROOT_PATH /usr/sbin/grub-install ${device} > /dev/null 2>&1
@@ -594,7 +597,7 @@ if [ -e /lib/firmware/mellanox/boot/capsule/boot_update2.cap ]; then
 	bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap --policy dual
 fi
 
-if [ “X$ENROLL_KEYS” = “Xyes” ]; then
+if [ "X$ENROLL_KEYS" = "Xyes" ]; then
 	bfrec --capsule /lib/firmware/mellanox/boot/capsule/EnrollKeysCap
 fi
 
@@ -670,19 +673,23 @@ log "INFO: Installation finished"
 
 if [ "$WITH_NIC_FW_UPDATE" == "yes" ]; then
 	if [ $NIC_FW_UPDATE_DONE -eq 1 ]; then
-		log "INFO: Running NIC Firmware reset"
-		if [ "X$mode" == "Xmanufacturing" ]; then
-			log "INFO: Rebooting..."
-		fi
-		# Wait for these messages to be pulled by the rshim service
-		# as mlxfwreset will restart the DPU
-		sleep 3
-		# Reset NIC FW
-		mount -t ext4 /dev/mmcblk0p2 /mnt
-		bind_partitions
-		fw_reset
-		unmount_partitions
+		NIC_FW_RESET_REQUIRED=1
 	fi
+fi
+
+if [ $NIC_FW_RESET_REQUIRED -eq 1 ]; then
+	log "INFO: Running NIC Firmware reset"
+	if [ "X$mode" == "Xmanufacturing" ]; then
+		log "INFO: Rebooting..."
+	fi
+	# Wait for these messages to be pulled by the rshim service
+	# as mlxfwreset will restart the DPU
+	sleep 3
+	# Reset NIC FW
+	mount -t ext4 /dev/mmcblk0p2 /mnt
+	bind_partitions
+	fw_reset
+	unmount_partitions
 fi
 
 if [ "X$mode" == "Xmanufacturing" ]; then

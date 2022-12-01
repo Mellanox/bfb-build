@@ -21,7 +21,7 @@ DISTRO="ubuntu"
 DISTRO_VERSION="20.04"
 DISTRO_BASE_URL="http://cloud-images.ubuntu.com/releases/focal/release/${DISTRO}-${DISTRO_VERSION}-server-cloudimg-arm64-root.tar.xz"
 VERSION="3.9.3"
-DOCA_VERSION="1.5.0"
+DOCA_VERSION="1.5.1"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-""}
 

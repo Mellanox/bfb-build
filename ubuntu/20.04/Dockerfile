@@ -44,8 +44,8 @@ RUN echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] htt
 RUN apt update
 RUN apt install -y kubelet runc containerd cri-tools
 RUN apt upgrade -y
-RUN wget -qO - https://linux.mellanox.com/public/repo/doca/1.5.0/ubuntu20.04/aarch64/GPG-KEY-Mellanox.pub | sudo apt-key add -
-RUN echo "deb [trusted=yes] https://linux.mellanox.com/public/repo/doca/1.5.0/ubuntu20.04/\$(ARCH) ./" | tee /etc/apt/sources.list.d/doca.tmp.list
+RUN wget -qO - https://linux.mellanox.com/public/repo/doca/1.5.1/ubuntu20.04/aarch64/GPG-KEY-Mellanox.pub | sudo apt-key add -
+RUN echo "deb [trusted=yes] https://linux.mellanox.com/public/repo/doca/1.5.1/ubuntu20.04/\$(ARCH) ./" | tee /etc/apt/sources.list.d/doca.tmp.list
 RUN dpkg -i /root/workspace/doca-repo.deb
 RUN apt update || true
 

@@ -25,7 +25,7 @@ RUN yum-config-manager --nogpgcheck --add-repo https://download-ib01.fedoraproje
      yum install -y --nogpgcheck uriparser
 RUN yum install -y --enablerepo=PowerTools meson libnghttp2-devel
 
-RUN yum-config-manager --nogpgcheck --add-repo https://linux.mellanox.com/public/repo/doca/1.5.0/centos8.2/aarch64/
+RUN yum-config-manager --nogpgcheck --add-repo https://linux.mellanox.com/public/repo/doca/1.5.1/centos8.2/aarch64/
 
 RUN yum install --nogpgcheck -y doca-runtime doca-tools doca-sdk
 

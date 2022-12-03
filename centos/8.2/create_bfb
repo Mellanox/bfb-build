@@ -143,7 +143,7 @@ if ! ( rpm -q parted-3.2 > /dev/null 2>&1 ); then
 	rpm -Uhv /tmp/parted-3.2-39.el7.aarch64.rpm || true
 fi
 
-ex dracut --no-hostonly -m "bash network base shutdown" --force-drivers "${bootctl_module} mlxbf_tmfifo dw_mmc_bluefield mmc_block virtio_console mlx5_core mlx5_ib ib_umad" --filesystems "xfs vfat" --gzip $initramfs ${kernel}
+ex dracut --no-hostonly -m "bash network base shutdown" --force-drivers "${bootctl_module} mlxbf_tmfifo dw_mmc_bluefield mmc_block virtio_console mlx5_core mlx5_ib ib_umad nvme nvme-tcp nvme-rdma nvme-fc nvme-fabrics nvme-core" --filesystems "xfs vfat" --gzip $initramfs ${kernel}
 
 rm -f /etc/udev/rules.d/91-tmfifo_net.rules /etc/udev/rules.d/92-oob_net.rules
 
@@ -217,10 +217,6 @@ copy_rpm()
 
 	if ! (rpm -q $package); then
 		yum install -y $package
-	fi
-
-	if ! (rpm -q $package); then
-		return
 	fi
 
 	case $package in
@@ -300,6 +296,7 @@ echo "Installing CentOS. Please wait..." | tee /dev/kmsg
 echo "=================================" | tee /dev/kmsg
 
 modprobe -a mlxbf_tmfifo dw_mmc_bluefield mmc_block virtio_console ${bootctl_module} 2>&1 | tee /dev/kmsg
+modprobe -a mlx5_ib ib_uverbs 2>&1 | tee /dev/kmsg
 
 sleep 5
 
@@ -330,10 +327,13 @@ if [ ! -e $CAPSULE ]; then
 fi
 
 boot_args=$(mktemp)
+boot_args2=$(mktemp)
 boot_path=$(mktemp)
 boot_desc=$(mktemp)
 printf "console=ttyAMA1 console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 earlycon=pl011,0x01800000 initrd=initramfs quiet" > \
 	"$boot_args"
+printf "console=ttyAMA1 console=hvc0 console=ttyAMA0 earlycon=pl011,0x13010000 initrd=initramfs quiet" > \
+	"$boot_args2"
 
 printf "VenHw(F019E406-8C9C-11E5-8797-001ACA00BFC4)/Image" > "$boot_path"
 printf "Linux from rshim" > "$boot_desc"
@@ -351,7 +351,8 @@ mkdir -p /workspace
 ex $mkbfb \
 	--image "$vmlinuz" --initramfs "$initramfs" \
 	--capsule "$CAPSULE" \
-	--boot-args "$boot_args" \
+	--boot-args-v0 "$boot_args" \
+	--boot-args-v2 "$boot_args2" \
 	--boot-path "$boot_path" \
 	--boot-desc "$boot_desc" \
 	${BFB} /workspace/${CENTOS_BFB}

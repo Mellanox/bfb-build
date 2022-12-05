@@ -62,6 +62,18 @@ fw_reset()
 {
 	mst start > /dev/null 2>&1 || true
 	chroot /mnt /sbin/mlnx_bf_configure > /dev/null 2>&1
+
+	MLXFWRESET_TIMEOUT=${MLXFWRESET_TIMEOUT:-180}
+	SECONDS=0
+	while ! (chroot /mnt mlxfwreset -d /dev/mst/mt*_pciconf0 q 2>&1 | grep -w "Driver is the owner" | grep -qw "\-Supported")
+	do
+		if [ $SECONDS -gt $MLXFWRESET_TIMEOUT ]; then
+			log "INFO: NIC Firmware reset is not supported. Host power cycle is required"
+			return
+		fi
+		sleep 1
+	done
+
 	msg=`chroot /mnt mlxfwreset -d /dev/mst/mt*_pciconf0 -y -l 3 --sync 1 r 2>&1`
 	if [ $? -ne 0 ]; then
 		log "INFO: NIC Firmware reset failed"
@@ -283,6 +295,10 @@ bind_partitions
 # parameters, and append the root filesystem parameters.
 bootarg="$(cat /proc/cmdline | sed 's/initrd=initramfs//;s/console=.*//')"
 sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"crashkernel=auto $bootarg console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 modprobe.blacklist=mlx5_core,mlx5_ib\"@" /mnt/etc/default/grub
+if (lspci -n -d 15b3: | grep -wq 'a2dc'); then
+    # BlueField-3
+    sed -i -e "s/0x01000000/0x13010000/g" /mnt/etc/default/grub
+fi
 
 chroot /mnt grub2-mkconfig -o /boot/efi/EFI/centos/grub.cfg
 
@@ -350,11 +366,7 @@ elif (lspci -n -d 15b3: | grep -wq 'a2d6'); then
 	ln -snf snap_rpc_init_bf2.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
 elif (lspci -n -d 15b3: | grep -wq 'a2dc'); then
 	# BlueField-3
-	if [ -e /mnt/etc/mlnx_snap/snap_rpc_init_bf3.conf ]; then
-		ln -snf snap_rpc_init_bf3.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
-	else
-		ln -snf snap_rpc_init_bf2.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
-	fi
+	chroot /mnt rpm -e mlnx-snap || true
 fi
 
 	mkdir -p /mnt/etc/dhcp
@@ -432,7 +444,7 @@ if [ -e /lib/firmware/mellanox/boot/capsule/boot_update2.cap ]; then
 	bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap --policy dual
 fi
 
-if [ “X$ENROLL_KEYS” = “Xyes” ]; then
+if [ "X$ENROLL_KEYS" = "Xyes" ]; then
 	bfrec --capsule /lib/firmware/mellanox/boot/capsule/EnrollKeysCap
 fi
 

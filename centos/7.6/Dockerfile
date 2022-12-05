@@ -32,10 +32,10 @@ RUN yum-config-manager --nogpgcheck --add-repo https://download-ib01.fedoraproje
      yum install -y epel-release; \
      yum install -y --nogpgcheck uriparser
 
-RUN yum-config-manager --nogpgcheck --add-repo https://linux.mellanox.com/public/repo/doca/1.5.0/centos7.6/aarch64/
+RUN yum-config-manager --nogpgcheck --add-repo https://linux.mellanox.com/public/repo/doca/1.5.1/centos7.6/aarch64/
 
 RUN yum install --nogpgcheck -y doca-runtime doca-tools doca-sdk
 RUN rpm -ihv --force mlxbf-bootimages-*.aarch64.rpm
 RUN /usr/sbin/update-pciids || true
 
-CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1050.95.gda12205-bluefield"]
+CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1049.116.g01f8472-bluefield"]

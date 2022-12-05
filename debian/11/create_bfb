@@ -283,7 +283,7 @@ chmod 0755 /usr/bin/pkexec
 
 ex mkdir -p debian
 # Tar the image
-XZ_OPT="--threads=0 -9 --verbose" tar -cJp --exclude='./workspace' --exclude='./signing-local' --exclude='./signing-shared' --exclude='./var/run/docker.sock' --exclude='./root/workspace' --exclude='./tmp/*' --exclude='./run/*' --exclude='./sys/*' --exclude='./proc/*' --exclude='./dev/*' --exclude='./.dockerenv' --exclude='./root/.bash_history' --exclude='./var/tmp/*' --exclude='./bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-arm-static' --exclude='./var/cache/apt/*' -f ./debian/image.tar.xz -C / .
+XZ_OPT="--threads=0 -9 --verbose" tar -cJp --exclude='./workspace' --exclude='./signing-local' --exclude='./signing-shared' --exclude='./var/run/docker.sock' --exclude='./root/workspace' --exclude='./tmp/*' --exclude='./run/*' --exclude='./sys/*' --exclude='./proc/*' --exclude='./dev/*' --exclude='./.dockerenv' --exclude='./root/.bash_history' --exclude='./var/tmp/*' --exclude='./bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-arm-static' --exclude='./var/cache/apt/*' --exclude='./var/lib/apt/lists/*' -f ./debian/image.tar.xz -C / .
 ex install -m 0755 ${SDIR}/install.sh ./debian/install.sh
 
 cat > scripts/initrd-install << EOF
@@ -334,10 +334,13 @@ if [ ! -e $CAPSULE ]; then
 fi
 
 boot_args=$(mktemp)
+boot_args2=$(mktemp)
 boot_path=$(mktemp)
 boot_desc=$(mktemp)
 printf "console=ttyAMA1 console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 earlycon=pl011,0x01800000 initrd=initramfs quiet" > \
 	"$boot_args"
+printf "console=ttyAMA1 console=hvc0 console=ttyAMA0 earlycon=pl011,0x13010000 initrd=initramfs quiet" > \
+	"$boot_args2"
 
 printf "VenHw(F019E406-8C9C-11E5-8797-001ACA00BFC4)/Image" > "$boot_path"
 printf "Linux from rshim" > "$boot_desc"
@@ -349,7 +352,8 @@ mkdir -p /workspace
 ex $mkbfb \
 	--image "$vmlinuz" --initramfs "$initramfs" \
 	--capsule "$CAPSULE" \
-	--boot-args "$boot_args" \
+	--boot-args-v0 "$boot_args" \
+	--boot-args-v2 "$boot_args2" \
 	--boot-path "$boot_path" \
 	--boot-desc "$boot_desc" \
 	${BFB} /workspace/${debian_BFB}

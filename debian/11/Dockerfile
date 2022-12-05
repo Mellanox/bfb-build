@@ -6,7 +6,6 @@ ADD install.sh .
 ADD create_bfb .
 ADD mlxbf-bootimages_3.9.3-12383_arm64.deb .
 ADD doca-repo.deb .
-ADD grubaa64.efi .
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV FLASH_KERNEL_SKIP=yes
@@ -53,17 +52,17 @@ RUN apt purge -y docker.io; \
         update-alternatives --set iptables /usr/sbin/iptables-legacy; \
         update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy;
 
-RUN wget -qO - https://linux.mellanox.com/public/repo/doca/1.5.0/debian11/aarch64/GPG-KEY-Mellanox.pub | apt-key add -
-RUN echo "deb [trusted=yes] https://linux.mellanox.com/public/repo/doca/1.5.0/debian11/\$(ARCH) ./" | tee /etc/apt/sources.list.d/doca.tmp.list
+RUN wget -qO - https://linux.mellanox.com/public/repo/doca/1.5.1/debian11/aarch64/GPG-KEY-Mellanox.pub | apt-key add -
+RUN echo "deb [trusted=yes] https://linux.mellanox.com/public/repo/doca/1.5.1/debian11/\$(ARCH) ./" | tee /etc/apt/sources.list.d/doca.tmp.list
 RUN apt update || true
 
 RUN dpkg -i /root/workspace/doca-repo.deb
 RUN apt update || true
 
 RUN apt install -y -f --allow-downgrades \
-		linux-image-5.10.151-bf.72.gc34d1b2=5.10.151-bf.72.gc34d1b2-1 \
-		linux-headers-5.10.151-bf.72.gc34d1b2=5.10.151-bf.72.gc34d1b2-1 \
-		linux-libc-dev=5.10.151-bf.72.gc34d1b2-1
+		linux-image-5.10.156-bf.76.g6d46ef5=5.10.156-bf.76.g6d46ef5-1 \
+		linux-headers-5.10.156-bf.76.g6d46ef5=5.10.156-bf.76.g6d46ef5-1 \
+		linux-libc-dev=5.10.156-bf.76.g6d46ef5-1
 RUN apt install -y -f doca-runtime-user || true
 RUN apt install -y -f doca-runtime-kernel || true
 RUN apt install -y -f doca-sdk-user || true
@@ -108,11 +107,8 @@ RUN /usr/sbin/update-pciids || true
 
 # Copy boot bits from rootfs to EFI partition
 RUN mkdir -p /boot/efi/EFI/debian/; \
-	rm -f /boot/efi/EFI/debian/grubaa64.efi; \
-	rm -f /usr/lib/grub/arm64-efi-signed/grubaa64.efi.signed; \
-	cp grubaa64.efi \
+	cp /usr/lib/grub/arm64-efi-signed/grubaa64.efi.signed \
 	/boot/efi/EFI/debian/grubaa64.efi; \
-	cp grubaa64.efi /usr/lib/grub/arm64-efi-signed/grubaa64.efi.signed; \
 	cp /usr/lib/grub/arm64-efi-signed/grubnetaa64.efi.signed \
 	/boot/efi/EFI/debian/grubnetaa64.efi; \
 	cp /usr/lib/shim/shimaa64.efi.signed \
@@ -125,9 +121,8 @@ RUN mkdir -p /boot/efi/EFI/debian/; \
 	/boot/efi/EFI/BOOT/BOOTAA64.EFI; \
 	cp /usr/lib/shim/mmaa64.efi \
 	   /usr/lib/shim/fbaa64.efi \
-	/boot/efi/EFI/BOOT/; \
-	chmod 700 /boot/efi/EFI/debian/grubaa64.efi
+	/boot/efi/EFI/BOOT/
 
 RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
 
-CMD ["/root/workspace/create_bfb", "-k", "5.10.151-bf.72.gc34d1b2"]
+CMD ["/root/workspace/create_bfb", "-k", "5.10.156-bf.76.g6d46ef5"]

@@ -1,4 +1,4 @@
-from rockylinux:8.6.20227707
+from --platform=linux/arm64 rockylinux:8.6.20227707
 ADD qemu-aarch64-static /usr/bin/
 
 WORKDIR /root/workspace
@@ -11,7 +11,7 @@ ENV RUN_FW_UPDATER=no
 RUN dnf install -y epel-release "dnf-command(config-manager)" && \
 	dnf config-manager --set-enabled powertools && \
 	dnf module enable -y ruby:3.0 && dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo && \
-	dnf install -y passwd dracut-network dracut-tools dracut-squash bc bison flex \
+	dnf install --enablerepo=baseos -y passwd dracut-network dracut-tools dracut-squash bc bison flex \
 				pesign rsync re2c patchutils git annobin intltool dwarves groff \
 				kernel-rpm-macros libtool rpm-build rpm-sign automake meson cmake \
 				gcc-c++ cryptsetup ltrace lsof jq unzip sysstat nvme-cli uuid \

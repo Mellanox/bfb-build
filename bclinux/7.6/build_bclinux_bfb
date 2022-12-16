@@ -98,5 +98,6 @@ ex rpm -ihv --force /root/workspace/mlxbf-bootimages-*.aarch64.rpm
 /usr/sbin/update-pciids || true
 
 sed -i -e "s/CentOS_7.6/BCLinux_7.6/" /etc/mlnx-release
+sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
 
 ex /root/workspace/create_bfb -k $kernel

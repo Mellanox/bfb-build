@@ -65,8 +65,10 @@ cp	Dockerfile \
 
 cd $WDIR
 
+sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/" build_bclinux_bfb
+
 docker build -t bfb_runtime_${DISTRO}${DISTRO_VERSION} -f Dockerfile .
- docker run -t --rm --privileged -e container=docker \
+docker run -t --rm --privileged -e container=docker \
 	-v $PWD:/workspace \
 	--name BlueField_OS_${DISTRO}_${DISTRO_VERSION} \
 	--mount type=bind,source=/dev,target=/dev \

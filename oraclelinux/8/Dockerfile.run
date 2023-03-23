@@ -1,0 +1,56 @@
+from --platform=linux/arm64 oraclelinux:8
+
+ADD qemu-aarch64-static /usr/bin/
+
+WORKDIR /root/workspace
+ADD install.sh .
+ADD create_bfb .
+ADD run_create_bfb .
+ADD bootimages bootimages/
+ADD uek uek/
+ADD SoC SoC/
+
+ENV RUN_FW_UPDATER=no
+ENV BUILDNUM=1
+
+# ol8 does not have lm_sensors-sensord
+RUN yum install -y \
+	grub2-tools grub2 grubby grub2-tools-minimal grub2-efi-aa64 grub2-efi-aa64-modules grub2-common grub2-tools-extra \
+	efibootmgr tcpdump nvme-cli rsync binutils sg3_utils libnl3 bison flex libmnl perl lsof \
+	libreswan yum-utils \
+	device-mapper-persistent-data lvm2 acpid perf popt-devel bc lm_sensors \
+	cryptsetup rasdaemon pciutils-devel watchdog kexec-tools jq python3-pip libnghttp2 wget \
+	annobin kernel-rpm-macros iproute-tc network-scripts usbutils nfs-utils python3-six chkconfig \
+	dosfstools e2fsprogs openssh-server
+
+RUN yum groupinstall -y "Development Tools"
+RUN echo -e '[ol8_developer_CODEREADY] \n\
+name=Oracle Linux $releasever CodeReady Packages for Development ($basearch) \n\
+baseurl=https://yum$ociregion.$ocidomain/repo/OracleLinux/OL8/codeready/builder/$basearch/ \n\
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-oracle \n\
+gpgcheck=1 \n\
+enabled=1' > /etc/yum.repos.d/oracle-codeready-ol8.repo
+
+RUN yum install -y vim sudo parted xfsprogs net-tools NetworkManager audit plymouth
+
+RUN yum install -y redhat-lsb-core
+
+# workaround for missing file and reinstall coreutils for missing pinky
+RUN touch /var/log/lastlog
+RUN yum reinstall -y coreutils
+RUN yum reinstall -y systemd
+
+RUN dnf install -y rdma-core rdma-core-devel libibverbs-utils.aarch64 mstflint
+
+RUN dnf install -y https://linux.mellanox.com/public/repo/doca/latest/centos8.2/aarch64/mft-4.22.1-11.arm64.rpm https://linux.mellanox.com/public/repo/doca/latest/centos8.2/aarch64/mft-oem-4.22.1-11.arm64.rpm
+
+RUN echo BlueField_OS_@BF_VERSION@_OL_@DISTRO_VERSION@-$BUILDNUM.@IMAGE_TYPE@ > /etc/mlnx-release
+
+RUN rpm -ihv uek/kernel-[0-9]*rpm uek/kernel-devel-[0-9]*rpm
+RUN rpm -Uhv uek/kernel-headers-[0-9]*rpm
+
+RUN mkdir -p /etc/ssh/sshd_config.d; echo "PermitRootLogin yes" > /etc/ssh/sshd_config.d/60-bf.conf
+
+RUN echo 'omit_drivers+=" mlx5_core mlx5_ib ib_umad "' > /etc/dracut.conf.d/mlnx.conf
+
+CMD [ "bash", "-c", "/root/workspace/run_create_bfb"]

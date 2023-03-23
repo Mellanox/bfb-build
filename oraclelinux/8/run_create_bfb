@@ -1,0 +1,25 @@
+#!/bin/bash -x
+
+rpm -ihv --nodeps /root/workspace/SoC/*.rpm
+
+for bootimage in /root/workspace/bootimages/*.rpm
+do
+	current_type=$(cat /etc/mlnx-release | awk -F '.' '{print $NF}')
+	echo "Current type: $current_type"
+
+	case "$bootimage" in
+	*devsigned*)
+		type=dev
+		;;
+	*signed*)
+		type=prod
+		;;
+	*)
+		type=unsigned
+		;;
+	esac
+
+	rpm -ihv --force $bootimage
+	sed -i -e "s/$current_type/$type/" /etc/mlnx-release
+	/root/workspace/create_bfb -k $(/bin/ls -1 /lib/modules/ | head -1)
+done

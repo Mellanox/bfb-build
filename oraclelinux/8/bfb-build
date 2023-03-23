@@ -1,0 +1,92 @@
+#!/bin/bash -ex
+
+cd ${0%*/*}
+
+# if [ ! -e Dockerfile ]; then
+# 	echo "ERROR: Dockerfile is missing."
+# 	exit 1
+# fi
+
+if ! (which wget > /dev/null 2>&1); then
+	echo "wget is required to build BFB"
+	exit 1
+fi
+
+if ! (which docker > /dev/null 2>&1); then
+	echo "docker is required to build BFB"
+	exit 1
+fi
+
+DISTRO="oraclelinux"
+DISTRO_VERSION="8"
+VERSION="4.0.1"
+DOCA_VERSION="2.0.0"
+IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
+
+WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
+
+mkdir -p $WDIR
+
+mkdir -p $WDIR/bootimages
+wget -P $WDIR/bootimages -r --no-verbose --no-directories -l1 --no-parent -A 'mlxbf-bootimages*.aarch64.rpm' https://linux.mellanox.com/public/repo/bluefield/${VERSION}/bootimages/${IMAGE_TYPE}/
+
+mkdir -p $WDIR/uek
+wget -P $WDIR/uek -r --no-verbose --no-directories -l1 --no-parent -A 'kernel*aarch64.rpm' https://linux.mellanox.com/public/repo/doca/${DOCA_VERSION}/OracleLinux/uek7/aarch64/
+
+cp	Dockerfile.* \
+	create_bfb \
+	install.sh \
+	build_ol_bfb \
+	run_create_bfb \
+	../../common/tools/qemu-aarch64-static \
+	$WDIR
+
+if [ -d uek ]; then
+	cp -a uek $WDIR
+fi
+
+build_rpms=${build_rpms:-1}
+
+cd $WDIR
+
+docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION} 2> /dev/null
+
+if [ $build_rpms -eq 1 ]; then
+	sed -e "s/@DISTRO_VERSION@/${DISTRO_VERSION}/g" \
+		-e "s/@IMAGE_TYPE@/${IMAGE_TYPE}/g" \
+		-e "s/@CUSTOM_VERSION@/$CUSTOM_VERSION/" \
+		-e "s/@BF_VERSION@/${VERSION}/g" \
+		Dockerfile.build > $WDIR/Dockerfile
+
+	docker build -t bfb_build_${DISTRO}${DISTRO_VERSION} -f Dockerfile .
+	docker run -t --rm --privileged -e container=docker \
+		-v $PWD:/workspace \
+		--name BlueField_OS_${DISTRO}_${DISTRO_VERSION} \
+		--mount type=bind,source=/dev,target=/dev \
+		--mount type=bind,source=/sys,target=/sys \
+		--mount type=bind,source=/proc,target=/proc \
+		bfb_build_${DISTRO}${DISTRO_VERSION}
+fi
+
+sed -e "s/@DISTRO_VERSION@/${DISTRO_VERSION}/g" \
+	-e "s/@IMAGE_TYPE@/${IMAGE_TYPE}/g" \
+	-e "s/@CUSTOM_VERSION@/$CUSTOM_VERSION/" \
+	-e "s/@BF_VERSION@/${VERSION}/g" \
+	Dockerfile.run > $WDIR/Dockerfile
+
+/bin/rm -f *debug*.rpm
+
+mkdir -p $WDIR/SoC
+mv *.rpm $WDIR/SoC
+
+docker build -t bfb_runtime_${DISTRO}${DISTRO_VERSION} -f Dockerfile .
+docker run -t --rm --privileged -e container=docker \
+	-v $PWD:/workspace \
+	--name BlueField_OS_${DISTRO}_${DISTRO_VERSION} \
+	--mount type=bind,source=/dev,target=/dev \
+	--mount type=bind,source=/sys,target=/sys \
+	--mount type=bind,source=/proc,target=/proc \
+	bfb_runtime_${DISTRO}${DISTRO_VERSION}
+readlink -f *.bfb
+
+echo "Default root password is: oracle"

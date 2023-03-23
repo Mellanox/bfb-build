@@ -1,0 +1,65 @@
+#!/bin/bash -x
+
+###############################################################################
+#
+# Copyright 2023 NVIDIA Corporation
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+###############################################################################
+
+WDIR=${WDIR:-/workspace/rpmbuild}
+
+# Execute command w/ echo and exit if it fail
+ex()
+{
+	echo "$@"
+	if ! "$@"; then
+		printf "\nFailed executing $@\n\n"
+		exit 1
+	fi
+}
+
+build_rpm()
+{
+	name=$1
+	git_url=$2
+	git_branch=$3
+	shift 3
+
+	ex git clone -b $git_branch $git_url $name
+	package_version=$(rpm -q --qf "[%{VERSION}\n]" --specfile ${name}/${name}.spec | head -1)
+	ex /bin/rm -rf ${name}/.git*
+	ex mv ${name} ${name}-${package_version}
+	ex tar czf ${WDIR}/SOURCES/${name}-${package_version}.tar.gz ${name}-${package_version}
+	rpmbuild -ta --nodeps --define "_topdir $WDIR" ${WDIR}/SOURCES/${name}-${package_version}.tar.gz || exit 1
+	ex rpm -ihv "$WDIR/RPMS/*/${name}-${package_version}*.rpm"
+	ex /bin/rm -rf ${WDIR}/${name}-${package_version}
+}
+
+/bin/rm -rf $WDIR
+mkdir -p $WDIR/{SPECS,RPMS,BUILD,SOURCES}
+cd $WDIR
+
+build_rpm "mlxbf-bootctl" "https://github.com/Mellanox/mlxbf-bootctl" "master"
+build_rpm "mlxbf-bfscripts" "https://github.com/Mellanox/bfscripts" "master"
+build_rpm "mlnx-tools" "https://github.com/Mellanox/mlnx-tools" "master"
+build_rpm "bf-release" "https://github.com/Mellanox/bf-release" "master"
+
+find $WDIR/RPMS -type f -exec cp '{}' /workspace \;
+/bin/rm -rf $WDIR/RPMS/*

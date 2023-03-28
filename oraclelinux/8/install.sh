@@ -411,7 +411,7 @@ bfbootmgr --cleanall > /dev/null 2>&1
 mount -t efivarfs none /sys/firmware/efi/efivars
 /bin/rm -f /sys/firmware/efi/efivars/Boot* > /dev/null 2>&1
 /bin/rm -f /sys/firmware/efi/efivars/dump-* > /dev/null 2>&1
-efibootmgr -c -d "$device" -p 1 -l "\EFI\redhat\grubaa64.efi" -L $distro
+efibootmgr -c -d "$device" -p 1 -l "\EFI\redhat\shimaa64.efi" -L $distro
 umount /sys/firmware/efi/efivars
 
 BFCFG=`which bfcfg 2> /dev/null`

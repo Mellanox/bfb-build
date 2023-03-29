@@ -49,7 +49,7 @@ build_rpms=${build_rpms:-1}
 
 cd $WDIR
 
-docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION} 2> /dev/null
+docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION} 2> /dev/null || true
 
 if [ $build_rpms -eq 1 ]; then
 	sed -e "s/@DISTRO_VERSION@/${DISTRO_VERSION}/g" \

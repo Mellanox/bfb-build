@@ -39,7 +39,7 @@ cd $WDIR
 
 docker_image=bfb_runtime_${DISTRO,,}${DISTRO_VERSION,,}
 
-docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION} 2> /dev/null
+docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION} 2> /dev/null || true
 
 sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/" Dockerfile
 

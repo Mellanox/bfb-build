@@ -13,14 +13,21 @@ ADD SoC SoC/
 ENV RUN_FW_UPDATER=no
 ENV BUILDNUM=1
 
+RUN echo -e '[ol8_bootloader] \n\
+name=Oracle Linux $releasever Bootloader Packages ($basearch) \n\
+baseurl=https://linux.mellanox.com/public/repo/doca/2.0.0/OracleLinux/bootloader \n\
+gpgcheck=0 \n\
+enabled=1' > /etc/yum.repos.d/oracle-bootloader-ol8.repo
+
 # ol8 does not have lm_sensors-sensord
 RUN yum install -y \
-	grub2-tools grub2 grubby grub2-tools-minimal grub2-efi-aa64 grub2-efi-aa64-modules grub2-common grub2-tools-extra \
-	efibootmgr tcpdump nvme-cli rsync binutils sg3_utils libnl3 bison flex libmnl perl lsof \
-	libreswan yum-utils \
-	device-mapper-persistent-data lvm2 acpid perf popt-devel bc lm_sensors \
-	cryptsetup rasdaemon pciutils-devel watchdog kexec-tools jq python3-pip libnghttp2 wget \
-	annobin kernel-rpm-macros iproute-tc network-scripts usbutils nfs-utils python3-six chkconfig \
+	grub2-tools grubby grub2-tools-minimal grub2-efi-aa64 \
+	grub2-efi-aa64-modules grub2-common grub2-tools-extra shim-aa64 \
+	efibootmgr tcpdump nvme-cli rsync binutils sg3_utils libnl3 libmnl perl \
+	lsof libreswan yum-utils device-mapper-persistent-data lvm2 acpid perf \
+	popt-devel bc lm_sensors cryptsetup rasdaemon pciutils-devel watchdog \
+	kexec-tools jq python3-pip libnghttp2 wget annobin kernel-rpm-macros \
+	iproute-tc network-scripts usbutils nfs-utils python3-six chkconfig \
 	dosfstools e2fsprogs openssh-server
 
 RUN yum groupinstall -y "Development Tools"

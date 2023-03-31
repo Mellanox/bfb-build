@@ -27,14 +27,71 @@ CHROOT_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 rshimlog=`which bfrshlog 2> /dev/null`
 distro="Ubuntu"
+NIC_FW_UPDATE_DONE=0
+NIC_FW_RESET_REQUIRED=0
+
+fspath=$(readlink -f `dirname $0`)
 
 log()
 {
-	echo "$*"
+	msg="[$(date +%H:%M:%S)] $*"
+	echo "$msg" > /dev/ttyAMA0
+	echo "$msg" > /dev/hvc0
 	if [ -n "$rshimlog" ]; then
 		$rshimlog "$*"
 	fi
 }
+
+fw_update()
+{
+	FW_UPDATER=/opt/mellanox/mlnx-fw-updater/mlnx_fw_updater.pl
+	FW_DIR=/opt/mellanox/mlnx-fw-updater/firmware/
+
+	if [[ -x /mnt/${FW_UPDATER} && -d /mnt/${FW_DIR} ]]; then
+		log "INFO: Updating NIC firmware..."
+		chroot /mnt ${FW_UPDATER} \
+			--force-fw-update \
+			--fw-dir ${FW_DIR}
+		if [ $? -eq 0 ]; then
+			log "INFO: NIC firmware update done"
+		else
+			log "INFO: NIC firmware update failed"
+		fi
+	else
+		log "WARNING: NIC Firmware files were not found"
+	fi
+}
+
+fw_reset()
+{
+	mst start > /dev/null 2>&1 || true
+	chroot /mnt /sbin/mlnx_bf_configure > /dev/null 2>&1
+
+	MLXFWRESET_TIMEOUT=${MLXFWRESET_TIMEOUT:-180}
+	SECONDS=0
+	while ! (chroot /mnt mlxfwreset -d /dev/mst/mt*_pciconf0 q 2>&1 | grep -w "Driver is the owner" | grep -qw "\-Supported")
+	do
+		if [ $SECONDS -gt $MLXFWRESET_TIMEOUT ]; then
+			log "INFO: NIC Firmware reset is not supported. Host power cycle is required"
+			return
+		fi
+		sleep 1
+	done
+
+	msg=`chroot /mnt mlxfwreset -d /dev/mst/mt*_pciconf0 -y -l 3 --sync 1 r 2>&1`
+	if [ $? -ne 0 ]; then
+		log "INFO: NIC Firmware reset failed"
+		log "INFO: $msg"
+	else
+		log "INFO: NIC Firmware reset done"
+	fi
+}
+
+#
+# Set the Hardware Clock from the System Clock
+#
+
+hwclock -w
 
 #
 # Check auto configuration passed from boot-fifo
@@ -86,17 +143,31 @@ function_exists()
 }
 
 DHCP_CLASS_ID=${PXE_DHCP_CLASS_ID:-""}
+DHCP_CLASS_ID_OOB=${DHCP_CLASS_ID_OOB:-"NVIDIA/BF/OOB"}
+DHCP_CLASS_ID_DP=${DHCP_CLASS_ID_DP:-"NVIDIA/BF/DP"}
+FACTORY_DEFAULT_DHCP_BEHAVIOR=${FACTORY_DEFAULT_DHCP_BEHAVIOR:-"true"}
+
+if [ "${FACTORY_DEFAULT_DHCP_BEHAVIOR}" == "true" ]; then
+	# Set factory defaults
+	DHCP_CLASS_ID="NVIDIA/BF/PXE"
+	DHCP_CLASS_ID_OOB="NVIDIA/BF/OOB"
+	DHCP_CLASS_ID_DP="NVIDIA/BF/DP"
+fi
 
 log "INFO: $distro installation started"
 
-device=/dev/mmcblk0
+default_device=/dev/mmcblk0
+# if [ -b /dev/nvme0n1 ]; then
+# 	default_device=/dev/nvme0n1
+# fi
+device=${device:-"$default_device"}
 
 echo 0 > /proc/sys/kernel/hung_task_timeout_secs
 
 # We cannot use wait-for-root as it expects the device to contain a
 # known filesystem, which might not be the case here.
 while [ ! -b $device ]; do
-    log "Waiting for %s to be ready\n" "$device"
+    log "Waiting for $device to be ready\n"
     sleep 1
 done
 
@@ -238,8 +309,28 @@ fi
 sync
 
 # Refresh partition table
+sleep 1
 blockdev --rereadpt ${device} > /dev/null 2>&1
 fi # manufacturing mode
+
+bind_partitions()
+{
+	mount --bind /proc /mnt/proc
+	mount --bind /dev /mnt/dev
+	mount --bind /sys /mnt/sys
+	mount -t efivarfs none /mnt/sys/firmware/efi/efivars
+}
+
+unmount_partitions()
+{
+	umount /mnt/sys/fs/fuse/connections > /dev/null 2>&1 || true
+	umount /mnt/sys/firmware/efi/efivars 2>&1 || true
+	umount /mnt/sys > /dev/null 2>&1
+	umount /mnt/dev > /dev/null 2>&1
+	umount /mnt/proc > /dev/null 2>&1
+	umount /mnt/boot/efi > /dev/null 2>&1
+	umount /mnt > /dev/null 2>&1
+}
 
 install_os_image()
 {
@@ -258,10 +349,11 @@ install_os_image()
 	COMMON_PARTITION=${device}p5
 
 	# Generate some entropy
-	mke2fs -O 64bit $ROOT_PARTITION > /dev/null 2>&1
-	mkfs.fat $BOOT_PARTITION -n "system-boot$OS_IMAGE" > /dev/null 2>&1
-	mkfs.ext4 -F $ROOT_PARTITION -L "writable$OS_IMAGE" > /dev/null 2>&1
+	mke2fs -O 64bit -O extents -F $ROOT_PARTITION > /dev/null 2>&1
+	mkfs.fat -F32 -n "EFI$OS_IMAGE" $BOOT_PARTITION > /dev/null 2>&1
+	mkfs.ext4 -F $ROOT_PARTITION -L "OS$OS_IMAGE" > /dev/null 2>&1
 	sync
+	sleep 1
 	blockdev --rereadpt ${device} > /dev/null 2>&1
 
 	mkdir -p /mnt
@@ -271,10 +363,10 @@ install_os_image()
 
 	echo "Extracting /..."
 	export EXTRACT_UNSAFE_SYMLINKS=1
-	tar Jxf /ubuntu/image.tar.xz --warning=no-timestamp -C /mnt
+	tar Jxf $fspath/image.tar.xz --warning=no-timestamp -C /mnt
 	sync
 
-	UBUNTU_CODENAME=`grep UBUNTU_CODENAME /mnt/etc/os-release | cut -d '=' -f 2`
+	UBUNTU_CODENAME=`grep ^ID= /mnt/etc/os-release | cut -d '=' -f 2`
 
 	cat > /mnt/etc/fstab << EOF
 `lsblk -o UUID -P $ROOT_PARTITION` / auto defaults 0 1
@@ -300,21 +392,25 @@ EOF
 		sed -i -r -e "s/(net.netfilter.nf_conntrack_max).*/\1 = 500000/" /mnt/usr/lib/sysctl.d/90-bluefield.conf
 	fi
 
-	if [ -n "${grub_admin_PASSWORD}" ]; then
-		sed -i -r -e "s/(password_pbkdf2 admin).*/\1 ${grub_admin_PASSWORD}/" /mnt/etc/grub.d/40_custom
-	fi
-
-	mount --bind /proc /mnt/proc
-	mount --bind /dev /mnt/dev
-	mount --bind /sys /mnt/sys
-	chroot /mnt env PATH=$CHROOT_PATH /usr/sbin/grub-install ${device} > /dev/null 2>&1
-	chroot /mnt env PATH=$CHROOT_PATH /usr/sbin/grub-mkconfig -o /boot/grub/grub.cfg > /dev/null 2>&1
-	chroot /mnt env PATH=$CHROOT_PATH /usr/sbin/grub-set-default 0
+	bind_partitions
 
 	vmlinuz=`cd /mnt/boot; /bin/ls -1 vmlinuz-* | tail -1`
 	initrd=`cd /mnt/boot; /bin/ls -1 initrd.img-* | tail -1 | sed -e "s/.old-dkms//"`
 	ln -snf $vmlinuz /mnt/boot/vmlinuz
 	ln -snf $initrd /mnt/boot/initrd.img
+
+	kver=$(/bin/ls -1 /mnt/lib/modules/ | tail -1)
+	cat >> /mnt/etc/initramfs-tools/modules << EOF
+dw_mmc-bluefield
+dw_mmc
+dw_mmc-pltfm
+sdhci-of-dwcmshc
+sdhci_pltfm
+sdhci
+mlxbf-tmfifo
+EOF
+
+	chroot /mnt update-initramfs -k ${kver} -u
 
 	cat > /mnt/etc/resolv.conf << EOF
 nameserver 127.0.0.53
@@ -334,9 +430,11 @@ ff02::2 ip6-allrouters
 ff02::3 ip6-allhosts
 EOF
 
-	cat > /mnt/etc/hostname << EOF
-localhost.localdomain
-EOF
+	# Remove /etc/hostname to get hostname from DHCP server
+	/bin/rm -f /mnt/etc/hostname
+
+	/bin/rm -f /mnt/var/lib/dbus/machine-id /etc/machine-id
+	touch /mnt/var/lib/dbus/machine-id /mnt/etc/machine-id
 
 	perl -ni -e 'print unless /PasswordAuthentication no/' /mnt/etc/ssh/sshd_config
 	echo "PasswordAuthentication yes" >> /mnt/etc/ssh/sshd_config
@@ -374,28 +472,15 @@ EOF
 	# Update HW-dependant files
 	if (lspci -n -d 15b3: | grep -wq 'a2d2'); then
 		# BlueField-1
-		if [ ! -n "$DHCP_CLASS_ID" ]; then
-			DHCP_CLASS_ID="BF1Client"
-		fi
 		ln -snf snap_rpc_init_bf1.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
 		# OOB interface does not exist on BlueField-1
 		sed -i -e '/oob_net0/,+1d' /mnt/var/lib/cloud/seed/nocloud-net/network-config
 	elif (lspci -n -d 15b3: | grep -wq 'a2d6'); then
 		# BlueField-2
-		if [ ! -n "$DHCP_CLASS_ID" ]; then
-			DHCP_CLASS_ID="BF2Client"
-		fi
 		ln -snf snap_rpc_init_bf2.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
 	elif (lspci -n -d 15b3: | grep -wq 'a2dc'); then
 		# BlueField-3
-		if [ ! -n "$DHCP_CLASS_ID" ]; then
-			DHCP_CLASS_ID="BF3Client"
-		fi
-		if [ -e /mnt/etc/mlnx_snap/snap_rpc_init_bf3.conf ]; then
-			ln -snf snap_rpc_init_bf3.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
-		else
-			ln -snf snap_rpc_init_bf2.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
-		fi
+		chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge mlnx-snap || true
 	fi
 
 	pciid=`echo $pciids | awk '{print $1}' | head -1`
@@ -462,8 +547,39 @@ EOF
 
 	mkdir -p /mnt/etc/dhcp
 	cat >> /mnt/etc/dhcp/dhclient.conf << EOF
-send vendor-class-identifier "$DHCP_CLASS_ID";
+send vendor-class-identifier "$DHCP_CLASS_ID_DP";
+interface "oob_net0" {
+  send vendor-class-identifier "$DHCP_CLASS_ID_OOB";
+}
 EOF
+
+	if [ "$WITH_NIC_FW_UPDATE" == "yes" ]; then
+		if [ $NIC_FW_UPDATE_DONE -eq 0 ]; then
+			fw_update
+			NIC_FW_UPDATE_DONE=1
+		fi
+	fi
+
+	if [ "X$ENABLE_SFC_HBN" == "Xyes" ]; then
+		NUM_SFs_ECPF0=${NUM_SFs_ECPF0:-18}
+		NUM_SFs_ECPF1=${NUM_SFs_ECPF1:-2}
+		log "INFO: Installing SFC HBN environment"
+		chroot /mnt /opt/mellanox/sfc-hbn/install.sh --ecpf0 $NUM_SFs_ECPF0 --ecpf1 $NUM_SFs_ECPF1
+		NIC_FW_RESET_REQUIRED=1
+	fi
+
+	if [ -n "${grub_admin_PASSWORD}" ]; then
+		sed -i -r -e "s/(password_pbkdf2 admin).*/\1 ${grub_admin_PASSWORD}/" /mnt/etc/grub.d/40_custom
+	fi
+
+	if (hexdump -C /sys/firmware/acpi/tables/SSDT* | grep -q MLNXBF33); then
+		# BlueField-3
+		sed -i -e "s/0x01000000/0x13010000/g" /mnt/etc/default/grub
+	fi
+
+	chroot /mnt env PATH=$CHROOT_PATH /usr/sbin/grub-install ${device} > /dev/null 2>&1
+	chroot /mnt env PATH=$CHROOT_PATH /usr/sbin/grub-mkconfig -o /boot/grub/grub.cfg > /dev/null 2>&1
+	chroot /mnt env PATH=$CHROOT_PATH /usr/sbin/grub-set-default 0
 
 	if function_exists bfb_modify_os; then
 		log "INFO: Running bfb_modify_os from bf.cfg"
@@ -472,13 +588,18 @@ EOF
 
 	sync
 
-	umount /mnt/sys/fs/fuse/connections > /dev/null 2>&1 || true
-	umount /mnt/sys > /dev/null 2>&1
-	umount /mnt/dev > /dev/null 2>&1
-	umount /mnt/proc > /dev/null 2>&1
-	umount /mnt/boot/efi > /dev/null 2>&1
-	umount /mnt > /dev/null 2>&1
+	unmount_partitions
 }
+
+mounted_efivarfs=0
+if [ ! -d /sys/firmware/efi/efivars ]; then
+	mount -t efivarfs none /sys/firmware/efi/efivars
+fi
+mounted_efivarfs=1
+
+bfbootmgr --cleanall > /dev/null 2>&1
+/bin/rm -f /sys/firmware/efi/efivars/Boot* > /dev/null 2>&1
+/bin/rm -f /sys/firmware/efi/efivars/dump-* > /dev/null 2>&1
 
 if function_exists bfb_pre_install; then
 	log "INFO: Running bfb_pre_install from bf.cfg"
@@ -505,30 +626,21 @@ else
 	fi
 fi
 
+sleep 1
 blockdev --rereadpt ${device} > /dev/null 2>&1
 
 sync
 
 bfrec --bootctl --policy dual 2> /dev/null || true
-# if [ -e /lib/firmware/mellanox/boot/capsule/boot_update2.cap ]; then
-# 	bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap --policy dual
-# fi
-
-if [ “X$ENROLL_KEYS” = “Xyes” ]; then
-	bfrec --capsule /lib/firmware/mellanox/boot/capsule/EnrollKeysCap
+if [ -e /lib/firmware/mellanox/boot/capsule/boot_update2.cap ]; then
+	bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap --policy dual
 fi
 
-bfbootmgr --cleanall > /dev/null 2>&1
+if [ -e /lib/firmware/mellanox/boot/capsule/efi_sbkeyssync.cap ]; then
+	bfrec --capsule /lib/firmware/mellanox/boot/capsule/efi_sbkeyssync.cap
+fi
 
 # Make it the boot partition
-mounted_efivarfs=0
-if [ ! -d /sys/firmware/efi/efivars ]; then
-	mount -t efivarfs none /sys/firmware/efi/efivars
-	mounted_efivarfs=1
-fi
-
-/bin/rm -f /sys/firmware/efi/efivars/Boot* > /dev/null 2>&1
-
 if efibootmgr | grep ${UBUNTU_CODENAME}; then
 	efibootmgr -b "$(efibootmgr | grep ${UBUNTU_CODENAME} | cut -c 5-8)" -B > /dev/null 2>&1
 fi
@@ -557,7 +669,7 @@ EOF
 	# Restore the original bf.cfg
 	/bin/rm -f /etc/bf.cfg
 	if [ -e /etc/bf.cfg.orig ]; then
-		mv /etc/bf.cfg.orig /etc/bf.cfg
+		grep -v PXE_DHCP_CLASS_ID= /etc/bf.cfg.orig > /etc/bf.cfg
 	fi
 fi
 
@@ -587,6 +699,28 @@ if function_exists bfb_post_install; then
 fi
 
 log "INFO: Installation finished"
+
+if [ "$WITH_NIC_FW_UPDATE" == "yes" ]; then
+	if [ $NIC_FW_UPDATE_DONE -eq 1 ]; then
+		NIC_FW_RESET_REQUIRED=1
+	fi
+fi
+
+if [ $NIC_FW_RESET_REQUIRED -eq 1 ]; then
+	log "INFO: Running NIC Firmware reset"
+	if [ "X$mode" == "Xmanufacturing" ]; then
+		log "INFO: Rebooting..."
+	fi
+	# Wait for these messages to be pulled by the rshim service
+	# as mlxfwreset will restart the DPU
+	sleep 3
+	# Reset NIC FW
+	mount -t ext4 ${device}p2 /mnt
+	bind_partitions
+	fw_reset
+	unmount_partitions
+fi
+
 if [ "X$mode" == "Xmanufacturing" ]; then
 	sleep 3
 	log "INFO: Rebooting..."

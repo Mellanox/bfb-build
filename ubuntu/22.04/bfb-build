@@ -42,15 +42,17 @@ fi
 DISTRO="ubuntu"
 DISTRO_VERSION="22.04"
 DISTRO_BASE_URL="https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-arm64-root.tar.xz"
-VERSION="4.0.0-alpha"
+VERSION="4.0.1"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-""}
 
 WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
 
 mkdir -p $WDIR
-wget --no-verbose -O $WDIR/mlxbf-bootimages.deb https://linux.mellanox.com/public/repo/doca/tmp/ubuntu22.04/aarch64/mlxbf-bootimages_4.0.bu1-12263_arm64.deb
-wget --no-verbose -O $WDIR/doca-repo.deb https://linux.mellanox.com/public/repo/doca/tmp/ubuntu22.04/aarch64/doca-repo-aarch64-ubuntu2204-local_1.4.0078-1.5.7.0.3.2.0.bf.4.0.bu1.12263_arm64.deb
+wget -q -P $WDIR -r --no-verbose --no-directories -l1 --no-parent -A 'doca-dpu-repo*arm64.deb' https://linux.mellanox.com/public/repo/doca/2.0.0/ubuntu22.04/arm64/
+mv $WDIR/doca-dpu-repo*arm64.deb $WDIR/doca-repo.deb
+wget -q -P $WDIR -r --no-verbose --no-directories -l1 --no-parent -A 'mlxbf-bootimages*arm64.deb' https://linux.mellanox.com/public/repo/bluefield/${VERSION}/bootimages/${IMAGE_TYPE}/
+mv $WDIR/mlxbf-bootimages*arm64.deb $WDIR/mlxbf-bootimages.deb
 
 cp	Dockerfile \
 	create_bfb \
@@ -60,7 +62,7 @@ cp	Dockerfile \
 
 cd $WDIR
 
-wget --no-check-certificate $DISTRO_BASE_URL
+wget -q --no-check-certificate $DISTRO_BASE_URL
 
 sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/" Dockerfile
 

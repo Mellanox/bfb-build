@@ -267,7 +267,7 @@ if [ -n "$kdir" ]; then
     kver=${kdir##*/}
     DRACUT_CMD=`chroot /mnt /bin/ls -1 /sbin/dracut /usr/bin/dracut 2> /dev/null | head -1`
     chroot /mnt grub2-set-default 0
-    chroot /mnt $DRACUT_CMD --kver ${kver} --force --add-drivers "mlxbf_tmfifo" /boot/initramfs-${kver}.img > /dev/null 2>&1
+    chroot /mnt $DRACUT_CMD --kver ${kver} --force --add-drivers "mlxbf_tmfifo mtd_blkdevs dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block virtio_console sdhci dw_mmc-pltfm sdhci-of-dwcmshc xfs vfat" /boot/initramfs-${kver}.img > /dev/null 2>&1
 else
     kver=$(/bin/ls -1 /mnt/lib/modules/ | head -1)
 fi

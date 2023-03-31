@@ -31,7 +31,11 @@ mkdir -p $WDIR/bootimages
 wget -P $WDIR/bootimages -r --no-verbose --no-directories -l1 --no-parent -A 'mlxbf-bootimages*.aarch64.rpm' https://linux.mellanox.com/public/repo/bluefield/${VERSION}/bootimages/${IMAGE_TYPE}/
 
 mkdir -p $WDIR/uek
-wget -P $WDIR/uek -r --no-verbose --no-directories -l1 --no-parent -A 'kernel*aarch64.rpm' https://linux.mellanox.com/public/repo/doca/${DOCA_VERSION}/OracleLinux/uek7/aarch64/
+if [ -d uek ]; then
+	cp -a uek $WDIR
+else
+	wget -P $WDIR/uek -r --no-verbose --no-directories -l1 --no-parent -A 'kernel*aarch64.rpm' https://linux.mellanox.com/public/repo/doca/${DOCA_VERSION}/OracleLinux/uek7/aarch64/
+fi
 
 cp	Dockerfile.* \
 	create_bfb \

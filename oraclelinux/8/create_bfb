@@ -136,20 +136,22 @@ if ! ( rpm -q dracut-tools > /dev/null 2>&1 ); then
 	yum install -y dracut-tools
 fi
 
-mmc_drivers=""
-for mmc_driver in dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block sdhci dw_mmc-pltfm sdhci-of-dwcmshc
+kmods=""
+for kmod in dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block virtio_console sdhci dw_mmc-pltfm sdhci-of-dwcmshc xfs vfat
 do
-    if (modinfo -k $kernel $mmc_driver 2>/dev/null | grep "filename:" | grep -q builtin); then
+    if (modinfo -k $kernel $kmod 2>/dev/null | grep "filename:" | grep -q builtin); then
         continue
     fi
 
-    mod=`find ./lib/modules/$kernel -name "${mmc_driver}.ko*" 2> /dev/null || true`
+    mod=`find /lib/modules/$kernel -name "${kmod}.ko*" 2> /dev/null || true`
     if [ -n "$mod" ]; then
-        mmc_drivers="$mmc_drivers $mmc_driver"
+        kmods="$kmods $kmod"
     fi
 done
 
-ex dracut --no-hostonly -m "bash network base shutdown" --force-drivers "$bootctl_module $mmc_drivers mlxbf-tmfifo mlx5_core mlx5_ib ib_umad nvme nvme-tcp nvme-rdma nvme-fc nvme-fabrics nvme-core" --gzip $initramfs ${kernel}
+# kmods="dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block virtio_console sdhci dw_mmc-pltfm sdhci-of-dwcmshc xfs vfat"
+
+ex dracut --no-hostonly -m "bash network base shutdown" --force-drivers "$bootctl_module $kmods mlxbf-tmfifo mlx5_core mlx5_ib ib_umad nvme nvme-tcp nvme-rdma nvme-fc nvme-fabrics nvme-core" --gzip $initramfs ${kernel}
 
 rm -f /etc/udev/rules.d/91-tmfifo_net.rules /etc/udev/rules.d/92-oob_net.rules
 
@@ -321,9 +323,9 @@ echo "=================================" | tee /dev/kmsg
 /sbin/modprobe mlxbf-bootctl 2>&1 | tee /dev/kmsg
 /sbin/modprobe ib_uverbs 2>&1 | tee /dev/kmsg
 /sbin/modprobe mlx5_ib 2>&1 | tee /dev/kmsg
-for mmc_driver in $mmc_drivers
+for kmod in $kmods
 do
-	/sbin/modprobe \$mmc_driver 2>&1 | tee /dev/kmsg
+	/sbin/modprobe \$kmod 2>&1 | tee /dev/kmsg
 done
 
 sleep 5

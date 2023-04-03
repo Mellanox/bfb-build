@@ -41,7 +41,7 @@ docker_image=bfb_runtime_${DISTRO,,}${DISTRO_VERSION,,}
 
 docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION} 2> /dev/null || true
 
-sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/" Dockerfile
+sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/g;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/g" Dockerfile
 
 docker build -t ${docker_image} -f Dockerfile .
 docker run -t --rm --privileged -e container=docker \

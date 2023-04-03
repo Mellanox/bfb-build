@@ -4,7 +4,7 @@ ADD qemu-aarch64-static /usr/bin/
 WORKDIR /root/workspace
 ADD install.sh .
 ADD create_bfb .
-ADD bootimages/ .
+ADD bootimages bootimages/
 
 ENV RUN_FW_UPDATER=no
 
@@ -49,6 +49,6 @@ RUN dnf install --nogpgcheck -y mstflint
 RUN /usr/sbin/update-pciids || true
 RUN rpm -ihv --force bootimages/mlxbf-bootimages-*.aarch64.rpm || true
 
-RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
+RUN sed -i -e 's/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/' -e 's/prod/@IMAGE_TYPE@@CUSTOM_VERSION@/' /etc/mlnx-release
 
 CMD ["/root/workspace/create_bfb", "-k", "4.19.90-2109.1.0.0108.oe1.aarch64"]

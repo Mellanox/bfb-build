@@ -1,0 +1,64 @@
+#!/bin/bash -ex
+
+cd ${0%*/*}
+
+if [ ! -e Dockerfile ]; then
+	echo "ERROR: Dockerfile is missing."
+	exit 1
+fi
+
+if ! (which wget > /dev/null 2>&1); then
+	echo "wget is required to build BFB"
+	exit 1
+fi
+
+if ! (which docker > /dev/null 2>&1); then
+	echo "docker is required to build BFB"
+	exit 1
+fi
+
+DISTRO="ctyunos"
+DISTRO_VERSION="2.0"
+DOCA_VERSION="1.5.1010"
+MLNX_OFED_VERSION=5.8-2.0.6.0
+BF_RELEASE="3.9.5-12666"
+CTYUNOS_VERSION="2.0.1"
+IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
+
+WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
+
+mkdir -p $WDIR
+
+mkdir -p $WDIR/bootimages
+wget -P $WDIR/bootimages -r --no-verbose --no-directories -l1 --no-parent -A 'mlxbf-bootimages*.aarch64.rpm' https://linux.mellanox.com/public/repo/bluefield/${BF_RELEASE}/bootimages/${IMAGE_TYPE}/
+
+cp	Dockerfile \
+	create_bfb \
+	install.sh \
+	../../common/tools/qemu-aarch64-static \
+	build_ctyunos_bfb \
+        $WDIR
+
+cd $WDIR
+
+docker_image=bfb_runtime_${DISTRO,,}${DISTRO_VERSION,,}
+
+docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION} 2> /dev/null || true
+
+sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/g;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/g" \
+	-e "s/@DOCA_VERSION@/$DOCA_VERSION/g" \
+	-e "s/@MLNX_OFED_VERSION@/$MLNX_OFED_VERSION/g" \
+	-e "s/@BF_RELEASE@/$BF_RELEASE/g" \
+	-e "s/@CTYUNOS_VERSION@/$CTYUNOS_VERSION/g" build_ctyunos_bfb
+
+docker build -t ${docker_image} -f Dockerfile .
+docker run -t --rm --privileged -e container=docker \
+	-v $PWD:/workspace \
+	--name BlueField_OS_${DISTRO}_${DISTRO_VERSION} \
+	--mount type=bind,source=/dev,target=/dev \
+	--mount type=bind,source=/sys,target=/sys \
+	${docker_image}
+
+readlink -f *.bfb
+
+echo "Default root password is: ctyunos"

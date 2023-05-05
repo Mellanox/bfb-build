@@ -1,4 +1,4 @@
-#  docker build -t bfb_runtime_ubuntu20.04 -f Dockerfile .
+#  docker build -t bfb_runtime_ubuntu22.04 -f Dockerfile .
 FROM scratch
 Add jammy-server-cloudimg-arm64-root.tar.xz /
 Add doca-repo.deb /tmp/
@@ -7,6 +7,7 @@ ADD qemu-aarch64-static /usr/bin/
 WORKDIR /root/workspace
 ADD install.sh .
 ADD create_bfb .
+ADD build_ubuntu_bfb .
 ADD mlxbf-bootimages.deb .
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -38,7 +39,7 @@ RUN echo 'set superusers="admin"' >> /etc/grub.d/40_custom; \
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python2.7 10
 
-RUN wget -qO - https://linux.mellanox.com/public/repo/doca/2.0.0/ubuntu22.04/aarch64/GPG-KEY-Mellanox.pub | sudo apt-key add -
+RUN wget -qO - @NV_BASE_URL@/doca/@DOCA_VERSION@/ubuntu22.04/aarch64/GPG-KEY-Mellanox.pub | sudo apt-key add -
 RUN wget -qO - https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key --keyring /usr/share/keyrings/kubernetes-archive-keyring.gpg add -
 RUN echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | tee /etc/apt/sources.list.d/kubernetes.list
 RUN apt update
@@ -51,13 +52,12 @@ RUN apt install -y kubelet=1.25.3-00 runc containerd cri-tools=1.25.0-00 kuberne
 RUN apt-mark hold kubelet cri-tools kubernetes-cni
 RUN dpkg -i /var/doca-dpu-repo-ubuntu2204-local/*mstflint*.deb || true
 RUN apt-mark hold mstflint
+RUN apt remove -y --purge $(dpkg --list "*openipmi*" | grep openipmi | awk '{print $2}') || true
+RUN dpkg -i /var/doca-dpu-repo-ubuntu2204-local/mlx-*openipmi*.deb || true
 RUN apt install -y -f doca-runtime doca-tools doca-sdk || true
-RUN apt remove -y --purge openipmi libopenipmi0 || true
-RUN apt install -y libgdbm-dev; dpkg -i /var/doca-dpu-repo-ubuntu2204-local/mlx-*openipmi*.deb || true
-RUN dpkg -i --force-all /var/doca-dpu-repo-ubuntu2204-local/mlnx-ofed-kernel-utils*arm64.deb || true
-RUN dpkg -i --force-all /var/doca-dpu-repo-ubuntu2204-local/mlnx-snap_*arm64.deb || true
-RUN dpkg -i /var/doca-dpu-repo-ubuntu2204-local/bf-release_*arm64.deb || true
 RUN apt --fix-broken install -y || true
+RUN dpkg -i /var/doca-dpu-repo-ubuntu2204-local/mlnx-snap_*arm64.deb || true
+RUN dpkg -i /var/doca-dpu-repo-ubuntu2204-local/bf-release_*arm64.deb || true
 RUN apt remove --purge -y doca-dpu-repo-ubuntu2204-local || true
 RUN apt update || true
 RUN /usr/sbin/dpkg-reconfigure bf-release || true
@@ -118,4 +118,4 @@ RUN mkdir -p /boot/efi/EFI/ubuntu/; \
 
 RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
 
-CMD ["bash", "-x", "/root/workspace/create_bfb", "-k", "5.15.0-1014-bluefield"]
+CMD ["bash", "-x", "/root/workspace/build_ubuntu_bfb"]

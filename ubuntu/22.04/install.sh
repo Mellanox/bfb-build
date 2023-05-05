@@ -1,7 +1,8 @@
 #!/bin/bash
+
 ###############################################################################
 #
-# Copyright 2022 NVIDIA Corporation
+# Copyright 2020 NVIDIA Corporation
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of
 # this software and associated documentation files (the "Software"), to deal in
@@ -77,6 +78,14 @@ fw_reset()
 		fi
 		sleep 1
 	done
+
+	log "INFO: Running NIC Firmware reset"
+	if [ "X$mode" == "Xmanufacturing" ]; then
+		log "INFO: Rebooting..."
+	fi
+	# Wait for these messages to be pulled by the rshim service
+	# as mlxfwreset will restart the DPU
+	sleep 3
 
 	msg=`chroot /mnt mlxfwreset -d /dev/mst/mt*_pciconf0 -y -l 3 --sync 1 r 2>&1`
 	if [ $? -ne 0 ]; then
@@ -388,8 +397,9 @@ EOF
 		umount /tmp/common > /dev/null 2>&1
 	fi
 
-	if (grep -qE "MemTotal:\s+16" /proc/meminfo > /dev/null 2>&1); then
-		sed -i -r -e "s/(net.netfilter.nf_conntrack_max).*/\1 = 500000/" /mnt/usr/lib/sysctl.d/90-bluefield.conf
+	memtotal=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+	if [ $memtotal -gt 16000000 ]; then
+		sed -i -r -e "s/(net.netfilter.nf_conntrack_max).*/\1 = 1000000/" /mnt/usr/lib/sysctl.d/90-bluefield.conf
 	fi
 
 	bind_partitions
@@ -636,8 +646,8 @@ if [ -e /lib/firmware/mellanox/boot/capsule/boot_update2.cap ]; then
 	bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap --policy dual
 fi
 
-if [ -e /lib/firmware/mellanox/boot/capsule/efi_sbkeyssync.cap ]; then
-	bfrec --capsule /lib/firmware/mellanox/boot/capsule/efi_sbkeyssync.cap
+if [ -e /lib/firmware/mellanox/boot/capsule/efi_sbkeysync.cap ]; then
+	bfrec --capsule /lib/firmware/mellanox/boot/capsule/efi_sbkeysync.cap
 fi
 
 # Make it the boot partition
@@ -707,13 +717,6 @@ if [ "$WITH_NIC_FW_UPDATE" == "yes" ]; then
 fi
 
 if [ $NIC_FW_RESET_REQUIRED -eq 1 ]; then
-	log "INFO: Running NIC Firmware reset"
-	if [ "X$mode" == "Xmanufacturing" ]; then
-		log "INFO: Rebooting..."
-	fi
-	# Wait for these messages to be pulled by the rshim service
-	# as mlxfwreset will restart the DPU
-	sleep 3
 	# Reset NIC FW
 	mount -t ext4 ${device}p2 /mnt
 	bind_partitions

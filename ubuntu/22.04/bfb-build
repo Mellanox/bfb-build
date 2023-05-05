@@ -42,19 +42,23 @@ fi
 DISTRO="ubuntu"
 DISTRO_VERSION="22.04"
 DISTRO_BASE_URL="https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-arm64-root.tar.xz"
-VERSION="4.0.1"
+BF_RELEASE="4.0.2"
+DOCA_VERSION="2.0.2"
+MLNX_OFED_VERSION=23.04-0.5.3.0
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-""}
+NV_BASE_URL=${NV_BASE_URL:-"https://linux.mellanox.com/public/repo"}
 
 WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
 
 mkdir -p $WDIR
-wget -q -P $WDIR -r --no-verbose --no-directories -l1 --no-parent -A 'doca-dpu-repo*arm64.deb' https://linux.mellanox.com/public/repo/doca/2.0.0/ubuntu22.04/arm64/
+wget -q -P $WDIR -r --no-verbose --no-directories -l1 --no-parent -A 'doca-dpu-repo*arm64.deb' ${NV_BASE_URL}/doca/${DOCA_VERSION}/ubuntu22.04/arm64/
 mv $WDIR/doca-dpu-repo*arm64.deb $WDIR/doca-repo.deb
-wget -q -P $WDIR -r --no-verbose --no-directories -l1 --no-parent -A 'mlxbf-bootimages*arm64.deb' https://linux.mellanox.com/public/repo/bluefield/${VERSION}/bootimages/${IMAGE_TYPE}/
+wget -q -P $WDIR -r --no-verbose --no-directories -l1 --no-parent -A 'mlxbf-bootimages*arm64.deb' ${NV_BASE_URL}/bluefield/${BF_RELEASE}/bootimages/${IMAGE_TYPE}/
 mv $WDIR/mlxbf-bootimages*arm64.deb $WDIR/mlxbf-bootimages.deb
 
 cp	Dockerfile \
+    build_ubuntu_bfb \
 	create_bfb \
 	install.sh \
 	../../common/tools/qemu-aarch64-static \
@@ -64,7 +68,9 @@ cd $WDIR
 
 wget -q --no-check-certificate $DISTRO_BASE_URL
 
-sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/" Dockerfile
+sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/" \
+    -e "s,@NV_BASE_URL@,$NV_BASE_URL,g" \
+    -e "s/@DOCA_VERSION@/$DOCA_VERSION/g" Dockerfile
 
 docker build -t bfb_runtime_${DISTRO}${DISTRO_VERSION} -f Dockerfile .
 docker run -t --rm --privileged -e container=docker \

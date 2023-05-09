@@ -35,7 +35,9 @@ fspath=$(readlink -f `dirname $0`)
 
 log()
 {
-	echo "$*"
+	msg="[$(date +%H:%M:%S)] $*"
+	echo "$msg" > /dev/ttyAMA0
+	echo "$msg" > /dev/hvc0
 	if [ -n "$rshimlog" ]; then
 		$rshimlog "$*"
 	fi
@@ -77,6 +79,14 @@ fw_reset()
 		sleep 1
 	done
 
+	log "INFO: Running NIC Firmware reset"
+	if [ "X$mode" == "Xmanufacturing" ]; then
+		log "INFO: Rebooting..."
+	fi
+	# Wait for these messages to be pulled by the rshim service
+	# as mlxfwreset will restart the DPU
+	sleep 3
+
 	msg=`chroot /mnt mlxfwreset -d /dev/mst/mt*_pciconf0 -y -l 3 --sync 1 r 2>&1`
 	if [ $? -ne 0 ]; then
 		log "INFO: NIC Firmware reset failed"
@@ -85,6 +95,12 @@ fw_reset()
 		log "INFO: NIC Firmware reset done"
 	fi
 }
+
+#
+# Set the Hardware Clock from the System Clock
+#
+
+hwclock -w
 
 #
 # Check auto configuration passed from boot-fifo
@@ -149,14 +165,18 @@ fi
 
 log "INFO: $distro installation started"
 
-device=${device:-/dev/mmcblk0}
+default_device=/dev/mmcblk0
+# if [ -b /dev/nvme0n1 ]; then
+# 	default_device=/dev/nvme0n1
+# fi
+device=${device:-"$default_device"}
 
 echo 0 > /proc/sys/kernel/hung_task_timeout_secs
 
 # We cannot use wait-for-root as it expects the device to contain a
 # known filesystem, which might not be the case here.
 while [ ! -b $device ]; do
-    log "Waiting for %s to be ready\n" "$device"
+    log "Waiting for $device to be ready\n"
     sleep 1
 done
 
@@ -298,6 +318,7 @@ fi
 sync
 
 # Refresh partition table
+sleep 1
 blockdev --rereadpt ${device} > /dev/null 2>&1
 fi # manufacturing mode
 
@@ -306,11 +327,13 @@ bind_partitions()
 	mount --bind /proc /mnt/proc
 	mount --bind /dev /mnt/dev
 	mount --bind /sys /mnt/sys
+	mount -t efivarfs none /mnt/sys/firmware/efi/efivars
 }
 
 unmount_partitions()
 {
 	umount /mnt/sys/fs/fuse/connections > /dev/null 2>&1 || true
+	umount /mnt/sys/firmware/efi/efivars 2>&1 || true
 	umount /mnt/sys > /dev/null 2>&1
 	umount /mnt/dev > /dev/null 2>&1
 	umount /mnt/proc > /dev/null 2>&1
@@ -335,10 +358,11 @@ install_os_image()
 	COMMON_PARTITION=${device}p5
 
 	# Generate some entropy
-	mke2fs -O 64bit $ROOT_PARTITION > /dev/null 2>&1
-	mkfs.fat $BOOT_PARTITION -n "EFI$OS_IMAGE" > /dev/null 2>&1
+	mke2fs -O 64bit -O extents -F $ROOT_PARTITION > /dev/null 2>&1
+	mkfs.fat -F32 -n "EFI$OS_IMAGE" $BOOT_PARTITION > /dev/null 2>&1
 	mkfs.ext4 -F $ROOT_PARTITION -L "OS$OS_IMAGE" > /dev/null 2>&1
 	sync
+	sleep 1
 	blockdev --rereadpt ${device} > /dev/null 2>&1
 
 	mkdir -p /mnt
@@ -351,7 +375,7 @@ install_os_image()
 	tar Jxf $fspath/image.tar.xz --warning=no-timestamp -C /mnt
 	sync
 
-	UBUNTU_CODENAME=`grep UBUNTU_CODENAME /mnt/etc/os-release | cut -d '=' -f 2`
+	UBUNTU_CODENAME=`grep ^ID= /mnt/etc/os-release | cut -d '=' -f 2`
 
 	cat > /mnt/etc/fstab << EOF
 `lsblk -o UUID -P $ROOT_PARTITION` / auto defaults 0 1
@@ -373,8 +397,9 @@ EOF
 		umount /tmp/common > /dev/null 2>&1
 	fi
 
-	if (grep -qE "MemTotal:\s+16" /proc/meminfo > /dev/null 2>&1); then
-		sed -i -r -e "s/(net.netfilter.nf_conntrack_max).*/\1 = 500000/" /mnt/usr/lib/sysctl.d/90-bluefield.conf
+	memtotal=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+	if [ $memtotal -gt 16000000 ]; then
+		sed -i -r -e "s/(net.netfilter.nf_conntrack_max).*/\1 = 1000000/" /mnt/usr/lib/sysctl.d/90-bluefield.conf
 	fi
 
 	bind_partitions
@@ -383,6 +408,19 @@ EOF
 	initrd=`cd /mnt/boot; /bin/ls -1 initrd.img-* | tail -1 | sed -e "s/.old-dkms//"`
 	ln -snf $vmlinuz /mnt/boot/vmlinuz
 	ln -snf $initrd /mnt/boot/initrd.img
+
+	kver=$(/bin/ls -1 /mnt/lib/modules/ | tail -1)
+	cat >> /mnt/etc/initramfs-tools/modules << EOF
+dw_mmc-bluefield
+dw_mmc
+dw_mmc-pltfm
+sdhci-of-dwcmshc
+sdhci_pltfm
+sdhci
+mlxbf-tmfifo
+EOF
+
+	chroot /mnt update-initramfs -k ${kver} -u
 
 	cat > /mnt/etc/resolv.conf << EOF
 nameserver 127.0.0.53
@@ -544,7 +582,7 @@ EOF
 		sed -i -r -e "s/(password_pbkdf2 admin).*/\1 ${grub_admin_PASSWORD}/" /mnt/etc/grub.d/40_custom
 	fi
 
-	if (lspci -n -d 15b3: | grep -wq 'a2dc'); then
+	if (hexdump -C /sys/firmware/acpi/tables/SSDT* | grep -q MLNXBF33); then
 		# BlueField-3
 		sed -i -e "s/0x01000000/0x13010000/g" /mnt/etc/default/grub
 	fi
@@ -562,6 +600,16 @@ EOF
 
 	unmount_partitions
 }
+
+mounted_efivarfs=0
+if [ ! -d /sys/firmware/efi/efivars ]; then
+	mount -t efivarfs none /sys/firmware/efi/efivars
+fi
+mounted_efivarfs=1
+
+bfbootmgr --cleanall > /dev/null 2>&1
+/bin/rm -f /sys/firmware/efi/efivars/Boot* > /dev/null 2>&1
+/bin/rm -f /sys/firmware/efi/efivars/dump-* > /dev/null 2>&1
 
 if function_exists bfb_pre_install; then
 	log "INFO: Running bfb_pre_install from bf.cfg"
@@ -588,6 +636,7 @@ else
 	fi
 fi
 
+sleep 1
 blockdev --rereadpt ${device} > /dev/null 2>&1
 
 sync
@@ -597,21 +646,11 @@ if [ -e /lib/firmware/mellanox/boot/capsule/boot_update2.cap ]; then
 	bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap --policy dual
 fi
 
-if [ "X$ENROLL_KEYS" = "Xyes" ]; then
-	bfrec --capsule /lib/firmware/mellanox/boot/capsule/EnrollKeysCap
+if [ -e /lib/firmware/mellanox/boot/capsule/efi_sbkeysync.cap ]; then
+	bfrec --capsule /lib/firmware/mellanox/boot/capsule/efi_sbkeysync.cap
 fi
-
-bfbootmgr --cleanall > /dev/null 2>&1
 
 # Make it the boot partition
-mounted_efivarfs=0
-if [ ! -d /sys/firmware/efi/efivars ]; then
-	mount -t efivarfs none /sys/firmware/efi/efivars
-	mounted_efivarfs=1
-fi
-
-/bin/rm -f /sys/firmware/efi/efivars/Boot* > /dev/null 2>&1
-
 if efibootmgr | grep ${UBUNTU_CODENAME}; then
 	efibootmgr -b "$(efibootmgr | grep ${UBUNTU_CODENAME} | cut -c 5-8)" -B > /dev/null 2>&1
 fi
@@ -678,15 +717,8 @@ if [ "$WITH_NIC_FW_UPDATE" == "yes" ]; then
 fi
 
 if [ $NIC_FW_RESET_REQUIRED -eq 1 ]; then
-	log "INFO: Running NIC Firmware reset"
-	if [ "X$mode" == "Xmanufacturing" ]; then
-		log "INFO: Rebooting..."
-	fi
-	# Wait for these messages to be pulled by the rshim service
-	# as mlxfwreset will restart the DPU
-	sleep 3
 	# Reset NIC FW
-	mount -t ext4 /dev/mmcblk0p2 /mnt
+	mount -t ext4 ${device}p2 /mnt
 	bind_partitions
 	fw_reset
 	unmount_partitions

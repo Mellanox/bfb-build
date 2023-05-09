@@ -6,7 +6,8 @@ ADD qemu-aarch64-static /usr/bin/
 WORKDIR /root/workspace
 ADD install.sh .
 ADD create_bfb .
-ADD mlxbf-bootimages_3.9.3-12383_arm64.deb .
+ADD build_ubuntu_bfb .
+ADD mlxbf-bootimages.deb .
 ADD doca-repo.deb .
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -39,32 +40,38 @@ RUN echo 'set superusers="admin"' >> /etc/grub.d/40_custom; \
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.8 1
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python2.7 10
 
-RUN curl -fsSLo /usr/share/keyrings/kubernetes-archive-keyring.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg
+RUN wget -qO - https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key --keyring /usr/share/keyrings/kubernetes-archive-keyring.gpg add -
 RUN echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | tee /etc/apt/sources.list.d/kubernetes.list
 RUN apt update
-RUN apt install -y kubelet runc containerd cri-tools
+# Install Libvirt+QEMU+KVM
+RUN apt install -y bridge-utils cpu-checker libvirt-clients libvirt-daemon qemu qemu-kvm
+RUN apt install -y kubelet=1.25.3-00 runc containerd cri-tools=1.25.0-00 kubernetes-cni=1.1.1-00
+RUN apt-mark hold kubelet cri-tools kubernetes-cni
 RUN apt upgrade -y
-RUN wget -qO - https://linux.mellanox.com/public/repo/doca/1.5.1/ubuntu20.04/aarch64/GPG-KEY-Mellanox.pub | sudo apt-key add -
-RUN echo "deb [trusted=yes] https://linux.mellanox.com/public/repo/doca/1.5.1/ubuntu20.04/\$(ARCH) ./" | tee /etc/apt/sources.list.d/doca.tmp.list
+RUN wget -qO - @NV_BASE_URL@/doca/@DOCA_VERSION@/ubuntu20.04/aarch64/GPG-KEY-Mellanox.pub | sudo apt-key add -
+RUN echo "deb [trusted=yes] @NV_BASE_URL@/doca/@DOCA_VERSION@/ubuntu20.04/\$(ARCH) ./" | tee /etc/apt/sources.list.d/doca.tmp.list
 RUN dpkg -i /root/workspace/doca-repo.deb
 RUN apt update || true
+RUN dpkg -i /var/doca-dpu-repo-ubuntu2004-local/*mstflint*.deb || true
+RUN apt-mark hold mstflint
 
 RUN apt install -y -f \
-	linux-bluefield=5.4.0.1049.47 \
-	linux-bluefield-headers-5.4.0-1049=5.4.0-1049.55 \
-	linux-bluefield-tools-5.4.0-1049=5.4.0-1049.55 \
-	linux-headers-5.4.0-1049-bluefield=5.4.0-1049.55 \
-	linux-headers-bluefield=5.4.0.1049.47 \
-	linux-image-5.4.0-1049-bluefield=5.4.0-1049.55 \
-	linux-image-bluefield=5.4.0.1049.47 \
-	linux-modules-5.4.0-1049-bluefield=5.4.0-1049.55 \
-	linux-tools-5.4.0-1049-bluefield=5.4.0-1049.55 \
-	linux-tools-bluefield=5.4.0.1049.47 \
+	linux-bluefield=5.4.0.1060.55 \
+	linux-bluefield-headers-5.4.0-1060=5.4.0-1060.66 \
+	linux-bluefield-tools-5.4.0-1060=5.4.0-1060.66 \
+	linux-headers-5.4.0-1060-bluefield=5.4.0-1060.66 \
+	linux-headers-bluefield=5.4.0.1060.55 \
+	linux-image-5.4.0-1060-bluefield=5.4.0-1060.66 \
+	linux-image-bluefield=5.4.0.1060.55 \
+	linux-modules-5.4.0-1060-bluefield=5.4.0-1060.66 \
+	linux-tools-5.4.0-1060-bluefield=5.4.0-1060.66 \
+	linux-tools-bluefield=5.4.0.1060.55 \
 	linux-libc-dev:arm64 \
 	linux-tools-common
 
 
 RUN apt install -y -f doca-runtime doca-tools doca-sdk || true
+RUN apt install -y -f mlnx-snap || true
 RUN cd /var/doca-dpu-repo-ubuntu2004-local; for dr in *modules*deb; do dpkg -i $dr || true;done
 RUN apt remove --purge -y doca-dpu-repo-ubuntu2004-local || true
 RUN apt --fix-broken install -y || true
@@ -73,9 +80,11 @@ RUN apt --fix-broken install -y || true
 RUN /bin/rm -f /etc/apt/sources.list.d/doca.tmp.list
 RUN apt update || true
 RUN /usr/sbin/dpkg-reconfigure bf-release || true
+RUN apt clean
+RUN rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /etc/kubelet.d
 RUN mkdir -p /workspace
-RUN dpkg -i /root/workspace/mlxbf-bootimages_*_arm64.deb
+RUN dpkg -i /root/workspace/mlxbf-bootimages*.deb
 
 # Manage system services
 RUN systemctl enable mlx-regex.service || true
@@ -119,6 +128,6 @@ RUN mkdir -p /boot/efi/EFI/ubuntu/; \
 	   /usr/lib/shim/fbaa64.efi \
 	/boot/efi/EFI/BOOT/
 
-RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
+RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" -e "s/prod/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
 
-CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1049-bluefield"]
+CMD ["bash", "-x", "/root/workspace/build_ubuntu_bfb"]

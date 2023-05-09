@@ -207,6 +207,14 @@ copy_module()
 		return
 	fi
 
+	if (modinfo -k $kernel $1 2>/dev/null | grep "filename:" | grep -q builtin); then
+		return
+	fi
+
+	if ! (modinfo -k $kernel $1 2>/dev/null); then
+		return
+	fi
+
 	for mod in `modinfo -F depends -k $kernel $1 | tr -s ',' ' '`
 	do
 		copy_module $mod
@@ -232,7 +240,7 @@ for tool in `dpkg -L mlxbf-scripts | grep bin/` \
 		`dpkg -L tar | grep -v share` \
 		xz efibootmgr bash getopt hexdump mstflint lspci perl \
 		lsblk watchdog shutdown systemctl strings aarch64-linux-gnu-strings \
-		mlxbf-bootctl id dirname curl $ADDON_TOOLS
+		mlxbf-bootctl id dirname curl openssl $ADDON_TOOLS
 do
 	if [ -d $tool ]; then
 		continue
@@ -254,7 +262,7 @@ do
 	done
 done
 
-for mod in nvme-rdma nvme-tcp nvme mlx5_ib ib_ipoib ib_iser $ADDON_KERNEL_MODULES
+for mod in mlxbf_tmfifo dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block sdhci sdhci-of-dwcmshc nvme-rdma nvme-tcp nvme mlx5_ib ib_ipoib ib_iser $ADDON_KERNEL_MODULES
 do
 	copy_module $mod
 done
@@ -303,6 +311,8 @@ printf_msg()
 	return 0
 }
 
+modprobe -a sdhci-of-dwcmshc dw_mmc-bluefield > /dev/null 2>&1
+modprobe mlxbf_tmfifo > /dev/null 2>&1
 insmod /mlx-bootctl.ko > /dev/null 2>&1
 insmod /sbsa_gwdt.ko > /dev/null 2>&1
 /usr/sbin/watchdog > /dev/null 2>&1
@@ -345,18 +355,40 @@ boot_args=$(mktemp)
 boot_args2=$(mktemp)
 boot_path=$(mktemp)
 boot_desc=$(mktemp)
-printf "console=ttyAMA1 console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 earlycon=pl011,0x01800000 initrd=initramfs quiet" > \
+printf "console=ttyAMA1 console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 earlycon=pl011,0x01800000 initrd=initramfs" > \
 	"$boot_args"
-printf "console=ttyAMA1 console=hvc0 console=ttyAMA0 earlycon=pl011,0x13010000 initrd=initramfs quiet" > \
+printf "console=hvc0 console=ttyAMA0 earlycon=pl011,0x13010000 initrd=initramfs" > \
 	"$boot_args2"
 
 printf "VenHw(F019E406-8C9C-11E5-8797-001ACA00BFC4)/Image" > "$boot_path"
 printf "Linux from rshim" > "$boot_desc"
 vmlinuz=$WDIR/vmlinuz
 if [ -e $SDIR/vmlinuz ]; then
-	sudo cat $SDIR/vmlinuz > "$vmlinuz"
+	case "$(file --brief --mime-type $SDIR/vmlinuz)" in
+		application/x-dosexec|application/octet-stream)
+			CAT=cat
+			;;
+		application/gzip)
+			CAT=zcat
+			;;
+		*)
+			CAT=cat
+			;;
+	esac
+	sudo $CAT $SDIR/vmlinuz > "$vmlinuz"
 else
-	sudo cat /boot/vmlinuz-$kernel > "$vmlinuz"
+	case "$(file --brief --mime-type /boot/vmlinuz-$kernel)" in
+		application/x-dosexec|application/octet-stream)
+			CAT=cat
+			;;
+		application/gzip)
+			CAT=zcat
+			;;
+		*)
+			CAT=cat
+			;;
+	esac
+	sudo $CAT /boot/vmlinuz-$kernel > "$vmlinuz"
 fi
 
 mkdir -p /workspace

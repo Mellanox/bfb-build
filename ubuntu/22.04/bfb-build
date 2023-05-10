@@ -68,7 +68,7 @@ cd $WDIR
 
 wget -q --no-check-certificate $DISTRO_BASE_URL
 
-sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/" \
+sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/g;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/g" \
     -e "s,@NV_BASE_URL@,$NV_BASE_URL,g" \
     -e "s/@DOCA_VERSION@/$DOCA_VERSION/g" Dockerfile
 

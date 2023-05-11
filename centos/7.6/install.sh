@@ -31,10 +31,11 @@ fspath=$(readlink -f `dirname $0`)
 rshimlog=`which bfrshlog 2> /dev/null`
 log()
 {
+	msg="[$(date +%H:%M:%S)] $*"
+	echo "$msg" > /dev/ttyAMA0
+	echo "$msg" > /dev/hvc0
 	if [ -n "$rshimlog" ]; then
 		$rshimlog "$*"
-	else
-		echo "$*"
 	fi
 }
 
@@ -74,6 +75,14 @@ fw_reset()
 		sleep 1
 	done
 
+	log "INFO: Running NIC Firmware reset"
+	if [ "X$mode" == "Xmanufacturing" ]; then
+		log "INFO: Rebooting..."
+	fi
+	# Wait for these messages to be pulled by the rshim service
+	# as mlxfwreset will restart the DPU
+	sleep 3
+
 	msg=`chroot /mnt mlxfwreset -d /dev/mst/mt*_pciconf0 -y -l 3 --sync 1 r 2>&1`
 	if [ $? -ne 0 ]; then
 		log "INFO: NIC Firmware reset failed"
@@ -99,6 +108,12 @@ unmount_partitions()
 	umount /mnt/boot/efi > /dev/null 2>&1
 	umount /mnt > /dev/null 2>&1
 }
+
+#
+# Set the Hardware Clock from the System Clock
+#
+
+hwclock -w
 
 #
 # Check auto configuration passed from boot-fifo
@@ -158,7 +173,11 @@ fi
 log "INFO: $distro installation started"
 
 # Create the CentOS partitions.
-device=${device:-/dev/mmcblk0}
+default_device=/dev/mmcblk0
+# if [ -b /dev/nvme0n1 ]; then
+#     default_device=/dev/nvme0n1
+# fi
+device=${device:-"$default_device"}
 
 SUPPORTED_SCHEMES="SCHEME_A SCHEME_B"
 if ! (echo "$SUPPORTED_SCHEMES" | grep -wq "$PART_SCHEME"); then
@@ -179,8 +198,8 @@ elif [[ "${PART_SCHEME}" == "SCHEME_B" ]]; then
 	parted --script $device -- \
 		mklabel gpt \
 		mkpart primary 1MiB 201MiB set 1 esp on \
-		mkpart primary 201MiB 6000MiB \
-		mkpart primary 6000MiB 12489MiB \
+		mkpart primary 201MiB 8000MiB \
+		mkpart primary 8000MiB 12489MiB \
 		mkpart primary 12489MiB 100%
 fi
 
@@ -188,6 +207,7 @@ sync
 
 partprobe "$device" > /dev/null 2>&1
 
+sleep 1
 blockdev --rereadpt "$device" > /dev/null 2>&1
 
 if function_exists bfb_pre_install; then
@@ -196,34 +216,34 @@ if function_exists bfb_pre_install; then
 fi
 
 # Generate some entropy
-mke2fs  /dev/mmcblk0p2 >> /dev/null
+mke2fs  ${device}p2 >> /dev/null
 
 # Copy the kernel image.
-mkdosfs /dev/mmcblk0p1 -n system-boot
-mkfs.xfs -f /dev/mmcblk0p2 -L local-boot
-mkfs.xfs -f /dev/mmcblk0p3 -L writable
+mkdosfs ${device}p1 -n system-boot
+mkfs.xfs -f ${device}p2 -L local-boot
+mkfs.xfs -f ${device}p3 -L writable
 if [[ "${PART_SCHEME}" == "SCHEME_B" ]]; then
-	mkfs.xfs -f /dev/mmcblk0p4
+	mkfs.xfs -f ${device}p4
 fi
 
 export EXTRACT_UNSAFE_SYMLINKS=1
 
-fsck.vfat -a /dev/mmcblk0p1
+fsck.vfat -a ${device}p1
 
-root="mmcblk0p3"
+root=${device/\/dev\/}p3
 if [[ "${PART_SCHEME}" == "SCHEME_A" ]]; then
-	mount /dev/mmcblk0p3 /mnt
+	mount ${device}p3 /mnt
 	mkdir -p /mnt/boot
-	mount /dev/mmcblk0p2 /mnt/boot
+	mount ${device}p2 /mnt/boot
 	mkdir -p /mnt/boot/efi
-	mount /dev/mmcblk0p1 /mnt/boot/efi
+	mount ${device}p1 /mnt/boot/efi
 elif [[ "${PART_SCHEME}" == "SCHEME_B" ]]; then
-	root="mmcblk0p2"
-	mount /dev/mmcblk0p2 /mnt
+	root=${device/\/dev\/}p2
+	mount ${device}p2 /mnt
 	mkdir -p /mnt/boot/efi
-	mount /dev/mmcblk0p1 /mnt/boot/efi
+	mount ${device}p1 /mnt/boot/efi
 	mkdir -p /mnt/var
-	mount /dev/mmcblk0p4 /mnt/var
+	mount ${device}p4 /mnt/var
 fi
 
 echo "Extracting /..."
@@ -236,9 +256,9 @@ if [[ "${PART_SCHEME}" == "SCHEME_A" ]]; then
 # /etc/fstab
 #
 #
-/dev/mmcblk0p3  /           xfs     defaults                   0 1
-/dev/mmcblk0p2  /boot       xfs     defaults                   0 2
-/dev/mmcblk0p1  /boot/efi   vfat    umask=0077,shortname=winnt 0 2
+${device}p3  /           xfs     defaults                   0 1
+${device}p2  /boot       xfs     defaults                   0 2
+${device}p1  /boot/efi   vfat    umask=0077,shortname=winnt 0 2
 EOF
 elif [[ "${PART_SCHEME}" == "SCHEME_B" ]]; then
 	cat > /mnt/etc/fstab << EOF
@@ -246,15 +266,16 @@ elif [[ "${PART_SCHEME}" == "SCHEME_B" ]]; then
 # /etc/fstab
 #
 #
-/dev/mmcblk0p2  /           xfs     defaults                   0 1
-/dev/mmcblk0p3  /home       xfs     defaults                   0 2
-/dev/mmcblk0p4  /var        xfs     defaults                   0 2
-/dev/mmcblk0p1  /boot/efi   vfat    umask=0077,shortname=winnt 0 2
+${device}p2  /           xfs     defaults                   0 1
+${device}p3  /home       xfs     defaults                   0 2
+${device}p4  /var        xfs     defaults                   0 2
+${device}p1  /boot/efi   vfat    umask=0077,shortname=winnt 0 2
 EOF
 fi
 
-if (grep -qE "MemTotal:\s+16" /proc/meminfo > /dev/null 2>&1); then
-	sed -i -r -e "s/(net.netfilter.nf_conntrack_max).*/\1 = 500000/" /mnt/usr/lib/sysctl.d/90-bluefield.conf
+memtotal=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+if [ $memtotal -gt 16000000 ]; then
+	sed -i -r -e "s/(net.netfilter.nf_conntrack_max).*/\1 = 1000000/" /mnt/usr/lib/sysctl.d/90-bluefield.conf
 fi
 
 cat > /mnt/etc/udev/rules.d/50-dev-root.rules << EOF
@@ -294,21 +315,21 @@ bind_partitions
 # Then, set boot arguments: Read current 'console' and 'earlycon'
 # parameters, and append the root filesystem parameters.
 bootarg="$(cat /proc/cmdline | sed 's/initrd=initramfs//;s/console=.*//')"
-sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"crashkernel=auto $bootarg console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 modprobe.blacklist=mlx5_core,mlx5_ib\"@" /mnt/etc/default/grub
-if (lspci -n -d 15b3: | grep -wq 'a2dc'); then
+sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"crashkernel=auto $bootarg console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 modprobe.blacklist=mlx5_core,mlx5_ib net.ifnames=0 biosdevname=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
+if (hexdump -C /sys/firmware/acpi/tables/SSDT* | grep -q MLNXBF33); then
     # BlueField-3
     sed -i -e "s/0x01000000/0x13010000/g" /mnt/etc/default/grub
 fi
 
 chroot /mnt grub2-mkconfig -o /boot/efi/EFI/centos/grub.cfg
 
-kdir=$(/bin/ls -1d /mnt/lib/modules/4.18* /mnt/lib/modules/4.19* /mnt/lib/modules/4.20* /mnt/lib/modules/5.4* 2> /dev/null)
+kdir=$(/bin/ls -1d /mnt/lib/modules/4.18* /mnt/lib/modules/4.19* /mnt/lib/modules/4.20* /mnt/lib/modules/5.* 2> /dev/null)
 kver=""
 if [ -n "$kdir" ]; then
     kver=${kdir##*/}
-    DRACUT_CMD=`chroot /mnt /bin/ls -1 /sbin/dracut /usr/bin/dracut 2> /dev/null`
+    DRACUT_CMD=`chroot /mnt /bin/ls -1 /sbin/dracut /usr/bin/dracut 2> /dev/null | head -n 1 | tr -d '\n'`
     chroot /mnt grub2-set-default 0
-    chroot /mnt $DRACUT_CMD --kver ${kver} --force --add-drivers "dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block mlxbf_tmfifo virtio_console" /boot/initramfs-${kver}.img
+    chroot /mnt $DRACUT_CMD --kver ${kver} --force --add-drivers "sdhci-of-dwcmshc dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block mlxbf_tmfifo virtio_console" /boot/initramfs-${kver}.img
 else
     kver=$(/bin/ls -1 /mnt/lib/modules/ | head -1)
 fi
@@ -327,6 +348,7 @@ EOF
 chroot /mnt /bin/systemctl enable serial-getty@ttyAMA0.service
 chroot /mnt /bin/systemctl enable serial-getty@ttyAMA1.service
 chroot /mnt /bin/systemctl enable serial-getty@hvc0.service
+chroot /mnt /bin/systemctl disable rshim-getty.service
 
 if [ -x /usr/bin/uuidgen ]; then
 	UUIDGEN=/usr/bin/uuidgen
@@ -444,8 +466,8 @@ if [ -e /lib/firmware/mellanox/boot/capsule/boot_update2.cap ]; then
 	bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap --policy dual
 fi
 
-if [ "X$ENROLL_KEYS" = "Xyes" ]; then
-	bfrec --capsule /lib/firmware/mellanox/boot/capsule/EnrollKeysCap
+if [ -e /lib/firmware/mellanox/boot/capsule/efi_sbkeysync.cap ]; then
+	bfrec --capsule /lib/firmware/mellanox/boot/capsule/efi_sbkeysync.cap
 fi
 
 # Clean up actual boot entries.
@@ -453,7 +475,8 @@ bfbootmgr --cleanall > /dev/null 2>&1
 
 mount -t efivarfs none /sys/firmware/efi/efivars
 /bin/rm -f /sys/firmware/efi/efivars/Boot* > /dev/null 2>&1
-efibootmgr -c -d /dev/mmcblk0 -p 1 -l "\EFI\centos\grubaa64.efi" -L $distro
+/bin/rm -f /sys/firmware/efi/efivars/dump-* > /dev/null 2>&1
+efibootmgr -c -d "${device}" -p 1 -l "\EFI\centos\grubaa64.efi" -L $distro
 umount /sys/firmware/efi/efivars
 
 BFCFG=`which bfcfg 2> /dev/null`
@@ -500,18 +523,11 @@ log "INFO: Installation finished"
 
 if [ "$WITH_NIC_FW_UPDATE" == "yes" ]; then
 	if [ $NIC_FW_UPDATE_DONE -eq 1 ]; then
-		log "INFO: Running NIC Firmware reset"
-		if [ "X$mode" == "Xmanufacturing" ]; then
-			log "INFO: Rebooting..."
-		fi
-		# Wait for these messages to be pulled by the rshim service
-		# as mlxfwreset will restart the DPU
-		sleep 3
 		# Reset NIC FW
 		if [[ "${PART_SCHEME}" == "SCHEME_A" ]]; then
-			mount /dev/mmcblk0p3 /mnt
+			mount ${device}p3 /mnt
 		else
-			mount /dev/mmcblk0p2 /mnt
+			mount ${device}p2 /mnt
 		fi
 		bind_partitions
 		fw_reset

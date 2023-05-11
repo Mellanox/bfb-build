@@ -19,13 +19,16 @@ fi
 
 DISTRO="centos"
 DISTRO_VERSION="7.6"
-VERSION="3.9.3"
+BF_RELEASE="4.0.2"
+DOCA_VERSION="2.0.2"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
+CUSTOM_VERSION=${CUSTOM_VERSION:-""}
+NV_BASE_URL=${NV_BASE_URL:-"https://linux.mellanox.com/public/repo"}
 
 WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
 
-mkdir -p $WDIR
-wget -P $WDIR -r --no-verbose --no-directories -l1 --no-parent -A 'mlxbf-bootimages*.aarch64.rpm' https://linux.mellanox.com/public/repo/bluefield/${VERSION}/bootimages/${IMAGE_TYPE}/
+mkdir -p $WDIR/bootimages
+wget -P $WDIR/bootimages -r --no-verbose --no-directories -l1 --no-parent -A 'mlxbf-bootimages*.aarch64.rpm' ${NV_BASE_URL}/bluefield/${BF_RELEASE}/bootimages/${IMAGE_TYPE}/
 
 cp	Dockerfile \
 	create_bfb \
@@ -36,7 +39,9 @@ cp	Dockerfile \
 
 cd $WDIR
 
-sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/" Dockerfile
+sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/g;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/g" \
+    -e "s,@NV_BASE_URL@,$NV_BASE_URL,g" \
+    -e "s/@DOCA_VERSION@/$DOCA_VERSION/g" Dockerfile
 
 docker build -t bfb_runtime_${DISTRO}${DISTRO_VERSION} -f Dockerfile .
 docker run -t --rm --privileged -e container=docker \

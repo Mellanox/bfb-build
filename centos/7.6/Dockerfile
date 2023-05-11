@@ -4,7 +4,7 @@ ADD qemu-aarch64-static /usr/bin/
 WORKDIR /root/workspace
 ADD install.sh .
 ADD create_bfb .
-ADD mlxbf-bootimages-3.9.3-12383.aarch64.rpm .
+ADD bootimages bootimages/
 ADD parted-3.2-39.el7.aarch64.rpm .
 
 ENV RUN_FW_UPDATER=no
@@ -32,10 +32,14 @@ RUN yum-config-manager --nogpgcheck --add-repo https://download-ib01.fedoraproje
      yum install -y epel-release; \
      yum install -y --nogpgcheck uriparser
 
-RUN yum-config-manager --nogpgcheck --add-repo https://linux.mellanox.com/public/repo/doca/1.5.1/centos7.6/aarch64/
+RUN yum-config-manager --nogpgcheck --add-repo @NV_BASE_URL@/doca/@DOCA_VERSION@/centos7.6/aarch64/
 
 RUN yum install --nogpgcheck -y doca-runtime doca-tools doca-sdk
-RUN rpm -ihv --force mlxbf-bootimages-*.aarch64.rpm
-RUN /usr/sbin/update-pciids || true
+RUN yum install --nogpgcheck -y mstflint
 
-CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1049.116.g01f8472-bluefield"]
+RUN /usr/sbin/update-pciids || true
+RUN rpm -ihv --force /root/workspace/bootimages/mlxbf-bootimages-*.aarch64.rpm || true
+
+RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" -e "s/prod/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
+
+CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1060.24.gf94e69d-bluefield"]

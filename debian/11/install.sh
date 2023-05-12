@@ -34,7 +34,9 @@ fspath=$(readlink -f `dirname $0`)
 
 log()
 {
-	echo "$*"
+	msg="[$(date +%H:%M:%S)] $*"
+	echo "$msg" > /dev/ttyAMA0
+	echo "$msg" > /dev/hvc0
 	if [ -n "$rshimlog" ]; then
 		$rshimlog "$*"
 	fi
@@ -76,6 +78,14 @@ fw_reset()
 		sleep 1
 	done
 
+	log "INFO: Running NIC Firmware reset"
+	if [ "X$mode" == "Xmanufacturing" ]; then
+		log "INFO: Rebooting..."
+	fi
+	# Wait for these messages to be pulled by the rshim service
+	# as mlxfwreset will restart the DPU
+	sleep 3
+
 	msg=`chroot /mnt mlxfwreset -d /dev/mst/mt*_pciconf0 -y -l 3 --sync 1 r 2>&1`
 	if [ $? -ne 0 ]; then
 		log "INFO: NIC Firmware reset failed"
@@ -105,6 +115,7 @@ unmount_partitions()
 #
 # Set the Hardware Clock from the System Clock
 #
+
 hwclock -w
 
 #
@@ -170,12 +181,16 @@ fi
 
 log "INFO: $distro installation started"
 
-device=${device:-/dev/mmcblk0}
+default_device=/dev/mmcblk0
+# if [ -b /dev/nvme0n1 ]; then
+#     default_device=/dev/nvme0n1
+# fi
+device=${device:-"$default_device"}
 
 # We cannot use wait-for-root as it expects the device to contain a
 # known filesystem, which might not be the case here.
 while [ ! -b $device ]; do
-    log "Waiting for %s to be ready\n" "$device"
+    log "Waiting for $device to be ready\n"
     sleep 1
 done
 
@@ -212,6 +227,7 @@ EOF
 sync
 
 # Refresh partition table
+sleep 1
 blockdev --rereadpt ${device} > /dev/null 2>&1
 
 if function_exists bfb_pre_install; then
@@ -242,12 +258,13 @@ LABEL=writable / auto defaults 0 1
 LABEL=system-boot  /boot/efi       vfat    umask=0077      0       2
 EOF
 
-if (grep -qE "MemTotal:\s+16" /proc/meminfo > /dev/null 2>&1); then
-	sed -i -r -e "s/(net.netfilter.nf_conntrack_max).*/\1 = 500000/" /mnt/usr/lib/sysctl.d/90-bluefield.conf
+memtotal=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+if [ $memtotal -gt 16000000 ]; then
+	sed -i -r -e "s/(net.netfilter.nf_conntrack_max).*/\1 = 1000000/" /mnt/usr/lib/sysctl.d/90-bluefield.conf
 fi
 
 bind_partitions
-if (lspci -n -d 15b3: | grep -wq 'a2dc'); then
+if (hexdump -C /sys/firmware/acpi/tables/SSDT* | grep -q MLNXBF33); then
     # BlueField-3
     sed -i -e "s/0x01000000/0x13010000/g" /mnt/etc/default/grub
 fi
@@ -259,6 +276,16 @@ vmlinuz=`cd /mnt/boot; /bin/ls -1 vmlinuz-* | tail -1`
 initrd=`cd /mnt/boot; /bin/ls -1 initrd.img-* | tail -1 | sed -e "s/.old-dkms//"`
 ln -snf $vmlinuz /mnt/boot/vmlinuz
 ln -snf $initrd /mnt/boot/initrd.img
+
+kver=$(/bin/ls -1 /mnt/lib/modules/ |grep bf | head -1)
+echo sdhci-of-dwcmshc >> /mnt/etc/initramfs-tools/modules
+echo dw_mmc-bluefield >> /mnt/etc/initramfs-tools/modules
+echo dw_mmc >> /mnt/etc/initramfs-tools/modules
+echo dw_mmc-pltfm >> /mnt/etc/initramfs-tools/modules
+echo mmc_block >> /mnt/etc/initramfs-tools/modules
+echo mlxbf_tmfifo >> /mnt/etc/initramfs-tools/modules
+echo virtio_console >> /mnt/etc/initramfs-tools/modules
+chroot /mnt update-initramfs -k ${kver} -u
 
 cat > /mnt/etc/resolv.conf << EOF
 nameserver 127.0.0.53
@@ -380,6 +407,7 @@ sync
 
 unmount_partitions
 
+sleep 1
 blockdev --rereadpt ${device} > /dev/null 2>&1
 
 fsck.vfat -a ${device}p1
@@ -390,8 +418,8 @@ if [ -e /lib/firmware/mellanox/boot/capsule/boot_update2.cap ]; then
 	bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap --policy dual
 fi
 
-if [ "X$ENROLL_KEYS" = "Xyes" ]; then
-	bfrec --capsule /lib/firmware/mellanox/boot/capsule/EnrollKeysCap
+if [ -e /lib/firmware/mellanox/boot/capsule/efi_sbkeysync.cap ]; then
+	bfrec --capsule /lib/firmware/mellanox/boot/capsule/efi_sbkeysync.cap
 fi
 
 bfbootmgr --cleanall > /dev/null 2>&1
@@ -399,6 +427,7 @@ bfbootmgr --cleanall > /dev/null 2>&1
 # Make it the boot partition
 mount -t efivarfs none /sys/firmware/efi/efivars
 /bin/rm -f /sys/firmware/efi/efivars/Boot* > /dev/null 2>&1
+/bin/rm -f /sys/firmware/efi/efivars/dump-* > /dev/null 2>&1
 
 if [ -x /usr/sbin/grub-install ]; then
 	mount ${device}p2 /mnt/
@@ -456,24 +485,13 @@ log "INFO: Installation finished"
 
 if [ "$WITH_NIC_FW_UPDATE" == "yes" ]; then
 	if [ $NIC_FW_UPDATE_DONE -eq 1 ]; then
-		log "INFO: Running NIC Firmware reset"
-		if [ "X$mode" == "Xmanufacturing" ]; then
-			log "INFO: Rebooting..."
-		fi
-		# Wait for these messages to be pulled by the rshim service
-		# as mlxfwreset will restart the DPU
-		sleep 3
 		# Reset NIC FW
-		mount -t ext4 /dev/mmcblk0p2 /mnt
+		mount -t ext4 ${device}p2 /mnt
 		bind_partitions
 		fw_reset
 		unmount_partitions
 	fi
 fi
-
-echo
-echo "ROOT PASSWORD is \"root\""
-echo
 
 sleep 3
 log "INFO: Rebooting..."

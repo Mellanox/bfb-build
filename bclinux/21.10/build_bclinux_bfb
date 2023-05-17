@@ -1,0 +1,92 @@
+#!/bin/bash -x
+
+###############################################################################
+#
+# Copyright 2022 NVIDIA Corporation
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+###############################################################################
+
+DOCA_VERSION=@DOCA_VERSION@
+MLNX_OFED_VERSION=@MLNX_OFED_VERSION@
+BF_RELEASE=@BF_RELEASE@
+DISTRO_VERSION=@DISTRO_VERSION@
+WDIR=${WDIR:-/tmp}
+
+# Execute command w/ echo and exit if it fail
+ex()
+{
+	echo "$@"
+	if ! "$@"; then
+		printf "\nFailed executing $@\n\n"
+		exit 1
+	fi
+}
+
+ex yum-config-manager --nogpgcheck --add-repo https://linux.mellanox.com/public/repo/doca/${DOCA_VERSION}/openeuler20.03/aarch64/
+
+kernel=`/bin/ls -1tr /lib/modules | tail -1`
+
+# Set python2.7 as a default
+update-alternatives --install /usr/bin/python python /usr/bin/python3.6 1
+update-alternatives --install /usr/bin/python python /usr/bin/python2.7 10
+
+mkdir -p $WDIR
+cd $WDIR
+
+# Build and install MLNX_OFED drivers
+ex wget --quiet https://linux.mellanox.com/public/repo/bluefield/${BF_RELEASE}/extras/mlnx_ofed/${MLNX_OFED_VERSION}/MLNX_OFED_SRC-${MLNX_OFED_VERSION}.tgz
+ex tar xzf MLNX_OFED_SRC-${MLNX_OFED_VERSION}.tgz
+ex sed -i.orig -e "s/release.oe1.bclinux/release/" MLNX_OFED_SRC-${MLNX_OFED_VERSION}/install.pl
+echo '%dist %{nil}' > /root/.rpmmacros
+ex MLNX_OFED_SRC-${MLNX_OFED_VERSION}/install.pl -k $kernel --kernel-extra-args '--with-sf-cfg-drv --without-xdp --without-odp' --kernel-only --disable-kmp
+/bin/rm -f /root/.rpmmacros
+
+# Build and install BlueField SoC drivers
+ex wget --quiet -r -np -nH --cut-dirs=3 -R "index.html*" https://linux.mellanox.com/public/repo/bluefield/${BF_RELEASE}/extras/SRPMS/
+mkdir -p ${WDIR}/${BF_RELEASE}/extras/{SPECS,RPMS,SOURCES,BUILD}
+
+for p in ${WDIR}/${BF_RELEASE}/extras/SRPMS/*.src.rpm
+do
+	case $p in
+		*rshim* | *libpka* | *mlx-OpenIPMI* | *mlxbf-bootctl*)
+			continue
+			;;
+	esac
+	ex rpmbuild --rebuild -D "debug_package %{nil}" -D "KVERSION $kernel" --define "KMP 0" --define "_topdir ${WDIR}/${BF_RELEASE}/extras" $p
+done
+
+ex rpm -ivh --force ${WDIR}/${BF_RELEASE}/extras/RPMS/aarch64/*.rpm
+
+ex yum-config-manager --nogpgcheck --add-repo https://linux.mellanox.com/public/repo/doca/${DOCA_VERSION}/openeuler20.03/aarch64/
+
+ex yum install --nogpgcheck -y doca-runtime-user doca-sdk-user doca-tools
+ex dnf install --nogpgcheck -y mstflint
+ex dnf install --nogpgcheck -y mlnx-snap
+
+ex rpm -ihv --force /root/workspace/bootimages/mlxbf-bootimages-*.aarch64*.rpm || true
+
+systemctl enable openvswitch
+
+/usr/sbin/update-pciids || true
+
+sed -i -e "s/openeuler_20.03sp1/BCLinux21.10/" /etc/mlnx-release
+sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/;s/prod/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
+
+ex /root/workspace/create_bfb -k $kernel

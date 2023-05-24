@@ -63,7 +63,7 @@ RUN dnf install -y rdma-core rdma-core-devel libibverbs-utils.aarch64 mstflint
 RUN dnf install -y bf-release doca-cx-apps doca-cx-apps-devel doca-cx-libs doca-cx-libs-devel doca-cx-prime-runtime doca-cx-prime-sdk doca-cx-prime-tools doca-cx-samples meson mlnx-dpdk mlnx-dpdk-devel mlnx-tools mlxbf-bfscripts mlxbf-bootctl network-scripts-openvswitch openvswitch openvswitch-ipsec python3-openvswitch
 
 RUN dnf install -y https://linux.mellanox.com/public/repo/doca/2.0.2/centos8.2/aarch64/mft-4.24.0-72.arm64.rpm https://linux.mellanox.com/public/repo/doca/2.0.2/centos8.2/aarch64/mft-oem-4.24.0-72.arm64.rpm
-RUN dnf install -y https://linux.mellanox.com/public/repo/doca/2.0.2/centos8.2/aarch64/mlx-OpenIPMI-2.0.25-3.g46a7d4b.aarch64.rpm
+RUN dnf install -y https://linux.mellanox.com/public/repo/doca/2.0.2/OracleLinux8/aarch64/mlx-OpenIPMI-2.0.25-3.gd28940d.aarch64.rpm
 
 RUN echo BlueField_OS_@BF_VERSION@_OL_@DISTRO_VERSION@-@BUILDVER@.@IMAGE_TYPE@ > /etc/mlnx-release
 

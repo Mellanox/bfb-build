@@ -256,21 +256,21 @@ cp -a /lib/firmware/mellanox/boot/capsule ./lib/firmware/mellanox/boot/
 cp $CAPSULE ./lib/firmware/mellanox/boot/capsule/
 mkdir -p mnt
 
-mkdir -p rocky
+mkdir -p anolis
 # Tar the image
 XZ_OPT="--threads=0 -9 --verbose" tar -cJp --exclude='./workspace' --exclude='./signing-local' --exclude='./signing-shared' --exclude='./var/run/docker.sock' \
  --exclude='./root/workspace' --exclude='./tmp/*' --exclude='./run/*' --exclude='./sys/*' --exclude='./proc/*' --exclude='./dev/*' --exclude='./.dockerenv' \
  --exclude='./root/rpmbuild' --exclude='./root/.rpmmacros' --exclude='./root/.bash_history' --exclude='./var/tmp/*rpm' --exclude='./bin/qemu-aarch64-static' \
- --exclude='./usr/bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-arm-static' --exclude='./var/lib/yum/*' --exclude='./var/cache/yum/*' -f "./rocky/image.tar.xz" -C / .
-install -m 0755 ${SDIR}/install.sh ./rocky/install.sh
+ --exclude='./usr/bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-arm-static' --exclude='./var/lib/yum/*' --exclude='./var/cache/yum/*' -f "./anolis/image.tar.xz" -C / .
+install -m 0755 ${SDIR}/install.sh ./anolis/install.sh
 
 mkdir scripts
-cat > scripts/install-rocky.sh << EOF
+cat > scripts/install-anolis.sh << EOF
 #!/bin/sh
 
 echo
 echo "=================================" | tee /dev/kmsg
-echo "Installing Rocky Linux. Please wait..." | tee /dev/kmsg
+echo "Installing Anolis OS. Please wait..." | tee /dev/kmsg
 echo "=================================" | tee /dev/kmsg
 
 modprobe -a mlxbf_tmfifo dw_mmc_bluefield mmc_block virtio_console ${bootctl_module} 2>&1 | tee /dev/kmsg
@@ -278,7 +278,7 @@ modprobe -a mlx5_ib ib_uverbs 2>&1 | tee /dev/kmsg
 
 sleep 5
 
-/bin/sh /rocky/install.sh
+/bin/sh /anolis/install.sh
 if [ \$? -eq 0 ]; then
         echo "===================================" | tee /dev/kmsg
         echo "Installation finished. Rebooting..." | tee /dev/kmsg
@@ -287,12 +287,12 @@ if [ \$? -eq 0 ]; then
         reboot -f
 else
         echo "========================" | tee /dev/kmsg
-        echo "Failed to install Rocky Linux" | tee /dev/kmsg
+        echo "Failed to install Anolis OS" | tee /dev/kmsg
         echo "========================" | tee /dev/kmsg
 fi
 EOF
 
-sed -i -e "s@source_conf /etc/conf.d@&\nbash -x /scripts/install-rocky.sh@" init
+sed -i -e "s@source_conf /etc/conf.d@&\nbash -x /scripts/install-anolis.sh@" init
 
 # Make initramfs
 find . | cpio -H newc -o | gzip -9 > $initramfs

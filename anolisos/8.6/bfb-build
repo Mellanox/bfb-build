@@ -39,10 +39,12 @@ if ! (which docker > /dev/null 2>&1); then
 	exit 1
 fi
 
-DISTRO="rockylinux"
+DISTRO="anolisos"
 DISTRO_VERSION="8.6"
-VERSION="3.9.3"
+VERSION="3.9.3-12383"
+MLNX_OFED_VERSION="23.04-1.1.3.0"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
+CUSTOM_VERSION="${DISTRO}_${DISTRO_VERSION}"
 
 WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
 
@@ -52,13 +54,12 @@ wget -P $WDIR -r --no-verbose --no-directories -l1 --no-parent -A 'mlxbf-bootima
 cp	Dockerfile \
 	create_bfb \
 	install.sh \
-	build_rockylinux_bfb \
 	../../common/tools/qemu-aarch64-static \
 	$WDIR
 
 cd $WDIR
 
-sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/" Dockerfile
+sed -i -e "s/@MLNX_OFED_VERSION@/$MLNX_OFED_VERSION/g;s/@VERSION@/$VERSION/g;s/@IMAGE_TYPE@/$IMAGE_TYPE/g;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/g" Dockerfile
 
 docker build -t bfb_runtime_${DISTRO}${DISTRO_VERSION} -f Dockerfile .
 docker run -t --rm --privileged -e container=docker \
@@ -71,4 +72,4 @@ docker run -t --rm --privileged -e container=docker \
 
 readlink -f *.bfb
 
-echo "Default root password is: rocky"
+echo "Default root password is: anolis"

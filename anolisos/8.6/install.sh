@@ -135,7 +135,7 @@ if [ -e /etc/bf.cfg ]; then
 	fi
 fi
 
-distro="Rocky Linux"
+distro="Anolis OS"
 
 function_exists()
 {
@@ -300,7 +300,7 @@ if (lspci -n -d 15b3: | grep -wq 'a2dc'); then
     sed -i -e "s/0x01000000/0x13010000/g" /mnt/etc/default/grub
 fi
 
-chroot /mnt grub2-mkconfig -o /boot/efi/EFI/rocky/grub.cfg
+chroot /mnt grub2-mkconfig -o /boot/efi/EFI/anolis/grub.cfg
 
 kdir=$(/bin/ls -1d /mnt/lib/modules/4.18* /mnt/lib/modules/4.19* /mnt/lib/modules/4.20* /mnt/lib/modules/5.4* 2> /dev/null)
 kver=""
@@ -313,7 +313,7 @@ else
     kver=$(/bin/ls -1 /mnt/lib/modules/ | head -1)
 fi
 
-echo rocky | chroot /mnt passwd root --stdin
+echo anolis | chroot /mnt passwd root --stdin
 
 if [ `wc -l /mnt/etc/hostname | cut -d ' ' -f 1` -eq 0 ]; then
 	echo "localhost" > /mnt/etc/hostname
@@ -451,7 +451,7 @@ bfbootmgr --cleanall > /dev/null 2>&1
 
 mount -t efivarfs none /sys/firmware/efi/efivars
 /bin/rm -f /sys/firmware/efi/efivars/Boot* > /dev/null 2>&1
-efibootmgr -c -d /dev/mmcblk0 -p 1 -l "\EFI\rocky\grubaa64.efi" -L $distro
+efibootmgr -c -d /dev/mmcblk0 -p 1 -l "\EFI\anolis\grubaa64.efi" -L $distro
 umount /sys/firmware/efi/efivars
 
 BFCFG=`which bfcfg 2> /dev/null`
@@ -486,7 +486,7 @@ if [ -n "$BFCFG" ]; then
 fi
 
 echo
-echo "ROOT PASSWORD is \"rocky\""
+echo "ROOT PASSWORD is \"anolis\""
 echo
 
 if function_exists bfb_post_install; then

@@ -28,12 +28,12 @@ RUN dnf install -y --disableexcludes=kubernetes \
 	libnl3-devel selinux-policy-devel numactl-devel unbound-devel libpcap-devel tcl-devel \
 	valgrind-devel iptables-devel libdb-devel libmnl-devel libcap-ng-devel systemd-devel \
 	grubby grub2-efi-aa64 efibootmgr \
-	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libmd-1.0.4-2.el8.aarch64.rpm \
-	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libmd-devel-1.0.4-2.el8.aarch64.rpm \
+	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libmd-1.1.0-1.el8.aarch64.rpm \
+	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libmd-devel-1.1.0-1.el8.aarch64.rpm \
 	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libbsd-devel-0.11.7-2.el8.aarch64.rpm \
-	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libbsd-0.11.7-2.el8.aarch64.rpm\
-	https://download.fedoraproject.org/pub/epel/7/aarch64/Packages/l/lcov-1.13-1.el7.noarch.rpm\
-	https://download.fedoraproject.org/pub/epel/7/aarch64/Packages/r/re2c-0.14.3-2.el7.aarch64.rpm\
+	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libbsd-0.11.7-2.el8.aarch64.rpm \
+	https://download.fedoraproject.org/pub/epel/7/aarch64/Packages/l/lcov-1.13-1.el7.noarch.rpm \
+	https://download.fedoraproject.org/pub/epel/7/aarch64/Packages/r/re2c-0.14.3-2.el7.aarch64.rpm \
 	https://vault.centos.org/centos/8/BaseOS/aarch64/os/Packages/watchdog-5.15-2.el8.aarch64.rpm
 
 RUN dnf install -y rpm-build rpm-sign automake meson cmake gcc-c++

@@ -445,19 +445,21 @@ umount /mnt
 
 sync
 
-bfrec --bootctl --policy dual 2> /dev/null || true
+bfrec --bootctl 2> /dev/null || true
 if [ -e /lib/firmware/mellanox/boot/capsule/boot_update2.cap ]; then
-	bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap --policy dual
+	bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap
 fi
 
-if [ -e /lib/firmware/mellanox/boot/capsule/efi_sbkeyssync.cap ]; then
-	bfrec --capsule /lib/firmware/mellanox/boot/capsule/efi_sbkeyssync.cap
+if [ "X$ENROLL_KEYS" = "Xyes" ]; then
+	bfrec --capsule /lib/firmware/mellanox/boot/capsule/EnrollKeysCap
 fi
 
 # Clean up actual boot entries.
 bfbootmgr --cleanall > /dev/null 2>&1
 
-mount -t efivarfs none /sys/firmware/efi/efivars
+if [ ! -d /sys/firmware/efi/efivars ]; then
+	mount -t efivarfs none /sys/firmware/efi/efivars
+fi
 /bin/rm -f /sys/firmware/efi/efivars/Boot* > /dev/null 2>&1
 /bin/rm -f /sys/firmware/efi/efivars/dump-* > /dev/null 2>&1
 efibootmgr -c -d "$device" -p 1 -l "\EFI\openEuler\grubaa64.efi" -L $distro

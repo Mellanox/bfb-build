@@ -26,7 +26,7 @@ RUN yum install -y \
 	popt-devel bc lm_sensors cryptsetup rasdaemon pciutils-devel watchdog \
 	kexec-tools jq python3-pip libnghttp2 wget annobin kernel-rpm-macros \
 	iproute-tc network-scripts usbutils nfs-utils python3-six chkconfig \
-	dosfstools e2fsprogs openssh-server ipmitool
+	dosfstools e2fsprogs openssh-server ipmitool chrony
 
 RUN echo -e '[ol8_developer_CODEREADY] \n\
 name=Oracle Linux $releasever CodeReady Packages for Development ($basearch) \n\

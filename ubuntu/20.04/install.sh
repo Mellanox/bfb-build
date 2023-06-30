@@ -87,6 +87,12 @@ fw_reset()
 }
 
 #
+# Set the Hardware Clock from the System Clock
+#
+
+hwclock -w
+
+#
 # Check auto configuration passed from boot-fifo
 #
 boot_fifo_path="/sys/bus/platform/devices/MLNXBF04:00/bootfifo"
@@ -156,7 +162,7 @@ echo 0 > /proc/sys/kernel/hung_task_timeout_secs
 # We cannot use wait-for-root as it expects the device to contain a
 # known filesystem, which might not be the case here.
 while [ ! -b $device ]; do
-    log "Waiting for %s to be ready\n" "$device"
+    log "Waiting for $device to be ready\n"
     sleep 1
 done
 
@@ -592,9 +598,9 @@ blockdev --rereadpt ${device} > /dev/null 2>&1
 
 sync
 
-bfrec --bootctl --policy dual 2> /dev/null || true
+bfrec --bootctl  2> /dev/null || true
 if [ -e /lib/firmware/mellanox/boot/capsule/boot_update2.cap ]; then
-	bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap --policy dual
+	bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap 
 fi
 
 if [ "X$ENROLL_KEYS" = "Xyes" ]; then

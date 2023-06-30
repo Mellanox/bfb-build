@@ -3,10 +3,13 @@ FROM scratch
 ADD ubuntu-20.04-server-cloudimg-arm64-root.tar.xz /
 ADD qemu-aarch64-static /usr/bin/
 
+ARG BASE_URL
+ARG DOCA_VERSION
+ARG BSP_VERSION
 WORKDIR /root/workspace
 ADD install.sh .
 ADD create_bfb .
-ADD mlxbf-bootimages_3.9.3-12383_arm64.deb .
+ADD bootimages bootimages/
 ADD doca-repo.deb .
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -19,7 +22,7 @@ RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
 RUN apt update
 RUN apt remove --purge -y snapd plymouth
 RUN apt autoremove -y
-RUN apt install -y grub-efi-arm64-signed grub-efi-arm64-bin shim-signed watchdog binutils sbsigntool rasdaemon net-tools nfs-common iptables-persistent rsync tcpdump nvme-cli iputils-arping iputils-ping iputils-tracepath bridge-utils iperf3 bc lm-sensors ifenslave acpid network-manager kexec-tools i2c-tools dc lldpad unzip sysstat mmc-utils
+RUN apt install -y grub-efi-arm64-signed grub-efi-arm64-bin shim-signed watchdog binutils sbsigntool rasdaemon net-tools nfs-common iptables-persistent rsync tcpdump nvme-cli iputils-arping iputils-ping iputils-tracepath bridge-utils iperf3 bc lm-sensors ifenslave acpid network-manager kexec-tools i2c-tools dc lldpad unzip sysstat mmc-utils uuid ntp
 # Install ipmitool and ignore default OpenIPMI due to possible conflicts with mlx-openipmi (notice the - in openipmi-)
 # Ref: https://serverfault.com/questions/250224/how-do-i-get-apt-get-to-ignore-some-dependencies
 RUN apt install -y ipmitool openipmi-
@@ -39,29 +42,29 @@ RUN echo 'set superusers="admin"' >> /etc/grub.d/40_custom; \
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.8 1
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python2.7 10
 
-RUN curl -fsSLo /usr/share/keyrings/kubernetes-archive-keyring.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg
+RUN wget -qO - https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key --keyring /usr/share/keyrings/kubernetes-archive-keyring.gpg add -
 RUN echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | tee /etc/apt/sources.list.d/kubernetes.list
 RUN apt update
-RUN apt install -y kubelet runc containerd cri-tools
-RUN apt upgrade -y
-RUN wget -qO - https://linux.mellanox.com/public/repo/doca/1.5.1/ubuntu20.04/aarch64/GPG-KEY-Mellanox.pub | sudo apt-key add -
-RUN echo "deb [trusted=yes] https://linux.mellanox.com/public/repo/doca/1.5.1/ubuntu20.04/\$(ARCH) ./" | tee /etc/apt/sources.list.d/doca.tmp.list
+RUN apt install -y kubelet=1.25.3-00 runc containerd cri-tools
+RUN apt-mark hold kubelet
+RUN wget -qO - $BASE_URL/doca/$DOCA_VERSION/GPG-KEY-Mellanox.pub | sudo apt-key add -
+RUN echo "deb [trusted=yes] ${BASE_URL}/doca/$DOCA_VERSION/ubuntu20.04/\$(ARCH) ./" | tee /etc/apt/sources.list.d/doca.tmp.list
 RUN dpkg -i /root/workspace/doca-repo.deb
 RUN apt update || true
 
 RUN apt install -y -f \
-	linux-bluefield=5.4.0.1049.47 \
-	linux-bluefield-headers-5.4.0-1049=5.4.0-1049.55 \
-	linux-bluefield-tools-5.4.0-1049=5.4.0-1049.55 \
-	linux-headers-5.4.0-1049-bluefield=5.4.0-1049.55 \
-	linux-headers-bluefield=5.4.0.1049.47 \
-	linux-image-5.4.0-1049-bluefield=5.4.0-1049.55 \
-	linux-image-bluefield=5.4.0.1049.47 \
-	linux-modules-5.4.0-1049-bluefield=5.4.0-1049.55 \
-	linux-tools-5.4.0-1049-bluefield=5.4.0-1049.55 \
-	linux-tools-bluefield=5.4.0.1049.47 \
-	linux-libc-dev:arm64 \
-	linux-tools-common
+    linux-bluefield=5.4.0.1066.61 \
+    linux-bluefield-headers-5.4.0-1066=5.4.0-1066.72 \
+    linux-bluefield-tools-5.4.0-1066=5.4.0-1066.72 \
+    linux-headers-5.4.0-1066-bluefield=5.4.0-1066.72 \
+    linux-headers-bluefield=5.4.0.1066.61 \
+    linux-image-5.4.0-1066-bluefield=5.4.0-1066.72 \
+    linux-image-bluefield=5.4.0.1066.61 \
+    linux-libc-dev:arm64 \
+    linux-modules-5.4.0-1066-bluefield=5.4.0-1066.72 \
+    linux-tools-5.4.0-1066-bluefield=5.4.0-1066.72 \
+    linux-tools-bluefield=5.4.0.1066.61 \
+    linux-tools-common
 
 
 RUN apt install -y -f doca-runtime doca-tools doca-sdk || true
@@ -75,7 +78,7 @@ RUN apt update || true
 RUN /usr/sbin/dpkg-reconfigure bf-release || true
 RUN mkdir -p /etc/kubelet.d
 RUN mkdir -p /workspace
-RUN dpkg -i /root/workspace/mlxbf-bootimages_*_arm64.deb
+RUN dpkg -i bootimages/mlxbf-bootimages_*_arm64.deb
 
 # Manage system services
 RUN systemctl enable mlx-regex.service || true
@@ -121,4 +124,4 @@ RUN mkdir -p /boot/efi/EFI/ubuntu/; \
 
 RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
 
-CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1049-bluefield"]
+CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1066-bluefield"]

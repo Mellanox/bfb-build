@@ -240,7 +240,7 @@ copy_rpm()
 			done
 			;;
 		*)
-			for f in `rpm -ql $package | grep -vE 'share|build-id'`
+			for f in `rpm -ql $package 2> /dev/null | grep -vE 'share|build-id'`
 			do
 				if [ -d $f ]; then
 					continue

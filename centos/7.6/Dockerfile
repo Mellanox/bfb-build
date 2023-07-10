@@ -1,16 +1,20 @@
 from mellanox/bluefield:bfb_builder_centos7.6
 ADD qemu-aarch64-static /usr/bin/
 
+ARG BASE_URL
+ARG DOCA_VERSION
+ARG BSP_VERSION
 WORKDIR /root/workspace
 ADD install.sh .
 ADD create_bfb .
-ADD mlxbf-bootimages-3.9.3-12383.aarch64.rpm .
+ADD bootimages bootimages/
 ADD parted-3.2-39.el7.aarch64.rpm .
 
 ENV RUN_FW_UPDATER=no
 
 RUN rpm -Uhv parted-3.2-39.el7.aarch64.rpm
 
+RUN sed -i 's|baseurl=http://mirror.centos.org/altarch|baseurl=https://mirror1.hs-esslingen.de/pub/Mirrors/centos-altarch|g' /etc/yum.repos.d/CentOS-*
 RUN yum install -y \
 		--enablerepo=updates \
 		NetworkManager \
@@ -24,18 +28,34 @@ RUN yum install -y \
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.8 1
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python2.7 10
 
-RUN yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo; \
-    yum install -y --enablerepo=extras --nogpgcheck docker-ce docker-ce-cli container-selinux containerd.io; \
-    systemctl enable docker
+RUN echo -e "[kubernetes] \n\
+name=Kubernetes \n\
+baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-aarch64 \n\
+enabled=1 \n\
+gpgcheck=1 \n\
+gpgkey=https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg \n\
+exclude=kubelet kubeadm kubectl kubernetes-cni" > /etc/yum.repos.d/kubernetes.repo
 
-RUN yum-config-manager --nogpgcheck --add-repo https://download-ib01.fedoraproject.org/pub/epel/7/aarch64/; \
+RUN echo -e "[docker-ce-stable] \n\
+name=Docker CE Stable - $basearch \n\
+baseurl=https://download.docker.com/linux/centos/7/aarch64/stable \n\
+enabled=1 \n\
+gpgcheck=1 \n\
+gpgkey=https://download.docker.com/linux/centos/gpg" > /etc/yum.repos.d/docker-ce.repo
+
+
+RUN yum install -y --disableexcludes=kubernetes --enablerepo=extras containerd.io kubelet-1.25.3-0.aarch64 cri-tools-1.25.0-0.aarch64 kubernetes-cni-1.1.1-0.aarch64
+
+RUN yum-config-manager --nogpgcheck --add-repo https://download.fedoraproject.org/pub/epel/7/aarch64/; \
      yum install -y epel-release; \
      yum install -y --nogpgcheck uriparser
 
-RUN yum-config-manager --nogpgcheck --add-repo https://linux.mellanox.com/public/repo/doca/1.5.1/centos7.6/aarch64/
+RUN yum-config-manager --nogpgcheck --add-repo $BASE_URL/doca/$DOCA_VERSION/centos7.6/aarch64/
 
 RUN yum install --nogpgcheck -y doca-runtime doca-tools doca-sdk
-RUN rpm -ihv --force mlxbf-bootimages-*.aarch64.rpm
 RUN /usr/sbin/update-pciids || true
+RUN rpm -ihv --force bootimages/mlxbf-bootimages-*.aarch64.rpm || true
 
-CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1049.116.g01f8472-bluefield"]
+RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
+
+CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1064.13.gb439522-bluefield"]

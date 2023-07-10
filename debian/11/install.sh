@@ -105,6 +105,7 @@ unmount_partitions()
 #
 # Set the Hardware Clock from the System Clock
 #
+
 hwclock -w
 
 #
@@ -175,7 +176,7 @@ device=${device:-/dev/mmcblk0}
 # We cannot use wait-for-root as it expects the device to contain a
 # known filesystem, which might not be the case here.
 while [ ! -b $device ]; do
-    log "Waiting for %s to be ready\n" "$device"
+    log "Waiting for $device to be ready\n"
     sleep 1
 done
 
@@ -385,9 +386,9 @@ blockdev --rereadpt ${device} > /dev/null 2>&1
 fsck.vfat -a ${device}p1
 sync
 
-bfrec --bootctl --policy dual 2> /dev/null || true
+bfrec --bootctl  2> /dev/null || true
 if [ -e /lib/firmware/mellanox/boot/capsule/boot_update2.cap ]; then
-	bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap --policy dual
+	bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap
 fi
 
 if [ "X$ENROLL_KEYS" = "Xyes" ]; then
@@ -470,10 +471,6 @@ if [ "$WITH_NIC_FW_UPDATE" == "yes" ]; then
 		unmount_partitions
 	fi
 fi
-
-echo
-echo "ROOT PASSWORD is \"root\""
-echo
 
 sleep 3
 log "INFO: Rebooting..."

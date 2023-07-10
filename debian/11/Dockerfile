@@ -1,10 +1,13 @@
 FROM mellanox/bluefield:bfb_builder_debian11
 ADD qemu-aarch64-static /usr/bin/
 
+ARG BASE_URL
+ARG DOCA_VERSION
+ARG BSP_VERSION
 WORKDIR /root/workspace
 ADD install.sh .
 ADD create_bfb .
-ADD mlxbf-bootimages_3.9.3-12383_arm64.deb .
+ADD bootimages bootimages/
 ADD doca-repo.deb .
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -52,17 +55,17 @@ RUN apt purge -y docker.io; \
         update-alternatives --set iptables /usr/sbin/iptables-legacy; \
         update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy;
 
-RUN wget -qO - https://linux.mellanox.com/public/repo/doca/1.5.1/debian11/aarch64/GPG-KEY-Mellanox.pub | apt-key add -
-RUN echo "deb [trusted=yes] https://linux.mellanox.com/public/repo/doca/1.5.1/debian11/\$(ARCH) ./" | tee /etc/apt/sources.list.d/doca.tmp.list
+RUN wget -qO - $BASE_URL/doca/$DOCA_VERSION/GPG-KEY-Mellanox.pub | apt-key add -
+RUN echo "deb [trusted=yes] $BASE_URL/doca/$DOCA_VERSION/debian11/\$(ARCH) ./" | tee /etc/apt/sources.list.d/doca.tmp.list
 RUN apt update || true
 
 RUN dpkg -i /root/workspace/doca-repo.deb
 RUN apt update || true
 
 RUN apt install -y -f --allow-downgrades \
-		linux-image-5.10.156-bf.76.g6d46ef5=5.10.156-bf.76.g6d46ef5-1 \
-		linux-headers-5.10.156-bf.76.g6d46ef5=5.10.156-bf.76.g6d46ef5-1 \
-		linux-libc-dev=5.10.156-bf.76.g6d46ef5-1
+		linux-image-5.10.185-bf.5.gef0d5fe=5.10.185-bf.5.gef0d5fe-1 \
+		linux-headers-5.10.185-bf.5.gef0d5fe=5.10.185-bf.5.gef0d5fe-1 \
+		linux-libc-dev=5.10.185-bf.5.gef0d5fe-1
 RUN apt install -y -f doca-runtime-user || true
 RUN apt install -y -f doca-runtime-kernel || true
 RUN apt install -y -f doca-sdk-user || true
@@ -70,7 +73,7 @@ RUN apt install -y -f doca-sdk-kernel || true
 RUN apt install -y -f doca-tools || true
 RUN cd /var/doca-dpu-repo-debian11-local; for dr in *modules*deb; do dpkg -i $dr || true;done
 RUN apt --fix-broken install -y || true
-# RUN apt install -y bf-release mlxbf-scripts mstflint || true
+RUN apt install -y bf-release mlxbf-scripts mstflint || true
 RUN apt install -y libvma libvma-dev libvma-utils || true
 RUN apt install -y mlnx-libsnap mlnx-snap || true
 RUN apt remove --purge -y doca-dpu-repo-debian11-local || true
@@ -79,7 +82,7 @@ RUN apt update || true
 RUN /usr/sbin/dpkg-reconfigure bf-release || true
 RUN mkdir -p /etc/kubelet.d
 RUN mkdir -p /workspace
-RUN dpkg -i /root/workspace/mlxbf-bootimages_*_arm64.deb
+RUN dpkg -i bootimages/mlxbf-bootimages_*_arm64.deb
 
 # Manage system services
 RUN systemctl enable mlx-regex.service || true
@@ -125,4 +128,4 @@ RUN mkdir -p /boot/efi/EFI/debian/; \
 
 RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
 
-CMD ["/root/workspace/create_bfb", "-k", "5.10.156-bf.76.g6d46ef5"]
+CMD ["/root/workspace/create_bfb", "-k", "5.10.185-bf.5.gef0d5fe"]

@@ -101,6 +101,12 @@ unmount_partitions()
 }
 
 #
+# Set the Hardware Clock from the System Clock
+#
+
+hwclock -w
+
+#
 # Check auto configuration passed from boot-fifo
 #
 boot_fifo_path="/sys/bus/platform/devices/MLNXBF04:00/bootfifo"
@@ -306,7 +312,7 @@ kdir=$(/bin/ls -1d /mnt/lib/modules/4.18* /mnt/lib/modules/4.19* /mnt/lib/module
 kver=""
 if [ -n "$kdir" ]; then
     kver=${kdir##*/}
-    DRACUT_CMD=`chroot /mnt /bin/ls -1 /sbin/dracut /usr/bin/dracut 2> /dev/null`
+    DRACUT_CMD=`chroot /mnt /bin/ls -1 /sbin/dracut /usr/bin/dracut 2> /dev/null | head -n 1 | tr -d '\n'`
     chroot /mnt grub2-set-default 0
     chroot /mnt $DRACUT_CMD --kver ${kver} --force --add-drivers "dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block mlxbf_tmfifo virtio_console" /boot/initramfs-${kver}.img
 else
@@ -439,9 +445,9 @@ umount /mnt
 
 sync
 
-bfrec --bootctl --policy dual 2> /dev/null || true
+bfrec --bootctl  2> /dev/null || true
 if [ -e /lib/firmware/mellanox/boot/capsule/boot_update2.cap ]; then
-	bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap --policy dual
+	bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap
 fi
 
 if [ "X$ENROLL_KEYS" = "Xyes" ]; then

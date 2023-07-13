@@ -11,17 +11,7 @@ Note: It is expected that these docker images will run faster on ARM (aarch64) s
 
 In case of using x86_64 server install and configure qemu:
 
-On Ubuntu server:
-$ sudo apt install qemu-user-static
-
-On CentOS:
-$ sudo yum install epel-release
-$ sudo yum install qemu-system-arm
-
-On Fedora:
-$ sudo yum install qemu-system-aarch64
-
-Alternatively, install qemu-user-static using docker container:
+Install qemu-user-static using docker container:
   $ docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
   See more info under: https://github.com/multiarch/qemu-user-static
 
@@ -225,12 +215,7 @@ https://askubuntu.com/questions/1408090/cannot-run-apt-update-on-ubuntu-22-docke
 ```
 
 ```
-bfb-build fails on the following OSes due to qemu issue:
-- CentOS Linux release 8.2.2004 x86_64
-  Error:
-  qemu: uncaught target signal 11 (Segmentation fault) - core dumped
-  Segmentation fault (core dumped)
-- Fedora 31 x86_64
+bfb-build fails due to qemu issue:
   Error:
   qemu: uncaught target signal 11 (Segmentation fault) - core dumped
   Segmentation fault (core dumped)

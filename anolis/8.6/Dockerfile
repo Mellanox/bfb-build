@@ -72,4 +72,8 @@ RUN rpm -ihv --force bootimages/mlxbf-bootimages-*.aarch64.rpm || true
 
 RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" -e "s/prod/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
 
+# Manage services
+RUN systemctl enable mlx_ipmid.service || true
+RUN systemctl enable set_emu_param.service || true
+
 CMD ["/root/workspace/create_bfb", "-k", "5.10.134-13.1.an8.aarch64"]

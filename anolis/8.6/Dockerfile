@@ -44,7 +44,7 @@ RUN dnf install -y --disableexcludes=kubernetes \
 	usbutils kexec-tools nfs-utils dracut-tools dracut-network dracut-squash iproute-tc sudo parted passwd \
 	network-scripts NetworkManager NetworkManager-ovs NetworkManager-config-server tcpdump \
 	libarchive libreswan rsyslog system-lsb-core time vim numactl libiscsi \
-	perl-Fedora-VSP perl-generators edac-util dmidecode \
+	perl-Fedora-VSP perl-generators edac-util dmidecode ipmitool \
 	glib2-devel python3-devel elfutils-devel binutils-devel pciutils-devel openssl-devel \
 	libnl3-devel selinux-policy-devel numactl-devel unbound-devel libpcap-devel tcl-devel \
 	valgrind-devel iptables-devel libdb-devel libmnl-devel libcap-ng-devel systemd-devel \

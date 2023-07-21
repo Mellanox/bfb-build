@@ -67,6 +67,8 @@ RUN dnf install --nogpgcheck -y mstflint-4.16.1-2.2307026
 RUN dnf install --nogpgcheck -y doca-runtime doca-tools doca-sdk
 RUN dnf install --nogpgcheck -y dpacc dpacc-extract dpa-compiler
 
+RUN dnf install --nogpgcheck -y mmc-utils || dnf install --nogpgcheck -y $BASE_URL/bluefield/$BSP_VERSION/extras/mmc-utils/mmc-utils-0.1+git.20230209-1.1.aarch64.rpm || true
+
 RUN /usr/sbin/update-pciids || true
 RUN rpm -ihv --force bootimages/mlxbf-bootimages-*.aarch64.rpm || true
 

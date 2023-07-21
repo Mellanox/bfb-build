@@ -228,7 +228,7 @@ copy_rpm()
 }
 
 # Copy the content of RPM packages
-for package in mlxbf-bfscripts kmod util-linux dosfstools e2fsprogs pciutils usbutils chkconfig mft mft-oem kernel-mft tar xfsprogs coreutils-single parted which curl openssl gawk passwd net-tools wget $ADDON_RPMS
+for package in mlxbf-bfscripts kmod util-linux dosfstools e2fsprogs pciutils usbutils chkconfig mft mft-oem kernel-mft tar xfsprogs coreutils-single parted which curl openssl gawk passwd net-tools wget nvme-cli mmc-utils $ADDON_RPMS
 do
     copy_rpm $package || true
 done

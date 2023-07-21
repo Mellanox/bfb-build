@@ -271,8 +271,10 @@ echo "=================================" | tee /dev/kmsg
 echo "Installing Anolis Linux. Please wait..." | tee /dev/kmsg
 echo "=================================" | tee /dev/kmsg
 
-modprobe -a sdhci-of-dwcmshc mlxbf_tmfifo dw_mmc-bluefield mmc_block virtio_console nvme ${bootctl_module} 2>&1 | tee /dev/kmsg
-modprobe -a mlx5_ib ib_uverbs 2>&1 | tee /dev/kmsg
+modprobe ${bootctl_module} 2>&1 | tee /dev/kmsg
+modprobe -a dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block virtio_console dw_mmc-pltfm sdhci-of-dwcmshc 2>&1 | tee /dev/kmsg
+# modprobe nvme
+# modprobe -a mlx5_ib ib_uverbs 2>&1 | tee /dev/kmsg
 
 sleep 5
 

@@ -86,8 +86,6 @@ do
         shift
 done
 
-bootctl_module="mlxbf-bootctl"
-
 SCRIPTS_DIR=`dirname $0`
 
 WDIR=${WDIR:-/root/workspace/bfb}
@@ -120,7 +118,7 @@ cd ${WDIR}
 
 initramfs=$WDIR/dump-initramfs-v0
 
-dracut --no-hostonly -m "bash network base shutdown" --add-drivers "${bootctl_module} sdhci-of-dwcmshc mlxbf-tmfifo dw_mmc-bluefield mmc_block virtio_console mlx5_core mlx5_ib ib_umad nvme gpio-mlxbf2 gpio-mlxbf3 mlxbf-gige" --filesystems "xfs vfat" --gzip $initramfs ${kernel}
+dracut --no-hostonly -m "bash network base shutdown" --add-drivers "mlxbf-bootctl sdhci-of-dwcmshc mlxbf-tmfifo dw_mmc-bluefield mmc_block virtio_console mlx5_core mlx5_ib mlxfw ib_umad nvme gpio-mlxbf2 gpio-mlxbf3 mlxbf-gige" --filesystems "xfs vfat" --gzip $initramfs ${kernel}
 
 rm -f /etc/udev/rules.d/91-tmfifo_net.rules /etc/udev/rules.d/92-oob_net.rules
 
@@ -271,10 +269,9 @@ echo "=================================" | tee /dev/kmsg
 echo "Installing Anolis Linux. Please wait..." | tee /dev/kmsg
 echo "=================================" | tee /dev/kmsg
 
-modprobe ${bootctl_module} 2>&1 | tee /dev/kmsg
-modprobe -a dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block virtio_console dw_mmc-pltfm sdhci-of-dwcmshc 2>&1 | tee /dev/kmsg
+modprobe -a sdhci-of-dwcmshc mlxbf_tmfifo dw_mmc-bluefield mmc_block virtio_console mlxbf-bootctl 2>&1 | tee /dev/kmsg
 # modprobe nvme
-# modprobe -a mlx5_ib ib_uverbs 2>&1 | tee /dev/kmsg
+# modprobe -a mlx5_ib mlxfw ib_umad 2>&1 | tee /dev/kmsg
 
 sleep 5
 

@@ -63,7 +63,7 @@ enabled=1" > /etc/yum.repos.d/doca.repo
 RUN dnf install -y kernel kernel-modules kernel-devel kernel-core kernel-modules-extra
 RUN dnf install -y openssl-1.1.1q openssl-devel-1.1.1q openssl-libs-1.1.1q openssl-perl-1.1.1q openssl-static-1.1.1q
 
-RUN dnf install --nogpgcheck -y mstflint-4.16.1-2.2307026
+RUN dnf install --nogpgcheck -y mstflint-4.16.1
 RUN dnf install --nogpgcheck -y doca-runtime doca-tools doca-sdk
 RUN dnf install --nogpgcheck -y dpacc dpacc-extract dpa-compiler
 

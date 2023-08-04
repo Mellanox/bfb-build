@@ -25,6 +25,8 @@
 
 PATH="/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:/opt/mellanox/scripts"
 NIC_FW_UPDATE_DONE=0
+RC=0
+err_msg=""
 
 fspath=$(readlink -f `dirname $0`)
 
@@ -171,17 +173,20 @@ fi
 
 log "INFO: $distro installation started"
 
+sleep 2m
+/sbin/modprobe nvme
+
 # Create partitions.
 default_device=/dev/mmcblk0
-if [ -b /dev/nvme0n1 ]; then
-    default_device=/dev/nvme0n1
-fi
+# if [ -b /dev/nvme0n1 ]; then
+#     default_device="/dev/$(cd /sys/block; /bin/ls -1d nvme* | sort -n | tail -1)"
+# fi
 device=${device:-"$default_device"}
 
 if [ "$SHRED_DRIVES" == "yes" ]; then
 	if [ -b /dev/nvme0n1 ]; then
-		log "Shredding /dev/nvme0n1"
-		shred -n 1 -v /dev/nvme0n1 &
+		log "Shredding /dev/$(cd /sys/block; /bin/ls -1d nvme* | sort -n | tail -1)"
+		shred -n 1 -v "/dev/$(cd /sys/block; /bin/ls -1d nvme* | sort -n | tail -1)" &
 	fi
 	if [ -b /dev/mmcblk0 ]; then
 		log "Shredding /dev/mmcblk0"
@@ -279,10 +284,15 @@ bind_partitions
 # Then, set boot arguments: Read current 'console' and 'earlycon'
 # parameters, and append the root filesystem parameters.
 bootarg="$(cat /proc/cmdline | sed 's/initrd=initramfs//;s/console=.*//')"
-sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=auto $bootarg console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 modprobe.blacklist=mlx5_core,mlx5_ib net.ifnames=0 biosdevname=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
+sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=auto $bootarg console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 modprobe.blacklist=mlx5_core,mlx5_ib selinux=0 net.ifnames=0 biosdevname=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
 if (hexdump -C /sys/firmware/acpi/tables/SSDT* | grep -q MLNXBF33); then
     # BlueField-3
     sed -i -e "s/0x01000000/0x13010000/g" /mnt/etc/default/grub
+fi
+
+if (lspci -vv | grep -wq SimX); then
+	# Remove earlycon from grub parameters on SimX
+	sed -i -r -e 's/earlycon=[^ ]* //g' /mnt/etc/default/grub
 fi
 
 chroot /mnt grub2-mkconfig -o /boot/efi/EFI/anolis/grub.cfg
@@ -386,6 +396,8 @@ if [ -n "$FLINT" ]; then
 	esac
 fi
 
+/sbin/modprobe -a mlx5_core ib_umad
+
 if [ "$WITH_NIC_FW_UPDATE" == "yes" ]; then
 	if [ $NIC_FW_UPDATE_DONE -eq 0 ]; then
 		fw_update
@@ -461,6 +473,14 @@ PXE_DHCP_CLASS_ID=$DHCP_CLASS_ID
 EOF
 
 	$BFCFG
+	rc=$?
+	if [ $rc -ne 0 ]; then
+		if (grep -q "boot: failed to get MAC" /tmp/bfcfg.log > /dev/null 2>&1); then
+			err_msg="Failed to add PXE boot entries"
+		fi
+	fi
+
+	RC=$((RC+rc))
 
 	# Restore the original bf.cfg
 	/bin/rm -f /etc/bf.cfg
@@ -471,6 +491,14 @@ fi
 
 if [ -n "$BFCFG" ]; then
 	$BFCFG
+	rc=$?
+	if [ $rc -ne 0 ]; then
+		if (grep -q "boot: failed to get MAC" /tmp/bfcfg.log > /dev/null 2>&1); then
+			err_msg="Failed to add PXE boot entries"
+		fi
+	fi
+
+	RC=$((RC+rc))
 fi
 
 echo

@@ -1,10 +1,13 @@
 from --platform=linux/arm64 rockylinux:8.6.20227707
 ADD qemu-aarch64-static /usr/bin/
 
+ARG BASE_URL
+ARG DOCA_VERSION
+ARG BSP_VERSION
 WORKDIR /root/workspace
 ADD install.sh .
 ADD create_bfb .
-ADD mlxbf-bootimages-3.9.3-12383.aarch64.rpm .
+ADD bootimages bootimages/
 
 ENV RUN_FW_UPDATER=no
 
@@ -28,7 +31,7 @@ RUN dnf install -y epel-release "dnf-command(config-manager)" && \
 
 RUN dnf update -y
 
-RUN dnf config-manager --nogpgcheck --add-repo https://linux.mellanox.com/public/repo/doca/1.5.1/rockylinux8.6/aarch64/
+RUN dnf config-manager --nogpgcheck --add-repo $BASE_URL/doca/$DOCA_VERSION/rockylinux8.6/aarch64/
 
 RUN dnf install -y kernel-4.18.0-372.26.1.el8_6 \
 	kernel-core-4.18.0-372.26.1.el8_6 \
@@ -39,10 +42,11 @@ RUN dnf install -y kernel-4.18.0-372.26.1.el8_6 \
 	kernel-modules-extra-4.18.0-372.26.1.el8_6
 
 RUN dnf install --nogpgcheck -y doca-runtime doca-tools doca-sdk
+RUN dnf install --nogpgcheck -y mstflint
 
 RUN /usr/sbin/update-pciids || true
-RUN rpm -ihv --force mlxbf-bootimages-*.aarch64.rpm || true
+RUN rpm -ihv --force bootimages/mlxbf-bootimages-*.aarch64.rpm || true
 
-RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
+RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/;s/prod/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
 
 CMD ["/root/workspace/create_bfb", "-k", "4.18.0-372.26.1.el8_6.aarch64"]

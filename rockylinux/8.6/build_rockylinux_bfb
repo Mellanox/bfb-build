@@ -23,9 +23,10 @@
 #
 ###############################################################################
 
-DOCA_VERSION=1.5.1
-BF_VERSION=3.9.3
-MLNX_OFED_VERSION=5.8-1.2.1.1
+DOCA_VERSION=@DOCA_VERSION@
+BSP_VERSION=@BSP_VERSION@
+MLNX_OFED_VERSION=@MLNX_OFED_VERSION@
+BASE_URL=@BASE_URL@
 WDIR=${WDIR:-/tmp}
 
 # Execute command w/ echo and exit if it fail
@@ -59,33 +60,33 @@ mkdir -p $WDIR
 cd $WDIR
 
 # Build and install MLNX_OFED drivers
-ex wget --quiet https://linux.mellanox.com/public/repo/bluefield/${BF_VERSION}/extras/mlnx_ofed/${MLNX_OFED_VERSION}/MLNX_OFED_SRC-${MLNX_OFED_VERSION}.tgz
+ex wget --quiet ${BASE_URL}/bluefield/${BSP_VERSION}/extras/mlnx_ofed/${MLNX_OFED_VERSION}/MLNX_OFED_SRC-${MLNX_OFED_VERSION}.tgz
 ex tar xzf MLNX_OFED_SRC-${MLNX_OFED_VERSION}.tgz
 ex MLNX_OFED_SRC-${MLNX_OFED_VERSION}/install.pl -k $kernel --kernel-extra-args '--with-sf-cfg-drv --without-xdp --without-odp' --kernel-only --disable-kmp
 
 # find MLNX_OFED_SRC-${MLNX_OFED_VERSION}/RPMS -name '*rpm' -a ! -name '*debuginfo*rpm' -exec rpm -ihv '{}' \;
 
 # Build and install BlueField SoC drivers
-ex wget --quiet -r -np -nH --cut-dirs=3 -R "index.html*" https://linux.mellanox.com/public/repo/bluefield/${BF_VERSION}/extras/SRPMS/
-mkdir -p ${WDIR}/${BF_VERSION}/extras/{SPECS,RPMS,SOURCES,BUILD}
+ex wget --quiet -r -np -nH --cut-dirs=3 -R "index.html*" ${BASE_URL}/bluefield/${BSP_VERSION}/extras/SRPMS/
+mkdir -p ${WDIR}/${BSP_VERSION}/extras/{SPECS,RPMS,SOURCES,BUILD}
 
-for p in ${WDIR}/${BF_VERSION}/extras/SRPMS/*.src.rpm
+for p in ${WDIR}/${BSP_VERSION}/extras/SRPMS/*.src.rpm
 do
 	case $p in
 		*rshim* | *libpka* | *mlx-OpenIPMI* | *mlxbf-bootctl*)
 			continue
 			;;
 	esac
-	ex rpmbuild --rebuild -D "debug_package %{nil}" -D "KVERSION $kernel" --define "KMP 0" --define "_topdir ${WDIR}/${BF_VERSION}/extras" $p
+	ex rpmbuild --rebuild -D "debug_package %{nil}" -D "KVERSION $kernel" --define "KMP 0" --define "_topdir ${WDIR}/${BSP_VERSION}/extras" $p
 done
 
-ex rpm -ivh --force ${WDIR}/${BF_VERSION}/extras/RPMS/aarch64/*.rpm
+ex rpm -ivh --force ${WDIR}/${BSP_VERSION}/extras/RPMS/aarch64/*.rpm
 
-ex yum-config-manager --nogpgcheck --add-repo https://linux.mellanox.com/public/repo/doca/${DOCA_VERSION}/rockylinux8.6/aarch64/
+ex yum-config-manager --nogpgcheck --add-repo ${BASE_URL}/doca/${DOCA_VERSION}/rockylinux8.6/aarch64/
 
 ex yum install --nogpgcheck -y doca-runtime-user doca-sdk-user doca-tools
 
-ex rpm -ihv --force /root/workspace/mlxbf-bootimages-3.9.3-12383.aarch64.rpm
+ex rpm -ihv --force /root/workspace/bootimages/mlxbf-bootimages*.aarch64.rpm
 
 /usr/sbin/update-pciids || true
 

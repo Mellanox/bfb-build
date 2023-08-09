@@ -29,6 +29,8 @@ CHROOT_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 rshimlog=`which bfrshlog 2> /dev/null`
 distro="Debian"
 NIC_FW_UPDATE_DONE=0
+RC=0
+err_msg=""
 
 fspath=$(readlink -f `dirname $0`)
 
@@ -182,9 +184,9 @@ fi
 log "INFO: $distro installation started"
 
 default_device=/dev/mmcblk0
-# if [ -b /dev/nvme0n1 ]; then
-#     default_device=/dev/nvme0n1
-# fi
+if [ -b /dev/nvme0n1 ]; then
+        default_device="/dev/$(cd /sys/block; /bin/ls -1d nvme* | sort -n | tail -1)"
+fi
 device=${device:-"$default_device"}
 
 # We cannot use wait-for-root as it expects the device to contain a
@@ -268,6 +270,11 @@ if (hexdump -C /sys/firmware/acpi/tables/SSDT* | grep -q MLNXBF33); then
     # BlueField-3
     sed -i -e "s/0x01000000/0x13010000/g" /mnt/etc/default/grub
 fi
+
+if (lspci -vv | grep -wq SimX); then
+	# Remove earlycon from grub parameters on SimX
+	sed -i -r -e 's/earlycon=[^ ]* //g' /mnt/etc/default/grub
+fi
 chroot /mnt env PATH=$CHROOT_PATH /usr/sbin/grub-install ${device}
 chroot /mnt env PATH=$CHROOT_PATH /usr/sbin/grub-mkconfig -o /boot/grub/grub.cfg
 chroot /mnt env PATH=$CHROOT_PATH /usr/sbin/grub-set-default 0
@@ -285,6 +292,7 @@ echo dw_mmc-pltfm >> /mnt/etc/initramfs-tools/modules
 echo mmc_block >> /mnt/etc/initramfs-tools/modules
 echo mlxbf_tmfifo >> /mnt/etc/initramfs-tools/modules
 echo virtio_console >> /mnt/etc/initramfs-tools/modules
+echo nvme >> /mnt/etc/initramfs-tools/modules
 chroot /mnt update-initramfs -k ${kver} -u
 
 cat > /mnt/etc/resolv.conf << EOF
@@ -352,6 +360,7 @@ if (lspci -n -d 15b3: | grep -wq 'a2d2'); then
 elif (lspci -n -d 15b3: | grep -wq 'a2d6'); then
 	# BlueField-2
 	ln -snf snap_rpc_init_bf2.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
+	#chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge dpa-compiler dpacc dpaeumgmt flexio || true
 elif (lspci -n -d 15b3: | grep -wq 'a2dc'); then
 	# BlueField-3
 	chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge mlnx-snap || true
@@ -413,9 +422,9 @@ blockdev --rereadpt ${device} > /dev/null 2>&1
 fsck.vfat -a ${device}p1
 sync
 
-bfrec --bootctl --policy dual 2> /dev/null || true
+bfrec --bootctl 2> /dev/null || true
 if [ -e /lib/firmware/mellanox/boot/capsule/boot_update2.cap ]; then
-	bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap --policy dual
+	bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap
 fi
 
 if [ -e /lib/firmware/mellanox/boot/capsule/efi_sbkeysync.cap ]; then
@@ -424,8 +433,10 @@ fi
 
 bfbootmgr --cleanall > /dev/null 2>&1
 
-# Make it the boot partition
-mount -t efivarfs none /sys/firmware/efi/efivars
+if [ ! -d /sys/firmware/efi/efivars ]; then
+	mount -t efivarfs none /sys/firmware/efi/efivars
+fi
+
 /bin/rm -f /sys/firmware/efi/efivars/Boot* > /dev/null 2>&1
 /bin/rm -f /sys/firmware/efi/efivars/dump-* > /dev/null 2>&1
 
@@ -462,6 +473,14 @@ PXE_DHCP_CLASS_ID=$DHCP_CLASS_ID
 EOF
 
 	$BFCFG
+	rc=$?
+	if [ $rc -ne 0 ]; then
+		if (grep -q "boot: failed to get MAC" /tmp/bfcfg.log > /dev/null 2>&1); then
+			err_msg="Failed to add PXE boot entries"
+		fi
+	fi
+
+	RC=$((RC+rc))
 
 	# Restore the original bf.cfg
 	/bin/rm -f /etc/bf.cfg
@@ -470,10 +489,18 @@ EOF
 	fi
 fi
 
-umount /sys/firmware/efi/efivars || true
+umount /sys/firmware/efi/efivars
 
 if [ -n "$BFCFG" ]; then
 	$BFCFG
+	rc=$?
+	if [ $rc -ne 0 ]; then
+		if (grep -q "boot: failed to get MAC" /tmp/bfcfg.log > /dev/null 2>&1); then
+			err_msg="Failed to add PXE boot entries"
+		fi
+	fi
+
+	RC=$((RC+rc))
 fi
 
 if function_exists bfb_post_install; then

@@ -53,16 +53,16 @@ RUN apt purge -y docker.io; \
         update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy;
 
 RUN wget -qO - @NV_BASE_URL@/doca/@DOCA_VERSION@/debian11/aarch64/GPG-KEY-Mellanox.pub | apt-key add -
-RUN echo "deb [trusted=yes] https://linux.mellanox.com/public/repo/doca/1.5.1/debian11/\$(ARCH) ./" | tee /etc/apt/sources.list.d/doca.tmp.list
+RUN echo "deb [trusted=yes] @NV_BASE_URL@/doca/@DOCA_VERSION@/debian11/\$(ARCH) ./" | tee /etc/apt/sources.list.d/doca.tmp.list
 RUN apt update || true
 
 RUN dpkg -i /root/workspace/doca-repo.deb
 RUN apt update || true
 
 RUN apt install -y -f --allow-downgrades \
-        linux-image-5.10.179-bf.5.gf1b32fd=5.10.179-bf.5.gf1b32fd-1 \
-        linux-headers-5.10.179-bf.5.gf1b32fd=5.10.179-bf.5.gf1b32fd-1 \
-        linux-libc-dev=5.10.179-bf.5.gf1b32fd-1
+        linux-image-5.10.188-bf.5.g3602dbc=5.10.188-bf.5.g3602dbc-1 \
+        linux-headers-5.10.188-bf.5.g3602dbc=5.10.188-bf.5.g3602dbc-1 \
+        linux-libc-dev=5.10.188-bf.5.g3602dbc-1
 RUN apt install -y -f doca-runtime-user || true
 RUN apt install -y -f doca-runtime-kernel || true
 RUN apt install -y -f doca-sdk-user || true
@@ -127,4 +127,4 @@ RUN mkdir -p /boot/efi/EFI/debian/; \
 
 RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" -e "s/prod/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
 
-CMD ["/root/workspace/create_bfb", "-k", "5.10.179-bf.5.gf1b32fd"]
+CMD ["/root/workspace/create_bfb", "-k", "5.10.188-bf.5.g3602dbc"]

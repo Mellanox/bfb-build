@@ -1,6 +1,9 @@
 from mellanox/bluefield:bfb_builder_centos7.6
 ADD qemu-aarch64-static /usr/bin/
 
+ARG BASE_URL
+ARG DOCA_VERSION
+ARG BSP_VERSION
 WORKDIR /root/workspace
 ADD install.sh .
 ADD create_bfb .
@@ -32,14 +35,14 @@ RUN yum-config-manager --nogpgcheck --add-repo https://download-ib01.fedoraproje
      yum install -y epel-release; \
      yum install -y --nogpgcheck uriparser
 
-RUN yum-config-manager --nogpgcheck --add-repo @NV_BASE_URL@/doca/@DOCA_VERSION@/centos7.6/aarch64/
+RUN yum-config-manager --nogpgcheck --add-repo @BASE_URL@/doca/@DOCA_VERSION@/centos7.6/aarch64/
 
 RUN yum install --nogpgcheck -y doca-runtime doca-tools doca-sdk
 RUN yum install --nogpgcheck -y mstflint
 
 RUN /usr/sbin/update-pciids || true
-RUN rpm -ihv --force /root/workspace/bootimages/mlxbf-bootimages-*.aarch64.rpm || true
+RUN rpm -ihv --force bootimages/mlxbf-bootimages-*.aarch64.rpm || true
 
 RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" -e "s/prod/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
 
-CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1060.24.gf94e69d-bluefield"]
+CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1058.30.g1e86a75-bluefield"]

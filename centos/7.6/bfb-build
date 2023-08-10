@@ -1,4 +1,26 @@
 #!/bin/bash -e
+###############################################################################
+#
+# Copyright 2022 NVIDIA Corporation
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+###############################################################################
 
 cd ${0%*/*}
 
@@ -19,16 +41,16 @@ fi
 
 DISTRO="centos"
 DISTRO_VERSION="7.6"
-BF_RELEASE="4.0.2"
-DOCA_VERSION="2.0.2"
+DOCA_VERSION="2.2.0"
+BSP_VERSION="4.2.0-12855"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-""}
-NV_BASE_URL=${NV_BASE_URL:-"https://linux.mellanox.com/public/repo"}
 
 WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
+BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
 
 mkdir -p $WDIR/bootimages
-wget -P $WDIR/bootimages -r --no-verbose --no-directories -l1 --no-parent -A 'mlxbf-bootimages*.aarch64.rpm' ${NV_BASE_URL}/bluefield/${BF_RELEASE}/bootimages/${IMAGE_TYPE}/
+wget -P $WDIR/bootimages -r --no-verbose --no-directories -l1 --no-parent -A 'mlxbf-bootimages*.aarch64.rpm' ${BASE_URL}/bluefield/${BSP_VERSION}/bootimages/${IMAGE_TYPE}/
 
 cp	Dockerfile \
 	create_bfb \
@@ -39,18 +61,25 @@ cp	Dockerfile \
 
 cd $WDIR
 
+docker_image=bfb_runtime_${DISTRO,,}${DISTRO_VERSION,,}
+
 sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/g;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/g" \
-    -e "s,@NV_BASE_URL@,$NV_BASE_URL,g" \
+    -e "s,@BASE_URL@,$BASE_URL,g" \
     -e "s/@DOCA_VERSION@/$DOCA_VERSION/g" Dockerfile
 
-docker build -t bfb_runtime_${DISTRO}${DISTRO_VERSION} -f Dockerfile .
+docker build -t ${docker_image} \
+	--build-arg BASE_URL=$BASE_URL \
+	--build-arg DOCA_VERSION=$DOCA_VERSION \
+	--build-arg BSP_VERSION=$BSP_VERSION \
+	-f Dockerfile .
+
 docker run -t --rm --privileged -e container=docker \
 	-v $PWD:/workspace \
 	--name BlueField_OS_${DISTRO}_${DISTRO_VERSION} \
 	--mount type=bind,source=/dev,target=/dev \
 	--mount type=bind,source=/sys,target=/sys \
 	--mount type=bind,source=/proc,target=/proc \
-	bfb_runtime_${DISTRO}${DISTRO_VERSION}
+	${docker_image}
 
 readlink -f *.bfb
 

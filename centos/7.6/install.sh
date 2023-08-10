@@ -25,6 +25,8 @@
 
 PATH="/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:/opt/mellanox/scripts"
 NIC_FW_UPDATE_DONE=0
+RC=0
+err_msg=""
 
 fspath=$(readlink -f `dirname $0`)
 
@@ -174,9 +176,9 @@ log "INFO: $distro installation started"
 
 # Create the CentOS partitions.
 default_device=/dev/mmcblk0
-# if [ -b /dev/nvme0n1 ]; then
-#     default_device=/dev/nvme0n1
-# fi
+if [ -b /dev/nvme0n1 ]; then
+    default_device="/dev/$(cd /sys/block; /bin/ls -1d nvme* | sort -n | tail -1)"
+fi
 device=${device:-"$default_device"}
 
 SUPPORTED_SCHEMES="SCHEME_A SCHEME_B"
@@ -321,6 +323,11 @@ if (hexdump -C /sys/firmware/acpi/tables/SSDT* | grep -q MLNXBF33); then
     sed -i -e "s/0x01000000/0x13010000/g" /mnt/etc/default/grub
 fi
 
+if (lspci -vv | grep -wq SimX); then
+	# Remove earlycon from grub parameters on SimX
+	sed -i -r -e 's/earlycon=[^ ]* //g' /mnt/etc/default/grub
+fi
+
 chroot /mnt grub2-mkconfig -o /boot/efi/EFI/centos/grub.cfg
 
 kdir=$(/bin/ls -1d /mnt/lib/modules/4.18* /mnt/lib/modules/4.19* /mnt/lib/modules/4.20* /mnt/lib/modules/5.* 2> /dev/null)
@@ -329,7 +336,7 @@ if [ -n "$kdir" ]; then
     kver=${kdir##*/}
     DRACUT_CMD=`chroot /mnt /bin/ls -1 /sbin/dracut /usr/bin/dracut 2> /dev/null | head -n 1 | tr -d '\n'`
     chroot /mnt grub2-set-default 0
-    chroot /mnt $DRACUT_CMD --kver ${kver} --force --add-drivers "sdhci-of-dwcmshc dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block mlxbf_tmfifo virtio_console" /boot/initramfs-${kver}.img
+    chroot /mnt $DRACUT_CMD --kver ${kver} --force --add-drivers "sdhci-of-dwcmshc dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block mlxbf_tmfifo virtio_console nvme" /boot/initramfs-${kver}.img
 else
     kver=$(/bin/ls -1 /mnt/lib/modules/ | head -1)
 fi
@@ -386,6 +393,7 @@ if (lspci -n -d 15b3: | grep -wq 'a2d2'); then
 elif (lspci -n -d 15b3: | grep -wq 'a2d6'); then
 	# BlueField-2
 	ln -snf snap_rpc_init_bf2.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
+	#chroot /mnt rpm -e dpa-compiler dpacc dpaeumgmt flexio || true
 elif (lspci -n -d 15b3: | grep -wq 'a2dc'); then
 	# BlueField-3
 	chroot /mnt rpm -e mlnx-snap || true
@@ -461,9 +469,9 @@ umount /mnt
 
 sync
 
-bfrec --bootctl --policy dual 2> /dev/null || true
+bfrec --bootctl 2> /dev/null || true
 if [ -e /lib/firmware/mellanox/boot/capsule/boot_update2.cap ]; then
-	bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap --policy dual
+	bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap
 fi
 
 if [ -e /lib/firmware/mellanox/boot/capsule/efi_sbkeysync.cap ]; then
@@ -473,10 +481,14 @@ fi
 # Clean up actual boot entries.
 bfbootmgr --cleanall > /dev/null 2>&1
 
-mount -t efivarfs none /sys/firmware/efi/efivars
+if [ ! -d /sys/firmware/efi/efivars ]; then
+	mount -t efivarfs none /sys/firmware/efi/efivars
+fi
+
 /bin/rm -f /sys/firmware/efi/efivars/Boot* > /dev/null 2>&1
 /bin/rm -f /sys/firmware/efi/efivars/dump-* > /dev/null 2>&1
 efibootmgr -c -d "${device}" -p 1 -l "\EFI\centos\grubaa64.efi" -L $distro
+
 umount /sys/firmware/efi/efivars
 
 BFCFG=`which bfcfg 2> /dev/null`
@@ -498,6 +510,14 @@ PXE_DHCP_CLASS_ID=$DHCP_CLASS_ID
 EOF
 
 	$BFCFG
+	rc=$?
+	if [ $rc -ne 0 ]; then
+		if (grep -q "boot: failed to get MAC" /tmp/bfcfg.log > /dev/null 2>&1); then
+			err_msg="Failed to add PXE boot entries"
+		fi
+	fi
+
+	RC=$((RC+rc))
 
 	# Restore the original bf.cfg
 	/bin/rm -f /etc/bf.cfg
@@ -508,6 +528,14 @@ fi
 
 if [ -n "$BFCFG" ]; then
 	$BFCFG
+	rc=$?
+	if [ $rc -ne 0 ]; then
+		if (grep -q "boot: failed to get MAC" /tmp/bfcfg.log > /dev/null 2>&1); then
+			err_msg="Failed to add PXE boot entries"
+		fi
+	fi
+
+	RC=$((RC+rc))
 fi
 
 echo

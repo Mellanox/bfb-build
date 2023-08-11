@@ -262,7 +262,7 @@ do
 	done
 done
 
-for mod in mlxbf_tmfifo dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block sdhci sdhci-of-dwcmshc nvme-rdma nvme-tcp nvme mlx5_ib ib_ipoib ib_iser $ADDON_KERNEL_MODULES
+for mod in mlxbf_tmfifo dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block sdhci sdhci-of-dwcmshc nvme-rdma nvme-tcp nvme mlx5_ib mlxfw ib_umad ib_ipoib ib_iser $ADDON_KERNEL_MODULES
 do
 	copy_module $mod
 done
@@ -313,6 +313,8 @@ printf_msg()
 
 modprobe -a sdhci-of-dwcmshc dw_mmc-bluefield > /dev/null 2>&1
 modprobe mlxbf_tmfifo > /dev/null 2>&1
+modprobe -a mlx5_ib mlxfw ib_umad
+modprobe nvme > /dev/null 2>&1
 insmod /mlx-bootctl.ko > /dev/null 2>&1
 insmod /sbsa_gwdt.ko > /dev/null 2>&1
 /usr/sbin/watchdog > /dev/null 2>&1

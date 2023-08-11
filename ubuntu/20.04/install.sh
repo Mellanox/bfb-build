@@ -30,6 +30,8 @@ rshimlog=`which bfrshlog 2> /dev/null`
 distro="Ubuntu"
 NIC_FW_UPDATE_DONE=0
 NIC_FW_RESET_REQUIRED=0
+RC=0
+err_msg=""
 
 fspath=$(readlink -f `dirname $0`)
 
@@ -166,9 +168,9 @@ fi
 log "INFO: $distro installation started"
 
 default_device=/dev/mmcblk0
-# if [ -b /dev/nvme0n1 ]; then
-# 	default_device=/dev/nvme0n1
-# fi
+if [ -b /dev/nvme0n1 ]; then
+	default_device="/dev/$(cd /sys/block; /bin/ls -1d nvme* | sort -n | tail -1)"
+fi
 device=${device:-"$default_device"}
 
 echo 0 > /proc/sys/kernel/hung_task_timeout_secs
@@ -418,6 +420,7 @@ sdhci-of-dwcmshc
 sdhci_pltfm
 sdhci
 mlxbf-tmfifo
+nvme
 EOF
 
 	chroot /mnt update-initramfs -k ${kver} -u
@@ -488,6 +491,7 @@ EOF
 	elif (lspci -n -d 15b3: | grep -wq 'a2d6'); then
 		# BlueField-2
 		ln -snf snap_rpc_init_bf2.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
+		#chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge dpa-compiler dpacc dpaeumgmt flexio || true
 	elif (lspci -n -d 15b3: | grep -wq 'a2dc'); then
 		# BlueField-3
 		chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge mlnx-snap || true
@@ -587,6 +591,11 @@ EOF
 		sed -i -e "s/0x01000000/0x13010000/g" /mnt/etc/default/grub
 	fi
 
+	if (lspci -vv | grep -wq SimX); then
+		# Remove earlycon from grub parameters on SimX
+		sed -i -r -e 's/earlycon=[^ ]* //g' /mnt/etc/default/grub
+	fi
+
 	chroot /mnt env PATH=$CHROOT_PATH /usr/sbin/grub-install ${device} > /dev/null 2>&1
 	chroot /mnt env PATH=$CHROOT_PATH /usr/sbin/grub-mkconfig -o /boot/grub/grub.cfg > /dev/null 2>&1
 	chroot /mnt env PATH=$CHROOT_PATH /usr/sbin/grub-set-default 0
@@ -601,11 +610,9 @@ EOF
 	unmount_partitions
 }
 
-mounted_efivarfs=0
 if [ ! -d /sys/firmware/efi/efivars ]; then
 	mount -t efivarfs none /sys/firmware/efi/efivars
 fi
-mounted_efivarfs=1
 
 bfbootmgr --cleanall > /dev/null 2>&1
 /bin/rm -f /sys/firmware/efi/efivars/Boot* > /dev/null 2>&1
@@ -641,9 +648,9 @@ blockdev --rereadpt ${device} > /dev/null 2>&1
 
 sync
 
-bfrec --bootctl --policy dual 2> /dev/null || true
+bfrec --bootctl 2> /dev/null || true
 if [ -e /lib/firmware/mellanox/boot/capsule/boot_update2.cap ]; then
-	bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap --policy dual
+	bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap
 fi
 
 if [ -e /lib/firmware/mellanox/boot/capsule/efi_sbkeysync.cap ]; then
@@ -675,6 +682,14 @@ PXE_DHCP_CLASS_ID=$DHCP_CLASS_ID
 EOF
 
 	$BFCFG
+	rc=$?
+	if [ $rc -ne 0 ]; then
+		if (grep -q "boot: failed to get MAC" /tmp/bfcfg.log > /dev/null 2>&1); then
+			err_msg="Failed to add PXE boot entries"
+		fi
+	fi
+
+	RC=$((RC+rc))
 
 	# Restore the original bf.cfg
 	/bin/rm -f /etc/bf.cfg
@@ -695,12 +710,18 @@ if ! (efibootmgr | grep ${UBUNTU_CODENAME}); then
 	fi
 fi
 
-if [ $mounted_efivarfs -eq 1 ]; then
-	umount /sys/firmware/efi/efivars > /dev/null 2>&1
-fi
+umount /sys/firmware/efi/efivars
 
 if [ -n "$BFCFG" ]; then
 	$BFCFG
+	rc=$?
+	if [ $rc -ne 0 ]; then
+		if (grep -q "boot: failed to get MAC" /tmp/bfcfg.log > /dev/null 2>&1); then
+			err_msg="Failed to add PXE boot entries"
+		fi
+	fi
+
+	RC=$((RC+rc))
 fi
 
 if function_exists bfb_post_install; then

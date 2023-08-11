@@ -56,16 +56,16 @@ RUN dpkg -i /var/doca-dpu-repo-ubuntu2004-local/*mstflint*.deb || true
 RUN apt-mark hold mstflint
 
 RUN apt install -y -f \
-	linux-bluefield=5.4.0.1060.55 \
-	linux-bluefield-headers-5.4.0-1060=5.4.0-1060.66 \
-	linux-bluefield-tools-5.4.0-1060=5.4.0-1060.66 \
-	linux-headers-5.4.0-1060-bluefield=5.4.0-1060.66 \
-	linux-headers-bluefield=5.4.0.1060.55 \
-	linux-image-5.4.0-1060-bluefield=5.4.0-1060.66 \
-	linux-image-bluefield=5.4.0.1060.55 \
-	linux-modules-5.4.0-1060-bluefield=5.4.0-1060.66 \
-	linux-tools-5.4.0-1060-bluefield=5.4.0-1060.66 \
-	linux-tools-bluefield=5.4.0.1060.55 \
+	linux-bluefield=5.4.0.1068.63 \
+	linux-bluefield-headers-5.4.0-1068=5.4.0-1068.74 \
+	linux-bluefield-tools-5.4.0-1068=5.4.0-1068.74 \
+	linux-headers-5.4.0-1068-bluefield=5.4.0-1068.74 \
+	linux-headers-bluefield=5.4.0.1068.63 \
+	linux-image-5.4.0-1068-bluefield=5.4.0-1068.74 \
+	linux-image-bluefield=5.4.0.1068.63 \
+	linux-modules-5.4.0-1068-bluefield=5.4.0-1068.74 \
+	linux-tools-5.4.0-1068-bluefield=5.4.0-1068.74 \
+	linux-tools-bluefield=5.4.0.1068.63 \
 	linux-libc-dev:arm64 \
 	linux-tools-common
 

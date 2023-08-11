@@ -1,4 +1,26 @@
 #!/bin/bash -e
+###############################################################################
+#
+# Copyright 2022 NVIDIA Corporation
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+###############################################################################
 
 cd ${0%*/*}
 
@@ -20,9 +42,9 @@ fi
 DISTRO="ubuntu"
 DISTRO_VERSION="20.04"
 DISTRO_BASE_URL="http://cloud-images.ubuntu.com/releases/focal/release/${DISTRO}-${DISTRO_VERSION}-server-cloudimg-arm64-root.tar.xz"
-BF_RELEASE="4.0.2"
-DOCA_VERSION="2.0.2"
-MLNX_OFED_VERSION=23.04-0.5.3.0
+BF_RELEASE="4.2.0-12855"
+DOCA_VERSION="2.2.0"
+MLNX_OFED_VERSION=23.07-0.5.0.0
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-""}
 NV_BASE_URL=${NV_BASE_URL:-"https://linux.mellanox.com/public/repo"}
@@ -30,7 +52,7 @@ NV_BASE_URL=${NV_BASE_URL:-"https://linux.mellanox.com/public/repo"}
 WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
 
 mkdir -p $WDIR
-wget -q -P $WDIR -r --no-verbose --no-directories -l1 --no-parent -A 'doca-dpu-repo*arm64.deb' ${NV_BASE_URL}/doca/${DOCA_VERSION}/ubuntu${DISTRO_VERSION}/aarch64/
+wget -q -P $WDIR -r --no-verbose --no-directories -l1 --no-parent -A 'doca-dpu-repo*arm64.deb' ${NV_BASE_URL}/doca/${DOCA_VERSION}/${DISTRO}${DISTRO_VERSION}/aarch64/
 mv $WDIR/doca-dpu-repo*arm64.deb $WDIR/doca-repo.deb
 wget -q -P $WDIR -r --no-verbose --no-directories -l1 --no-parent -A 'mlxbf-bootimages*arm64.deb' ${NV_BASE_URL}/bluefield/${BF_RELEASE}/bootimages/${IMAGE_TYPE}/
 mv $WDIR/mlxbf-bootimages*arm64.deb $WDIR/mlxbf-bootimages.deb

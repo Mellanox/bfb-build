@@ -55,6 +55,7 @@ RUN apt-mark hold mstflint
 RUN apt remove -y --purge $(dpkg --list "*openipmi*" | grep openipmi | awk '{print $2}') || true
 RUN dpkg -i /var/doca-dpu-repo-ubuntu2204-local/mlx-*openipmi*.deb || true
 RUN apt install -y -f doca-runtime doca-tools doca-sdk || true
+RUN dpkg -i /var/doca-dpu-repo-ubuntu2204-local/mlxbf-gige-modules*.deb || true
 RUN apt --fix-broken install -y || true
 RUN dpkg -i /var/doca-dpu-repo-ubuntu2204-local/mlnx-snap_*arm64.deb || true
 RUN dpkg -i /var/doca-dpu-repo-ubuntu2204-local/bf-release_*arm64.deb || true

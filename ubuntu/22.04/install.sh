@@ -575,10 +575,10 @@ EOF
 	fi
 
 	if [ "X$ENABLE_SFC_HBN" == "Xyes" ]; then
-		NUM_SFs_ECPF0=${NUM_SFs_ECPF0:-18}
-		NUM_SFs_ECPF1=${NUM_SFs_ECPF1:-2}
+		NUM_VFs_PHYS_PORT0=${NUM_VFs_PHYS_PORT0:-14}
+		NUM_VFs_PHYS_PORT1=${NUM_VFs_PHYS_PORT1:-0}
 		log "INFO: Installing SFC HBN environment"
-		chroot /mnt /opt/mellanox/sfc-hbn/install.sh --ecpf0 $NUM_SFs_ECPF0 --ecpf1 $NUM_SFs_ECPF1
+		chroot /mnt /opt/mellanox/sfc-hbn/install.sh --ecpf0 $NUM_VFs_PHYS_PORT0 --ecpf1 $NUM_VFs_PHYS_PORT1
 		NIC_FW_RESET_REQUIRED=1
 	fi
 

@@ -1,4 +1,4 @@
-from --platform=linux/arm64 oraclelinux:8
+from --platform=linux/arm64 oraclelinux:8.7
 
 ADD qemu-aarch64-static /usr/bin/
 
@@ -30,6 +30,13 @@ gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-oracle \n\
 gpgcheck=1 \n\
 enabled=1' > /etc/yum.repos.d/oracle-codeready-ol8.repo
 
+RUN echo -e '[ol8_developer_EPEL] \n\
+name=Oracle Linux $releasever EPEL Packages for Development ($basearch) \n\
+baseurl=https://yum$ociregion.$ocidomain/repo/OracleLinux/OL8/developer/EPEL/$basearch/ \n\
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-oracle \n\
+gpgcheck=1 \n\
+enabled=1' > /etc/yum.repos.d/oracle-epel-ol8.repo
+
 RUN yum-config-manager --set-enabled ol8_developer_CODEREADY
 RUN yum install -y git gcc make flex bison rpm-build python3 openssl-devel elfutils-libelf-devel.aarch64 bc pciutils-devel rsync kmod dwarves
 
@@ -46,7 +53,7 @@ RUN yum reinstall -y systemd
 
 RUN dnf install -y rdma-core rdma-core-devel mstflint
 
-RUN rpm -ihv $(/bin/ls -1 bootimages/*.rpm | head -1)
+RUN rpm -ihv bootimages/mlxbf-bootimages-signed*rpm
 
 RUN echo BlueField_OS_@BF_VERSION@_OL_@DISTRO_VERSION@-$BUILDNUM.@IMAGE_TYPE@ > /etc/mlnx-release
 

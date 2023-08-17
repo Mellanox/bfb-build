@@ -1,7 +1,10 @@
-from --platform=linux/arm64 oraclelinux:8
+from --platform=linux/arm64 oraclelinux:8.7
 
 ADD qemu-aarch64-static /usr/bin/
 
+ARG BASE_URL
+ARG DOCA_VERSION
+ARG BSP_VERSION
 WORKDIR /root/workspace
 ADD install.sh .
 ADD create_bfb .
@@ -13,12 +16,29 @@ ENV RUN_FW_UPDATER=no
 
 RUN echo -e '[ol8_bootloader] \n\
 name=Oracle Linux $releasever Bootloader Packages ($basearch) \n\
-baseurl=https://linux.mellanox.com/public/repo/doca/2.0.2/OracleLinux8/bootloader \n\
+baseurl=@BASE_URL@/doca/@DOCA_VERSION@/OracleLinux8/bootloader \n\
 gpgcheck=0 \n\
 enabled=1' > /etc/yum.repos.d/oracle-bootloader-ol8.repo
 
+# EPEL
+RUN echo -e '[ol8_developer_EPEL] \n\
+name=Oracle Linux $releasever EPEL Packages for Development ($basearch) \n\
+baseurl=https://yum$ociregion.$ocidomain/repo/OracleLinux/OL8/developer/EPEL/$basearch/ \n\
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-oracle \n\
+gpgcheck=1 \n\
+enabled=1' > /etc/yum.repos.d/oracle-epel-ol8.repo
+
+#Kublet
+RUN echo -e '[kubernetes] \n\
+name=Kubernetes \n\
+baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-$basearch \n\
+gpgcheck=1 \n\
+enabled=1 \n\
+gpgkey=https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg \n\
+exclude=kubelet kubeadm kubectl' > /etc/yum.repos.d/kubernetes.repo
+
 # ol8 does not have lm_sensors-sensord
-RUN yum install -y \
+RUN dnf install --disableexcludes=kubernetes -y \
 	grub2-tools grubby grub2-tools-minimal grub2-efi-aa64 \
 	grub2-efi-aa64-modules grub2-common grub2-tools-extra shim-aa64 \
 	efibootmgr tcpdump nvme-cli rsync binutils sg3_utils libnl3 libmnl perl \
@@ -26,7 +46,12 @@ RUN yum install -y \
 	popt-devel bc lm_sensors cryptsetup rasdaemon pciutils-devel watchdog \
 	kexec-tools jq python3-pip libnghttp2 wget annobin kernel-rpm-macros \
 	iproute-tc network-scripts usbutils nfs-utils python3-six chkconfig \
-	dosfstools e2fsprogs openssh-server ipmitool chrony
+	dosfstools e2fsprogs openssh-server ipmitool \
+	@BASE_URL@/doca/@DOCA_VERSION@/extras/addons/containerd.io-1.6.22-3.1.el8.aarch64.rpm \
+    @BASE_URL@/doca/@DOCA_VERSION@/extras/addons/cri-tools-1.25.0-0.aarch64.rpm \
+    @BASE_URL@/doca/@DOCA_VERSION@/extras/addons/kubernetes-cni-1.1.1-0.aarch64.rpm \
+    @BASE_URL@/doca/@DOCA_VERSION@/extras/addons/kubelet-1.25.3-0.aarch64.rpm \
+	systemd-timesyncd chrony
 
 RUN echo -e '[ol8_developer_CODEREADY] \n\
 name=Oracle Linux $releasever CodeReady Packages for Development ($basearch) \n\
@@ -34,13 +59,6 @@ baseurl=https://yum$ociregion.$ocidomain/repo/OracleLinux/OL8/codeready/builder/
 gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-oracle \n\
 gpgcheck=1 \n\
 enabled=1' > /etc/yum.repos.d/oracle-codeready-ol8.repo
-
-RUN echo -e '[ol8_developer_EPEL] \n\
-name=Oracle Linux $releasever EPEL Packages for Development ($basearch) \n\
-baseurl=https://yum$ociregion.$ocidomain/repo/OracleLinux/OL8/developer/EPEL/$basearch/ \n\
-gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-oracle \n\
-gpgcheck=1 \n\
-enabled=1' > /etc/yum.repos.d/oracle-epel-ol8.repo
 
 RUN yum install -y vim sudo parted xfsprogs net-tools NetworkManager audit plymouth
 RUN yum install -y python3-prometheus_client libbsd libbsd-devel
@@ -54,18 +72,15 @@ RUN yum reinstall -y systemd
 
 RUN echo -e '[ol8_doca] \n\
 name=Oracle Linux $releasever DOCA Packages ($basearch) \n\
-baseurl=https://linux.mellanox.com/public/repo/doca/2.0.2/OracleLinux8/aarch64 \n\
+baseurl=@BASE_URL@/doca/@DOCA_VERSION@/OracleLinux8/aarch64 \n\
 gpgcheck=0 \n\
 enabled=1' > /etc/yum.repos.d/oracle-doca-ol8.repo
 
-RUN dnf install -y rdma-core rdma-core-devel libibverbs-utils.aarch64 mstflint
+RUN dnf install -y rdma-core rdma-core-devel libibverbs-utils.aarch64 mstflint infiniband-diags infiniband-diags-compat libibumad librdmacm-utils python3-pyverbs
 
-RUN dnf install -y bf-release doca-cx-apps doca-cx-apps-devel doca-cx-libs doca-cx-libs-devel doca-cx-prime-runtime doca-cx-prime-sdk doca-cx-prime-tools doca-cx-samples meson mlnx-dpdk mlnx-dpdk-devel mlnx-tools mlxbf-bfscripts mlxbf-bootctl network-scripts-openvswitch openvswitch openvswitch-ipsec python3-openvswitch
+RUN dnf install -y bf-release doca-cx-apps doca-cx-apps-devel doca-cx-libs doca-cx-libs-devel doca-cx-prime-runtime doca-cx-prime-sdk doca-cx-prime-tools doca-cx-samples meson mlnx-dpdk mlnx-dpdk-devel mlnx-tools mlxbf-bfscripts mlxbf-bootctl network-scripts-openvswitch openvswitch openvswitch-ipsec python3-openvswitch mlx-OpenIPMI mft mft-oem mlnx-fw-updater
 
-RUN dnf install -y https://linux.mellanox.com/public/repo/doca/2.0.2/centos8.2/aarch64/mft-4.24.0-72.arm64.rpm https://linux.mellanox.com/public/repo/doca/2.0.2/centos8.2/aarch64/mft-oem-4.24.0-72.arm64.rpm
-RUN dnf install -y https://linux.mellanox.com/public/repo/doca/2.0.2/OracleLinux8/aarch64/mlx-OpenIPMI-2.0.25-3.gd28940d.aarch64.rpm
-
-RUN echo BlueField_OS_@BF_VERSION@_OL_@DISTRO_VERSION@-@BUILDVER@.@IMAGE_TYPE@ > /etc/mlnx-release
+RUN echo BlueField_OS_@BF_VERSION@_OL_@DISTRO_VERSION@-@BUILDVER@.@IMAGE_TYPE@@CUSTOM_VERSION@ > /etc/mlnx-release
 
 RUN rpm -ihv uek/kernel-[0-9]*rpm uek/kernel-devel-[0-9]*rpm
 RUN rpm -Uhv uek/kernel-headers-[0-9]*rpm
@@ -73,5 +88,7 @@ RUN rpm -Uhv uek/kernel-headers-[0-9]*rpm
 RUN mkdir -p /etc/ssh/sshd_config.d; echo "PermitRootLogin yes" > /etc/ssh/sshd_config.d/60-bf.conf
 
 RUN echo 'omit_drivers+=" mlx5_core mlx5_ib ib_umad "' > /etc/dracut.conf.d/mlnx.conf
+
+RUN /usr/bin/systemctl enable kdump.service
 
 CMD [ "bash", "-c", "/root/workspace/run_create_bfb"]

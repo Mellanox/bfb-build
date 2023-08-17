@@ -4,7 +4,7 @@ rpm -ihv --nodeps /root/workspace/SoC/*.rpm
 
 for bootimage in /root/workspace/bootimages/*.rpm
 do
-	current_type=$(cat /etc/mlnx-release | awk -F '.' '{print $NF}')
+	current_type=$(cat /etc/mlnx-release | grep -oE "unsigned|dev|prod")
 	echo "Current type: $current_type"
 
 	case "$bootimage" in

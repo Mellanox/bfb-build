@@ -19,22 +19,24 @@ fi
 
 DISTRO="oraclelinux"
 DISTRO_VERSION="8"
-VERSION="4.0.3"
-DOCA_VERSION="2.0.2"
+DOCA_VERSION="2.2.0"
+BSP_VERSION="4.2.1-12867"
+BF_VERSION=${BSP_VERSION%-*}
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 
 WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
+BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
 
 mkdir -p $WDIR
 
 mkdir -p $WDIR/bootimages
-wget -P $WDIR/bootimages -r --no-verbose --no-directories -l1 --no-parent -A 'mlxbf-bootimages*.aarch64.rpm' https://linux.mellanox.com/public/repo/bluefield/${VERSION}/bootimages/${IMAGE_TYPE}/
+wget -P $WDIR/bootimages -r --no-verbose --no-directories -l1 --no-parent -A 'mlxbf-bootimages*.aarch64.rpm' ${BASE_URL}/bluefield/${BSP_VERSION}/bootimages/${IMAGE_TYPE}/
 
 mkdir -p $WDIR/uek
 if [ -d uek ]; then
 	cp -a uek $WDIR
 else
-	wget -P $WDIR/uek -r --no-verbose --no-directories -l1 --no-parent -A 'kernel*aarch64.rpm' https://linux.mellanox.com/public/repo/doca/${DOCA_VERSION}/OracleLinux8/uek7/aarch64/
+	wget -P $WDIR/uek -r --no-verbose --no-directories -l1 --no-parent -A 'kernel*aarch64.rpm' ${BASE_URL}/doca/${DOCA_VERSION}/OracleLinux8/uek7/aarch64/
 fi
 
 cp	Dockerfile.* \
@@ -54,13 +56,16 @@ BUILDNUM=${BUILDNUM:-"1.inbox"}
 
 cd $WDIR
 
+docker_image=bfb_runtime_${DISTRO,,}${DISTRO_VERSION,,}
+
 docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION} 2> /dev/null || true
 
 if [ $build_rpms -eq 1 ]; then
 	sed -e "s/@DISTRO_VERSION@/${DISTRO_VERSION}/g" \
 		-e "s/@IMAGE_TYPE@/${IMAGE_TYPE}/g" \
 		-e "s/@CUSTOM_VERSION@/$CUSTOM_VERSION/" \
-		-e "s/@BF_VERSION@/${VERSION}/g" \
+		-e "s/@BF_VERSION@/${BF_VERSION}/g" \
+		-e "s/@BSP_VERSION@/${BSP_VERSION}/g" \
 		-e "s/@BUILDVER@/${BUILDNUM}/g" \
 		Dockerfile.build > $WDIR/Dockerfile
 
@@ -81,19 +86,28 @@ fi
 
 sed -e "s/@DISTRO_VERSION@/${DISTRO_VERSION}/g" \
 	-e "s/@IMAGE_TYPE@/${IMAGE_TYPE}/g" \
-	-e "s/@CUSTOM_VERSION@/$CUSTOM_VERSION/" \
-	-e "s/@BF_VERSION@/${VERSION}/g" \
+	-e "s/@CUSTOM_VERSION@/${CUSTOM_VERSION}/g" \
+	-e "s/@BSP_VERSION@/${BSP_VERSION}/g" \
+	-e "s/@DOCA_VERSION@/${DOCA_VERSION}/g" \
+	-e "s/@BF_VERSION@/${BF_VERSION}/g" \
+	-e "s|@BASE_URL@|${BASE_URL}|g" \
 	-e "s/@BUILDVER@/${BUILDNUM}/g" \
 	Dockerfile.run > $WDIR/Dockerfile
 
-docker build -t bfb_runtime_${DISTRO}${DISTRO_VERSION} -f Dockerfile .
+docker build -t ${docker_image} \
+	--build-arg BASE_URL=$BASE_URL \
+	--build-arg DOCA_VERSION=$DOCA_VERSION \
+	--build-arg BSP_VERSION=$BSP_VERSION \
+	-f Dockerfile .
+
 docker run -t --rm --privileged -e container=docker \
 	-v $PWD:/workspace \
 	--name BlueField_OS_${DISTRO}_${DISTRO_VERSION} \
 	--mount type=bind,source=/dev,target=/dev \
 	--mount type=bind,source=/sys,target=/sys \
 	--mount type=bind,source=/proc,target=/proc \
-	bfb_runtime_${DISTRO}${DISTRO_VERSION}
+	${docker_image}
+
 readlink -f *.bfb
 
 echo "Default root password is: oracle"

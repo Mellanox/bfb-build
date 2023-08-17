@@ -25,6 +25,8 @@
 
 PATH="/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:/opt/mellanox/scripts"
 NIC_FW_UPDATE_DONE=0
+RC=0
+err_msg=""
 
 fspath=$(readlink -f `dirname $0`)
 
@@ -74,6 +76,14 @@ fw_reset()
 		fi
 		sleep 1
 	done
+
+	log "INFO: Running NIC Firmware reset"
+	if [ "X$mode" == "Xmanufacturing" ]; then
+		log "INFO: Rebooting..."
+	fi
+	# Wait for these messages to be pulled by the rshim service
+	# as mlxfwreset will restart the DPU
+	sleep 3
 
 	msg=`chroot /mnt mlxfwreset -d /dev/mst/mt*_pciconf0 -y -l 3 --sync 1 r 2>&1`
 	if [ $? -ne 0 ]; then
@@ -128,6 +138,8 @@ if [ -e "${boot_fifo_path}" ]; then
 	rm -f $cfg_file
 fi
 
+dbus-uuidgen > /etc/machine-id 2>&1
+
 #
 # Check PXE installation
 #
@@ -165,9 +177,9 @@ log "INFO: $distro installation started"
 
 # Create the OL partitions.
 default_device=/dev/mmcblk0
-# if [ -b /dev/nvme0n1 ]; then
-#     default_device=/dev/nvme0n1
-# fi
+if [ -b /dev/nvme0n1 ]; then
+    default_device="/dev/$(cd /sys/block; /bin/ls -1d nvme* | sort -n | tail -1)"
+fi
 device=${device:-"$default_device"}
 
 dd if=/dev/zero of=$device bs=512 count=1
@@ -218,8 +230,9 @@ ${device}p2  /           xfs     defaults                   0 1
 ${device}p1  /boot/efi   vfat    umask=0077,shortname=winnt 0 2
 EOF
 
-if (grep -qE "MemTotal:\s+16" /proc/meminfo > /dev/null 2>&1); then
-	sed -i -r -e "s/(net.netfilter.nf_conntrack_max).*/\1 = 500000/" /mnt/usr/lib/sysctl.d/90-bluefield.conf
+memtotal=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+if [ $memtotal -gt 16000000 ]; then
+	sed -i -r -e "s/(net.netfilter.nf_conntrack_max).*/\1 = 1000000/" /mnt/usr/lib/sysctl.d/90-bluefield.conf
 fi
 
 cat > /mnt/etc/udev/rules.d/50-dev-root.rules << EOF
@@ -259,6 +272,11 @@ if (hexdump -C /sys/firmware/acpi/tables/SSDT* | grep -q MLNXBF33); then
     sed -i -e "s/0x01000000/0x13010000/g" /mnt/etc/default/grub
 fi
 
+if (lspci -vv | grep -wq SimX); then
+	# Remove earlycon from grub parameters on SimX
+	sed -i -r -e 's/earlycon=[^ ]* //g' /mnt/etc/default/grub
+fi
+
 chroot /mnt grub2-mkconfig -o /boot/efi/EFI/redhat/grub.cfg
 
 kdir=$(/bin/ls -1d /mnt/lib/modules/5.* 2> /dev/null)
@@ -267,7 +285,7 @@ if [ -n "$kdir" ]; then
     kver=${kdir##*/}
     DRACUT_CMD=`chroot /mnt /bin/ls -1 /sbin/dracut /usr/bin/dracut 2> /dev/null | head -1`
     chroot /mnt grub2-set-default 0
-    chroot /mnt $DRACUT_CMD --kver ${kver} --force --add-drivers "mlxbf_tmfifo mtd_blkdevs dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block virtio_console sdhci dw_mmc-pltfm sdhci-of-dwcmshc xfs vfat" /boot/initramfs-${kver}.img > /dev/null 2>&1
+    chroot /mnt $DRACUT_CMD --kver ${kver} --force --add-drivers "mlxbf_tmfifo mtd_blkdevs dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block virtio_console sdhci dw_mmc-pltfm sdhci-of-dwcmshc xfs vfat nvme" /boot/initramfs-${kver}.img > /dev/null 2>&1
 else
     kver=$(/bin/ls -1 /mnt/lib/modules/ | head -1)
 fi
@@ -395,20 +413,23 @@ sync
 
 UPDATE_BOOT=${UPDATE_BOOT:-1}
 if [ $UPDATE_BOOT -eq 1 ]; then
-	bfrec --bootctl --policy dual 2> /dev/null || true
+	bfrec --bootctl 2> /dev/null || true
 	if [ -e /lib/firmware/mellanox/boot/capsule/boot_update2.cap ]; then
-		bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap --policy dual
+		bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap
 	fi
 
-	if [ -e /lib/firmware/mellanox/boot/capsule/efi_sbkeyssync.cap ]; then
-		bfrec --capsule /lib/firmware/mellanox/boot/capsule/efi_sbkeyssync.cap
+	if [ -e /lib/firmware/mellanox/boot/capsule/efi_sbkeysync.cap ]; then
+		bfrec --capsule /lib/firmware/mellanox/boot/capsule/efi_sbkeysync.cap
 	fi
 fi
 
 # Clean up actual boot entries.
 bfbootmgr --cleanall > /dev/null 2>&1
 
-mount -t efivarfs none /sys/firmware/efi/efivars
+if [ ! -d /sys/firmware/efi/efivars ]; then
+	mount -t efivarfs none /sys/firmware/efi/efivars
+fi
+
 /bin/rm -f /sys/firmware/efi/efivars/Boot* > /dev/null 2>&1
 /bin/rm -f /sys/firmware/efi/efivars/dump-* > /dev/null 2>&1
 efibootmgr -c -d "$device" -p 1 -l "\EFI\redhat\shimaa64.efi" -L $distro
@@ -429,10 +450,21 @@ BOOT3=NET-NIC_P1-IPV4
 BOOT4=NET-NIC_P1-IPV6
 BOOT5=NET-OOB-IPV4
 BOOT6=NET-OOB-IPV6
+BOOT7=NET-NIC_P0-IPV4-HTTP
+BOOT8=NET-NIC_P1-IPV4-HTTP
+BOOT9=NET-OOB-IPV4-HTTP
 PXE_DHCP_CLASS_ID=$DHCP_CLASS_ID
 EOF
 
 	$BFCFG
+	rc=$?
+	if [ $rc -ne 0 ]; then
+		if (grep -q "boot: failed to get MAC" /tmp/bfcfg.log > /dev/null 2>&1); then
+			err_msg="Failed to add PXE boot entries"
+		fi
+	fi
+
+	RC=$((RC+rc))
 
 	# Restore the original bf.cfg
 	/bin/rm -f /etc/bf.cfg
@@ -443,6 +475,14 @@ fi
 
 if [ -n "$BFCFG" ]; then
 	$BFCFG
+	rc=$?
+	if [ $rc -ne 0 ]; then
+		if (grep -q "boot: failed to get MAC" /tmp/bfcfg.log > /dev/null 2>&1); then
+			err_msg="Failed to add PXE boot entries"
+		fi
+	fi
+
+	RC=$((RC+rc))
 fi
 
 echo
@@ -458,13 +498,6 @@ log "INFO: Installation finished"
 
 if [ "$WITH_NIC_FW_UPDATE" == "yes" ]; then
 	if [ $NIC_FW_UPDATE_DONE -eq 1 ]; then
-		log "INFO: Running NIC Firmware reset"
-		if [ "X$mode" == "Xmanufacturing" ]; then
-			log "INFO: Rebooting..."
-		fi
-		# Wait for these messages to be pulled by the rshim service
-		# as mlxfwreset will restart the DPU
-		sleep 3
 		# Reset NIC FW
 		mount ${device}p2 /mnt
 		bind_partitions

@@ -3,7 +3,16 @@ FROM scratch
 Add jammy-server-cloudimg-arm64-root.tar.xz /
 Add doca-repo.deb /tmp/
 ADD qemu-aarch64-static /usr/bin/
+RUN mkdir -p /opt/mellanox/doca/services/
+Add telemetry-agent /opt/mellanox/doca/services/telemetry
+add blueman /opt/mellanox/doca/services/blueman
+Add infrastructure /opt/mellanox/doca/services/infrastructure
 
+ARG BASE_URL
+ARG DOCA_VERSION
+ARG BSP_VERSION
+ARG DISTRO
+ARG DISTRO_VERSION
 WORKDIR /root/workspace
 ADD install.sh .
 ADD create_bfb .
@@ -21,7 +30,7 @@ RUN apt update
 RUN apt upgrade -y
 RUN apt remove --purge -y snapd plymouth
 RUN apt autoremove -y
-RUN apt install -y grub-efi-arm64-signed grub-efi-arm64-bin shim-signed watchdog binutils sbsigntool rasdaemon net-tools nfs-common iptables-persistent rsync tcpdump nvme-cli iputils-arping iputils-ping iputils-tracepath bridge-utils iperf3 bc lm-sensors ifenslave acpid network-manager kexec-tools i2c-tools dc lldpad unzip ipmitool sysstat mmc-utils libhugetlbfs-bin uuid ntp libgdbm-dev
+RUN apt install -y grub-efi-arm64-signed grub-efi-arm64-bin shim-signed watchdog binutils sbsigntool rasdaemon net-tools nfs-common iptables-persistent rsync tcpdump nvme-cli iputils-arping iputils-ping iputils-tracepath bridge-utils iperf3 bc lm-sensors ifenslave acpid network-manager kexec-tools i2c-tools dc lldpad unzip ipmitool sysstat mmc-utils libhugetlbfs-bin uuid ntp libgdbm-dev jq
 RUN apt install -y docker.io; systemctl disable docker.service || true; systemctl disable docker.socket || true
 RUN apt install -y qemu-user-static qemu-utils qemu-user
 RUN apt install -y python3-pip
@@ -39,7 +48,7 @@ RUN echo 'set superusers="admin"' >> /etc/grub.d/40_custom; \
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python2.7 10
 
-RUN wget -qO - @NV_BASE_URL@/doca/@DOCA_VERSION@/ubuntu22.04/aarch64/GPG-KEY-Mellanox.pub | sudo apt-key add -
+RUN wget -qO - $BASE_URL/doca/$DOCA_VERSION/ubuntu22.04/aarch64/GPG-KEY-Mellanox.pub | sudo apt-key add -
 RUN wget -qO - https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key --keyring /usr/share/keyrings/kubernetes-archive-keyring.gpg add -
 RUN echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | tee /etc/apt/sources.list.d/kubernetes.list
 RUN apt update
@@ -48,14 +57,15 @@ RUN apt install -y bridge-utils cpu-checker libvirt-clients libvirt-daemon qemu 
 RUN dpkg -i /tmp/doca-repo.deb
 RUN apt update
 RUN apt upgrade -y
-RUN apt install -y kubelet=1.25.3-00 runc containerd cri-tools=1.25.0-00 kubernetes-cni=1.1.1-00
+RUN apt install -y containerd=1.7.2-0ubuntu1~22.04.1 runc
+RUN apt install -y kubelet=1.25.3-00 cri-tools=1.25.0-00 kubernetes-cni=1.1.1-00
 RUN apt-mark hold kubelet cri-tools kubernetes-cni
 RUN dpkg -i /var/doca-dpu-repo-ubuntu2204-local/*mstflint*.deb || true
 RUN apt-mark hold mstflint
 RUN apt remove -y --purge $(dpkg --list "*openipmi*" | grep openipmi | awk '{print $2}') || true
-RUN dpkg -i /var/doca-dpu-repo-ubuntu2204-local/mlx-*openipmi*.deb || true
 RUN apt install -y -f doca-runtime doca-tools doca-sdk || true
 RUN dpkg -i /var/doca-dpu-repo-ubuntu2204-local/mlxbf-gige-modules*.deb || true
+RUN dpkg -i /var/doca-dpu-repo-ubuntu2204-local/mlx-*openipmi*.deb || true
 RUN apt --fix-broken install -y || true
 RUN dpkg -i /var/doca-dpu-repo-ubuntu2204-local/mlnx-snap_*arm64.deb || true
 RUN dpkg -i /var/doca-dpu-repo-ubuntu2204-local/bf-release_*arm64.deb || true
@@ -67,7 +77,7 @@ RUN rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /etc/kubelet.d
 RUN mkdir -p /workspace
 RUN sed -i -r -e "s/^(MACAddressPolicy.*)/# \1/" /usr/lib/systemd/network/99-default.link
-RUN dpkg -i /root/workspace/mlxbf-bootimages*.deb
+RUN dpkg -i --force-overwrite /root/workspace/mlxbf-bootimages*.deb
 
 # Manage system services
 RUN systemctl enable mlx-regex.service || true

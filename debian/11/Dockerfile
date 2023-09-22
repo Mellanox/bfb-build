@@ -1,6 +1,11 @@
 FROM mellanox/bluefield:bfb_builder_debian11
 ADD qemu-aarch64-static /usr/bin/
 
+ARG BASE_URL
+ARG DOCA_VERSION
+ARG BSP_VERSION
+ARG DISTRO
+ARG DISTRO_VERSION
 WORKDIR /root/workspace
 ADD install.sh .
 ADD create_bfb .
@@ -17,7 +22,7 @@ RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
 RUN apt update
 RUN apt remove --purge -y snapd plymouth
 RUN apt autoremove -y
-RUN apt install -y vim parted cpio logrotate initramfs-tools dosfstools e2fsprogs ifupdown uuid-runtime efivar openssh-server shim-signed shim-unsigned watchdog binutils sbsigntool rasdaemon net-tools nfs-common iptables-persistent rsync tcpdump nvme-cli iputils-arping iputils-ping iputils-tracepath bridge-utils iperf3 bc lm-sensors ifenslave acpid network-manager kexec-tools i2c-tools dc lldpad initramfs-tools dosfstools sudo bsdmainutils wget fdisk usbutils rsyslog
+RUN apt install -y vim parted cpio logrotate initramfs-tools dosfstools e2fsprogs ifupdown uuid-runtime efivar openssh-server shim-signed shim-unsigned watchdog binutils sbsigntool rasdaemon net-tools nfs-common iptables-persistent rsync tcpdump nvme-cli iputils-arping iputils-ping iputils-tracepath bridge-utils iperf3 bc lm-sensors ifenslave acpid network-manager kexec-tools i2c-tools dc lldpad initramfs-tools dosfstools sudo bsdmainutils wget fdisk usbutils rsyslog jq
 RUN apt install -y python3-pip
 RUN apt install -y build-essential
 RUN apt install -y python2.7 python3.9
@@ -52,17 +57,17 @@ RUN apt purge -y docker.io; \
         update-alternatives --set iptables /usr/sbin/iptables-legacy; \
         update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy;
 
-RUN wget -qO - @NV_BASE_URL@/doca/@DOCA_VERSION@/debian11/aarch64/GPG-KEY-Mellanox.pub | apt-key add -
-RUN echo "deb [trusted=yes] @NV_BASE_URL@/doca/@DOCA_VERSION@/debian11/\$(ARCH) ./" | tee /etc/apt/sources.list.d/doca.tmp.list
+RUN wget -qO - $BASE_URL/doca/$DOCA_VERSION/debian11/aarch64/GPG-KEY-Mellanox.pub | apt-key add -
+RUN echo "deb [trusted=yes] $BASE_URL/doca/$DOCA_VERSION/debian11/\$(ARCH) ./" | tee /etc/apt/sources.list.d/doca.tmp.list
 RUN apt update || true
 
 RUN dpkg -i /root/workspace/doca-repo.deb
 RUN apt update || true
 
 RUN apt install -y -f --allow-downgrades \
-        linux-image-5.10.188-bf.5.g3602dbc=5.10.188-bf.5.g3602dbc-1 \
-        linux-headers-5.10.188-bf.5.g3602dbc=5.10.188-bf.5.g3602dbc-1 \
-        linux-libc-dev=5.10.188-bf.5.g3602dbc-1
+        linux-image-5.10.194-bf.2.g006d584=5.10.194-bf.2.g006d584-1 \
+        linux-headers-5.10.194-bf.2.g006d584=5.10.194-bf.2.g006d584-1 \
+        linux-libc-dev=5.10.194-bf.2.g006d584-1
 RUN apt install -y -f doca-runtime-user || true
 RUN apt install -y -f doca-runtime-kernel || true
 RUN apt install -y -f doca-sdk-user || true
@@ -81,7 +86,7 @@ RUN apt clean
 RUN rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /etc/kubelet.d
 RUN mkdir -p /workspace
-RUN dpkg -i /root/workspace/mlxbf-bootimages*.deb
+RUN dpkg -i --force-overwrite /root/workspace/mlxbf-bootimages*.deb
 
 # Manage system services
 RUN systemctl enable mlx-regex.service || true
@@ -127,4 +132,4 @@ RUN mkdir -p /boot/efi/EFI/debian/; \
 
 RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" -e "s/prod/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
 
-CMD ["/root/workspace/create_bfb", "-k", "5.10.188-bf.5.g3602dbc"]
+CMD ["/root/workspace/create_bfb", "-k", "5.10.194-bf.2.g006d584"]

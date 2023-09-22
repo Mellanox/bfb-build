@@ -238,7 +238,7 @@ do
 	copy_bin $tool
 done
 
-for deb in $ADDON_DEBS
+for deb in coreutils nvme-cli mmc-utils $ADDON_DEBS
 do
 	for tool in `dpkg -L $deb | grep -v share`
 	do

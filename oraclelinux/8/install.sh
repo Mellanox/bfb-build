@@ -37,6 +37,9 @@ LOG=/tmp/$logfile
 
 fspath=$(readlink -f "$(dirname $0)")
 
+cx_pcidev=$(lspci -nD 2> /dev/null | grep 15b3:a2d[26c] | awk '{print $1}' | head -1)
+dpu_part_number=$(mstvpd -s $cx_pcidev | grep ^PN: | awk '{print $NF}')
+
 log()
 {
 	msg="[$(date +%H:%M:%S)] $*"
@@ -179,9 +182,6 @@ EOF
 	rm -f $cfg_file
 fi
 
-ilog "Starting mst:"
-ilog "$(mst start)"
-
 cat >> $LOG << EOF
 
 ############ DEBUG INFO (pre-install) ###############
@@ -203,10 +203,13 @@ LSPCI:
 $(lspci)
 
 NIC FW INFO:
-$(flint -d /dev/mst/mt*_pciconf0 q)
+$(mstflint -d $cx_pcidev q)
+
+DPU Part Number:
+$dpu_part_number
 
 MLXCONFIG:
-$(mlxconfig -d /dev/mst/mt*_pciconf0 -e q)
+$(mstconfig -d $cx_pcidev -e q)
 ########### DEBUG INFO END ############
 
 EOF

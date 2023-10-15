@@ -19,7 +19,7 @@ RUN yum install -y \
 	libreswan yum-utils \
 	device-mapper-persistent-data lvm2 acpid perf popt-devel bc lm_sensors \
 	cryptsetup rasdaemon pciutils-devel watchdog kexec-tools jq python3-pip libnghttp2 wget \
-	annobin kernel-rpm-macros iproute-tc network-scripts usbutils nfs-utils python3-six chkconfig \
+	annobin kernel-rpm-macros iproute-tc NetworkManager NetworkManager-initscripts-updown usbutils nfs-utils python3-six chkconfig \
 	dosfstools e2fsprogs openssh-server
 
 RUN yum groupinstall -y "Development Tools"
@@ -42,7 +42,7 @@ RUN yum install -y git gcc make flex bison rpm-build python3 openssl-devel elfut
 
 # enable ol8 Code Ready Builder for installing meson
 RUN yum-config-manager --set-enabled ol8_codeready_builder
-RUN yum install -y vim meson sudo parted xfsprogs net-tools NetworkManager audit plymouth
+RUN yum install -y vim meson sudo parted xfsprogs net-tools audit plymouth
 
 RUN yum install -y redhat-lsb-core
 

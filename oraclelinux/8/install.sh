@@ -439,6 +439,10 @@ interface "oob_net0" {
 }
 EOF
 
+# Enable NetworkManager for ifcfg-enp3s0f0s0 and ifcfg-enp3s0f1s0
+sed -i 's@NM_CONTROLLED="no"@NM_CONTROLLED="yes"@' /mnt/etc/sysconfig/network-scripts/ifcfg-enp3s0f0s0
+sed -i 's@NM_CONTROLLED="no"@NM_CONTROLLED="yes"@' /mnt/etc/sysconfig/network-scripts/ifcfg-enp3s0f1s0
+
 # Customisations per PSID
 FLINT=""
 if [ -x /usr/bin/mstflint ]; then

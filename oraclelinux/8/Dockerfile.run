@@ -45,7 +45,7 @@ RUN dnf install --disableexcludes=kubernetes -y \
 	lsof libreswan yum-utils device-mapper-persistent-data lvm2 acpid perf \
 	popt-devel bc lm_sensors cryptsetup rasdaemon pciutils-devel watchdog \
 	kexec-tools jq python3-pip libnghttp2 wget annobin kernel-rpm-macros \
-	iproute-tc network-scripts usbutils nfs-utils python3-six chkconfig \
+	iproute-tc NetworkManager NetworkManager-initscripts-updown usbutils nfs-utils python3-six chkconfig \
 	dosfstools e2fsprogs openssh-server ipmitool \
 	@BASE_URL@/doca/@DOCA_VERSION@/extras/addons/containerd.io-1.6.22-3.1.el8.aarch64.rpm \
     @BASE_URL@/doca/@DOCA_VERSION@/extras/addons/cri-tools-1.25.0-0.aarch64.rpm \
@@ -60,7 +60,7 @@ gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-oracle \n\
 gpgcheck=1 \n\
 enabled=1' > /etc/yum.repos.d/oracle-codeready-ol8.repo
 
-RUN yum install -y vim sudo parted xfsprogs net-tools NetworkManager audit plymouth
+RUN yum install -y vim sudo parted xfsprogs net-tools audit plymouth
 RUN yum install -y python3-prometheus_client libbsd libbsd-devel
 
 RUN yum install -y redhat-lsb-core
@@ -78,7 +78,7 @@ enabled=1' > /etc/yum.repos.d/oracle-doca-ol8.repo
 
 RUN dnf install -y rdma-core rdma-core-devel libibverbs-utils.aarch64 mstflint infiniband-diags infiniband-diags-compat libibumad librdmacm-utils python3-pyverbs
 
-RUN dnf install -y bf-release doca-cx-apps doca-cx-apps-devel doca-cx-libs doca-cx-libs-devel doca-cx-prime-runtime doca-cx-prime-sdk doca-cx-prime-tools doca-cx-samples meson mlnx-dpdk mlnx-dpdk-devel mlnx-tools mlxbf-bfscripts mlxbf-bootctl network-scripts-openvswitch openvswitch openvswitch-ipsec python3-openvswitch mlx-OpenIPMI mft mft-oem mlnx-fw-updater
+RUN dnf install -y bf-release doca-cx-apps doca-cx-apps-devel doca-cx-libs doca-cx-libs-devel doca-cx-prime-runtime doca-cx-prime-sdk doca-cx-prime-tools doca-cx-samples meson mlnx-dpdk mlnx-dpdk-devel mlnx-tools mlxbf-bfscripts mlxbf-bootctl openvswitch openvswitch-ipsec python3-openvswitch mlx-OpenIPMI mft mft-oem mlnx-fw-updater
 
 RUN echo BlueField_OS_@BF_VERSION@_OL_@DISTRO_VERSION@-@BUILDVER@.@IMAGE_TYPE@@CUSTOM_VERSION@ > /etc/mlnx-release
 

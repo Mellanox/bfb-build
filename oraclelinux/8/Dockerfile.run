@@ -14,12 +14,6 @@ ADD uek uek/
 
 ENV RUN_FW_UPDATER=no
 
-RUN echo -e '[ol8_bootloader] \n\
-name=Oracle Linux $releasever Bootloader Packages ($basearch) \n\
-baseurl=@BASE_URL@/doca/@DOCA_VERSION@/OracleLinux8/bootloader \n\
-gpgcheck=0 \n\
-enabled=1' > /etc/yum.repos.d/oracle-bootloader-ol8.repo
-
 # EPEL
 RUN echo -e '[ol8_developer_EPEL] \n\
 name=Oracle Linux $releasever EPEL Packages for Development ($basearch) \n\

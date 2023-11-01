@@ -58,4 +58,4 @@ RUN rpm -ihv --force bootimages/mlxbf-bootimages-*.aarch64.rpm || true
 
 RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
 
-CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1064.13.gb439522-bluefield"]
+CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1074.2.g0c050d4-bluefield"]

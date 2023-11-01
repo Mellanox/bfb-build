@@ -11,9 +11,9 @@ ADD bootimages bootimages/
 
 ENV RUN_FW_UPDATER=no
 
-RUN dnf update -y
+RUN dnf update -y --nobest
 
-RUN dnf install -y --disableexcludes=kubernetes \
+RUN dnf install -y --nobest --disableexcludes=kubernetes \
 	rpm-build rpm-sign automake meson cmake gcc-c++ \
 	bc bison flex pesign rsync patchutils git annobin intltool \
 	groff kernel-rpm-macros libtool desktop-file-utils jq wget \
@@ -36,7 +36,7 @@ RUN dnf install -y --disableexcludes=kubernetes \
 	https://download.fedoraproject.org/pub/epel/7/aarch64/Packages/r/re2c-0.14.3-2.el7.aarch64.rpm \
 	https://vault.centos.org/centos/8/BaseOS/aarch64/os/Packages/watchdog-5.15-2.el8.aarch64.rpm
 
-RUN dnf install -y rpm-build rpm-sign automake meson cmake gcc-c++
+RUN dnf install -y --nobest rpm-build rpm-sign automake meson cmake gcc-c++
 
 RUN echo -e "[doca] \n\
 name=Nvidia DOCA repository \n\
@@ -44,10 +44,10 @@ baseurl=$BASE_URL/doca/$DOCA_VERSION/openeuler20.03sp1/aarch64/ \n\
 gpgcheck=0 \n\
 enabled=1" > /etc/yum.repos.d/doca.repo
 
-RUN dnf install -y kernel-4.19.90-2109.1.0.0108.oe1.aarch64 kernel-devel-4.19.90-2109.1.0.0108.oe1.aarch64
+RUN dnf install -y --nobest kernel-4.19.90-2109.1.0.0108.oe1.aarch64 kernel-devel-4.19.90-2109.1.0.0108.oe1.aarch64
 
-RUN dnf install --nogpgcheck -y doca-runtime doca-tools doca-sdk
-RUN dnf install --nogpgcheck -y mstflint
+RUN dnf install --nogpgcheck --nobest --exclude network-scripts-openvswitch -y doca-runtime doca-tools doca-sdk
+RUN dnf install --nogpgcheck --nobest -y mstflint
 
 RUN /usr/sbin/update-pciids || true
 RUN rpm -ihv --force bootimages/mlxbf-bootimages-*.aarch64.rpm || true

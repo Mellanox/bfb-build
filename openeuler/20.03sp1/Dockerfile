@@ -50,6 +50,7 @@ RUN dnf install --nogpgcheck --nobest --exclude network-scripts-openvswitch -y d
 RUN dnf install --nogpgcheck --nobest -y mstflint
 
 RUN /usr/sbin/update-pciids || true
+RUN rpm -e --nodeps $(rpm -qa mlxbf-bootimages*)
 RUN rpm -ihv --force bootimages/mlxbf-bootimages-*.aarch64.rpm || true
 
 RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release

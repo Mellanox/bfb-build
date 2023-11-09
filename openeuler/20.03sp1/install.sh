@@ -307,9 +307,12 @@ if (hexdump -C /sys/firmware/acpi/tables/SSDT* | grep -q MLNXBF33); then
 fi
 
 chroot /mnt grub2-mkconfig -o /boot/efi/EFI/openEuler/grub.cfg
-
-kdir=$(/bin/ls -1d /mnt/lib/modules/4.18* /mnt/lib/modules/4.19* /mnt/lib/modules/4.20* /mnt/lib/modules/5.* 2> /dev/null)
-kver=""
+kver=$(uname -r)
+if [ -d /mnt/lib/modules/$kver ]; then
+    kdir=/mnt/lib/modules/$kver
+else
+    kdir=$(/bin/ls -1d /mnt/lib/modules/4.18* /mnt/lib/modules/4.19* /mnt/lib/modules/4.20* /mnt/lib/modules/5.* 2> /dev/null)
+fi
 if [ -n "$kdir" ]; then
     kver=${kdir##*/}
     DRACUT_CMD=`chroot /mnt /bin/ls -1 /sbin/dracut /usr/bin/dracut 2> /dev/null | head -n 1 | tr -d '\n'`

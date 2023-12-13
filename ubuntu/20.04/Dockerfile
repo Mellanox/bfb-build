@@ -20,7 +20,7 @@ RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
 RUN apt update
 RUN apt remove --purge -y snapd plymouth
 RUN apt autoremove -y
-RUN apt install -y grub-efi-arm64-signed grub-efi-arm64-bin shim-signed watchdog binutils sbsigntool rasdaemon net-tools nfs-common iptables-persistent rsync tcpdump nvme-cli iputils-arping iputils-ping iputils-tracepath bridge-utils iperf3 bc lm-sensors ifenslave acpid network-manager kexec-tools i2c-tools dc lldpad unzip sysstat mmc-utils
+RUN apt install -y grub-efi-arm64-signed grub-efi-arm64-bin shim-signed watchdog binutils sbsigntool rasdaemon net-tools nfs-common iptables-persistent rsync tcpdump nvme-cli iputils-arping iputils-ping iputils-tracepath bridge-utils iperf3 bc lm-sensors ifenslave acpid network-manager kexec-tools i2c-tools dc lldpad unzip sysstat mmc-utils uuid ntp jq libev4 conntrack
 # Install ipmitool and ignore default OpenIPMI due to possible conflicts with mlx-openipmi (notice the - in openipmi-)
 # Ref: https://serverfault.com/questions/250224/how-do-i-get-apt-get-to-ignore-some-dependencies
 RUN apt install -y ipmitool openipmi-
@@ -28,7 +28,7 @@ RUN apt install -y docker.io; systemctl disable docker.service || true; systemct
 RUN apt install -y python3-pip
 RUN apt install -y build-essential
 RUN apt install -y libpam-pwquality; echo "minlen = 8" >> /etc/security/pwquality.conf; echo "minclass = 3" >> /etc/security/pwquality.conf
-RUN apt install -y python2.7 python3.8
+RUN apt install -y python2.7 python3.8 python3-pyinotify
 
 # Grub password
 RUN echo 'set superusers="admin"' >> /etc/grub.d/40_custom; \
@@ -56,16 +56,16 @@ RUN dpkg -i /var/doca-dpu-repo-ubuntu2004-local/*mstflint*.deb || true
 RUN apt-mark hold mstflint
 
 RUN apt install -y -f \
-	linux-bluefield=5.4.0.1068.63 \
-	linux-bluefield-headers-5.4.0-1068=5.4.0-1068.74 \
-	linux-bluefield-tools-5.4.0-1068=5.4.0-1068.74 \
-	linux-headers-5.4.0-1068-bluefield=5.4.0-1068.74 \
-	linux-headers-bluefield=5.4.0.1068.63 \
-	linux-image-5.4.0-1068-bluefield=5.4.0-1068.74 \
-	linux-image-bluefield=5.4.0.1068.63 \
-	linux-modules-5.4.0-1068-bluefield=5.4.0-1068.74 \
-	linux-tools-5.4.0-1068-bluefield=5.4.0-1068.74 \
-	linux-tools-bluefield=5.4.0.1068.63 \
+	linux-bluefield=5.4.0.1076.71 \
+	linux-bluefield-headers-5.4.0-1076=5.4.0-1076.82 \
+	linux-bluefield-tools-5.4.0-1076=5.4.0-1076.82 \
+	linux-headers-5.4.0-1076-bluefield=5.4.0-1076.82 \
+	linux-headers-bluefield=5.4.0.1076.71 \
+	linux-image-5.4.0-1076-bluefield=5.4.0-1076.82 \
+	linux-image-bluefield=5.4.0.1076.71 \
+	linux-modules-5.4.0-1076-bluefield=5.4.0-1076.82 \
+	linux-tools-5.4.0-1076-bluefield=5.4.0-1076.82 \
+	linux-tools-bluefield=5.4.0.1076.71 \
 	linux-libc-dev:arm64 \
 	linux-tools-common
 
@@ -87,7 +87,7 @@ RUN mkdir -p /workspace
 RUN dpkg -i /root/workspace/mlxbf-bootimages*.deb
 
 # Manage system services
-RUN systemctl enable mlx-regex.service || true
+RUN systemctl disable mlx-regex.service || true
 RUN systemctl enable NetworkManager.service || true
 RUN systemctl enable NetworkManager-wait-online.service || true
 RUN systemctl enable networking.service || true

@@ -42,9 +42,9 @@ fi
 DISTRO="ubuntu"
 DISTRO_VERSION="20.04"
 DISTRO_BASE_URL="http://cloud-images.ubuntu.com/releases/focal/release/${DISTRO}-${DISTRO_VERSION}-server-cloudimg-arm64-root.tar.xz"
-BF_RELEASE="4.2.0-12855"
-DOCA_VERSION="2.2.0"
-MLNX_OFED_VERSION=23.07-0.5.0.0
+DOCA_VERSION="2.5.0"
+BSP_VERSION="4.5.0-12993"
+MLNX_OFED_VERSION="23.10-1.2.0.0"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-""}
 NV_BASE_URL=${NV_BASE_URL:-"https://linux.mellanox.com/public/repo"}
@@ -54,7 +54,7 @@ WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
 mkdir -p $WDIR
 wget -q -P $WDIR -r --no-verbose --no-directories -l1 --no-parent -A 'doca-dpu-repo*arm64.deb' ${NV_BASE_URL}/doca/${DOCA_VERSION}/${DISTRO}${DISTRO_VERSION}/aarch64/
 mv $WDIR/doca-dpu-repo*arm64.deb $WDIR/doca-repo.deb
-wget -q -P $WDIR -r --no-verbose --no-directories -l1 --no-parent -A 'mlxbf-bootimages*arm64.deb' ${NV_BASE_URL}/bluefield/${BF_RELEASE}/bootimages/${IMAGE_TYPE}/
+wget -q -P $WDIR -r --no-verbose --no-directories -l1 --no-parent -A 'mlxbf-bootimages*arm64.deb' ${NV_BASE_URL}/bluefield/${BSP_VERSION}/bootimages/${IMAGE_TYPE}/
 mv $WDIR/mlxbf-bootimages*arm64.deb $WDIR/mlxbf-bootimages.deb
 
 cp	Dockerfile \

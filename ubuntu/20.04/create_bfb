@@ -240,7 +240,7 @@ for tool in `dpkg -L mlxbf-scripts | grep bin/` \
 		`dpkg -L tar | grep -v share` \
 		xz efibootmgr bash getopt hexdump mstflint lspci perl \
 		lsblk watchdog shutdown systemctl strings aarch64-linux-gnu-strings \
-		mlxbf-bootctl id dirname curl openssl $ADDON_TOOLS
+		mlxbf-bootctl id dirname curl openssl parted $ADDON_TOOLS
 do
 	if [ -d $tool ]; then
 		continue
@@ -250,7 +250,7 @@ do
 	copy_bin $tool
 done
 
-for deb in $ADDON_DEBS
+for deb in coreutils nvme-cli mmc-utils $ADDON_DEBS
 do
 	for tool in `dpkg -L $deb | grep -v share`
 	do
@@ -262,7 +262,7 @@ do
 	done
 done
 
-for mod in mlxbf_tmfifo dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block sdhci sdhci-of-dwcmshc nvme-rdma nvme-tcp nvme mlx5_ib mlxfw ib_umad ib_ipoib ib_iser $ADDON_KERNEL_MODULES
+for mod in mlxbf_tmfifo dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block sdhci sdhci-of-dwcmshc nvme-rdma nvme-tcp nvme mlx5_ib mlxfw ib_umad ib_ipoib ib_iser mst_pci mst_pciconf $ADDON_KERNEL_MODULES
 do
 	copy_module $mod
 done

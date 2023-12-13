@@ -11,9 +11,9 @@ ADD bootimages bootimages/
 
 ENV RUN_FW_UPDATER=no
 
-RUN dnf update -y
+RUN dnf update -y --allowerasing --nobest
 
-RUN dnf install -y --disableexcludes=kubernetes \
+RUN dnf install -y --allowerasing --nobest --disableexcludes=kubernetes \
 	rpm-build rpm-sign automake meson cmake gcc-c++ \
 	bc bison flex pesign rsync patchutils git annobin intltool \
 	groff kernel-rpm-macros libtool desktop-file-utils jq wget \
@@ -46,10 +46,14 @@ enabled=1" > /etc/yum.repos.d/doca.repo
 
 RUN dnf install -y kernel-4.19.90-2109.1.0.0108.oe1.aarch64 kernel-devel-4.19.90-2109.1.0.0108.oe1.aarch64
 
-RUN dnf install --nogpgcheck -y doca-runtime doca-tools doca-sdk
+RUN dnf install --nogpgcheck -y --exclude network-scripts-openvswitch doca-runtime doca-tools doca-sdk
 RUN dnf install --nogpgcheck -y mstflint
+RUN dnf install --nogpgcheck -y dpacc dpacc-extract dpa-compiler
+
+RUN dnf install --nogpgcheck -y mmc-utils || dnf install --nogpgcheck -y $BASE_URL/bluefield/$BSP_VERSION/extras/mmc-utils/mmc-utils-0.1+git.20230209-1.1.aarch64.rpm || true
 
 RUN /usr/sbin/update-pciids || true
+RUN rpm -e --nodeps $(rpm -qa mlxbf-bootimages*)
 RUN rpm -ihv --force bootimages/mlxbf-bootimages-*.aarch64.rpm || true
 
 RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/;s/prod/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release

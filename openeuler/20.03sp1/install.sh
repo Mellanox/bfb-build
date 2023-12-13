@@ -2,7 +2,7 @@
 
 ###############################################################################
 #
-# Copyright 2020 NVIDIA Corporation
+# Copyright 2023 NVIDIA Corporation
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of
 # this software and associated documentation files (the "Software"), to deal in
@@ -24,13 +24,19 @@
 ###############################################################################
 
 PATH="/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:/opt/mellanox/scripts"
+
+
+rshimlog=$(which bfrshlog 2> /dev/null)
+distro="OpenEuler"
 NIC_FW_UPDATE_DONE=0
 RC=0
 err_msg=""
 
-fspath=$(readlink -f `dirname $0`)
+logfile=${distro}.installation.log
+LOG=/tmp/$logfile
 
-rshimlog=`which bfrshlog 2> /dev/null`
+fspath=$(readlink -f "$(dirname $0)")
+
 log()
 {
 	msg="[$(date +%H:%M:%S)] $*"
@@ -39,6 +45,29 @@ log()
 	if [ -n "$rshimlog" ]; then
 		$rshimlog "$*"
 	fi
+	echo "$msg" >> $LOG
+}
+
+ilog()
+{
+	msg="[$(date +%H:%M:%S)] $*"
+	echo "$msg" >> $LOG
+	echo "$msg"
+}
+
+save_log()
+{
+cat >> $LOG << EOF
+
+########################## DMESG ##########################
+$(dmesg -x)
+EOF
+	sync
+	if [ ! -d /mnt/root ]; then
+		mount -t $ROOTFS /dev/${root_device} /mnt
+	fi
+	cp $LOG /mnt/root
+	umount /mnt
 }
 
 fw_update()
@@ -48,10 +77,15 @@ fw_update()
 
 	if [[ -x /mnt/${FW_UPDATER} && -d /mnt/${FW_DIR} ]]; then
 		log "INFO: Updating NIC firmware..."
-		chroot /mnt ${FW_UPDATER} \
+		chroot /mnt ${FW_UPDATER} --log /tmp/mlnx_fw_update.log -v \
 			--force-fw-update \
 			--fw-dir ${FW_DIR}
-		if [ $? -eq 0 ]; then
+		rc=$?
+		sync
+		if [ -e /tmp/mlnx_fw_update.log ]; then
+			cat /tmp/mlnx_fw_update.log >> $LOG
+		fi
+		if [ $rc -eq 0 ]; then
 			log "INFO: NIC firmware update done"
 		else
 			log "INFO: NIC firmware update failed"
@@ -63,8 +97,8 @@ fw_update()
 
 fw_reset()
 {
-	mst start > /dev/null 2>&1 || true
-	chroot /mnt /sbin/mlnx_bf_configure > /dev/null 2>&1
+	ilog "Running mlnx_bf_configure:"
+	ilog "$(chroot /mnt /sbin/mlnx_bf_configure)"
 
 	MLXFWRESET_TIMEOUT=${MLXFWRESET_TIMEOUT:-180}
 	SECONDS=0
@@ -78,6 +112,7 @@ fw_reset()
 	done
 
 	log "INFO: Running NIC Firmware reset"
+	save_log
 	if [ "X$mode" == "Xmanufacturing" ]; then
 		log "INFO: Rebooting..."
 	fi
@@ -85,7 +120,7 @@ fw_reset()
 	# as mlxfwreset will restart the DPU
 	sleep 3
 
-	msg=`chroot /mnt mlxfwreset -d /dev/mst/mt*_pciconf0 -y -l 3 --sync 1 r 2>&1`
+	msg=$(chroot /mnt mlxfwreset -d /dev/mst/mt*_pciconf0 -y -l 3 --sync 1 r 2>&1)
 	if [ $? -ne 0 ]; then
 		log "INFO: NIC Firmware reset failed"
 		log "INFO: $msg"
@@ -112,6 +147,12 @@ unmount_partitions()
 }
 
 #
+# Set the Hardware Clock from the System Clock
+#
+
+hwclock -w
+
+#
 # Check auto configuration passed from boot-fifo
 #
 boot_fifo_path="/sys/bus/platform/devices/MLNXBF04:00/bootfifo"
@@ -128,16 +169,56 @@ if [ -e "${boot_fifo_path}" ]; then
 	if [ -s "${cfg_file}" -a ."${offset}" != ."1" ]; then
 		log "INFO: Found bf.cfg"
 		cat ${cfg_file} | tr -d '\0' > /etc/bf.cfg
+cat >> $LOG << EOF
+
+############ bf.cfg ###############
+$(cat /etc/bf.cfg)
+########## END of bf.cfg ##########
+EOF
 	fi
 	rm -f $cfg_file
 fi
+
+ilog "Starting mst:"
+ilog "$(mst start)"
+
+cat >> $LOG << EOF
+
+############ DEBUG INFO (pre-install) ###############
+KERNEL: $(uname -r)
+
+LSBLK:
+$(lsblk -o NAME,LABEL,UUID)
+
+LSMOD:
+$(lsmod)
+
+NETWORK:
+$(ip addr show)
+
+CMDLINE:
+$(cat /proc/cmdline)
+
+PARTED:
+$(parted -l -s)
+
+LSPCI:
+$(lspci)
+
+NIC FW INFO:
+$(flint -d /dev/mst/mt*_pciconf0 q)
+
+MLXCONFIG:
+$(mlxconfig -d /dev/mst/mt*_pciconf0 -e q)
+########### DEBUG INFO END ############
+
+EOF
 
 #
 # Check PXE installation
 #
 if [ ! -e /tmp/bfpxe.done ]; then touch /tmp/bfpxe.done; bfpxe; fi
 
-PART_SCHEME="SCHEME_A"
 if [ -e /etc/bf.cfg ]; then
 	if ( bash -n /etc/bf.cfg ); then
 		. /etc/bf.cfg
@@ -146,7 +227,13 @@ if [ -e /etc/bf.cfg ]; then
 	fi
 fi
 
-distro="OpenEuler"
+if [ "X${DEBUG}" == "Xyes" ]; then
+	log_output=/dev/kmsg
+	if [ -n "$log_output" ]; then
+		exec >$log_output 2>&1
+		unset log_output
+	fi
+fi
 
 function_exists()
 {
@@ -154,6 +241,7 @@ function_exists()
 	return $?
 }
 
+ROOTFS=${ROOTFS:-"xfs"}
 DHCP_CLASS_ID=${PXE_DHCP_CLASS_ID:-""}
 DHCP_CLASS_ID_OOB=${DHCP_CLASS_ID_OOB:-"NVIDIA/BF/OOB"}
 DHCP_CLASS_ID_DP=${DHCP_CLASS_ID_DP:-"NVIDIA/BF/DP"}
@@ -175,29 +263,13 @@ if [ -b /dev/nvme0n1 ]; then
 fi
 device=${device:-"$default_device"}
 
-SUPPORTED_SCHEMES="SCHEME_A SCHEME_B"
-if ! (echo "$SUPPORTED_SCHEMES" | grep -wq "$PART_SCHEME"); then
-	echo "ERROR: Unsupported partition scheme: $PART_SCHEME"
-	echo "Switching to SCHEME_A"
-	PART_SCHEME="SCHEME_A"
-fi
-
 dd if=/dev/zero of=$device bs=512 count=1
 
-if [[ "${PART_SCHEME}" == "SCHEME_A" ]]; then
-	parted --script $device -- \
-		mklabel gpt \
-		mkpart primary 1MiB 201MiB set 1 esp on \
-		mkpart primary 201MiB 1225MiB \
-		mkpart primary 1225MiB 100%
-elif [[ "${PART_SCHEME}" == "SCHEME_B" ]]; then
-	parted --script $device -- \
-		mklabel gpt \
-		mkpart primary 1MiB 201MiB set 1 esp on \
-		mkpart primary 201MiB 6000MiB \
-		mkpart primary 6000MiB 12489MiB \
-		mkpart primary 12489MiB 100%
-fi
+parted --script $device -- \
+	mklabel gpt \
+	mkpart primary 1MiB 201MiB set 1 esp on \
+	mkpart primary 201MiB 1225MiB \
+	mkpart primary 1225MiB 100%
 
 sync
 
@@ -214,60 +286,42 @@ fi
 # Generate some entropy
 mke2fs  ${device}p2 >> /dev/null
 
-# Copy the kernel image.
+ilog "Creating file systems:"
+(
 mkdosfs ${device}p1 -n system-boot
-mkfs.xfs -f ${device}p2 -L local-boot
-mkfs.xfs -f ${device}p3 -L writable
-if [[ "${PART_SCHEME}" == "SCHEME_B" ]]; then
-	mkfs.xfs -f ${device}p4
-fi
-
-export EXTRACT_UNSAFE_SYMLINKS=1
+mkfs.${ROOTFS} -f ${device}p2 -L local-boot
+mkfs.${ROOTFS} -f ${device}p3 -L writable
+) >> $LOG 2>&1
+sync
+sleep 1
 
 fsck.vfat -a ${device}p1
 
-root=${device/\/dev\/}p3
-if [[ "${PART_SCHEME}" == "SCHEME_A" ]]; then
-	mount ${device}p3 /mnt
-	mkdir -p /mnt/boot
-	mount ${device}p2 /mnt/boot
-	mkdir -p /mnt/boot/efi
-	mount ${device}p1 /mnt/boot/efi
-elif [[ "${PART_SCHEME}" == "SCHEME_B" ]]; then
-	root=${device/\/dev\/}p2
-	mount ${device}p2 /mnt
-	mkdir -p /mnt/boot/efi
-	mount ${device}p1 /mnt/boot/efi
-	mkdir -p /mnt/var
-	mount ${device}p4 /mnt/var
-fi
+root_device=${device/\/dev\/}p3
+mount ${device}p3 /mnt
+mkdir -p /mnt/boot
+mount ${device}p2 /mnt/boot
+mkdir -p /mnt/boot/efi
+mount ${device}p1 /mnt/boot/efi
 
-echo "Extracting /..."
+ilog "Extracting /..."
+export EXTRACT_UNSAFE_SYMLINKS=1
 tar Jxf $fspath/image.tar.xz --warning=no-timestamp -C /mnt
 sync
 
-if [[ "${PART_SCHEME}" == "SCHEME_A" ]]; then
-	cat > /mnt/etc/fstab << EOF
+UUID_p1=$(lsblk -o UUID ${device}p1 | tail -1)
+UUID_p2=$(lsblk -o UUID ${device}p2 | tail -1)
+UUID_p3=$(lsblk -o UUID ${device}p3 | tail -1)
+
+cat > /mnt/etc/fstab << EOF
 #
 # /etc/fstab
 #
 #
-${device}p3  /           xfs     defaults                   0 1
-${device}p2  /boot       xfs     defaults                   0 2
-${device}p1  /boot/efi   vfat    umask=0077,shortname=winnt 0 2
+UUID=${UUID_p3}  /           ${ROOTFS}     defaults                   0 1
+UUID=${UUID_p2}  /boot       ${ROOTFS}     defaults                   0 2
+UUID=${UUID_p1}  /boot/efi   vfat    umask=0077,shortname=winnt 0 2
 EOF
-elif [[ "${PART_SCHEME}" == "SCHEME_B" ]]; then
-	cat > /mnt/etc/fstab << EOF
-#
-# /etc/fstab
-#
-#
-${device}p2  /           xfs     defaults                   0 1
-${device}p3  /home       xfs     defaults                   0 2
-${device}p4  /var        xfs     defaults                   0 2
-${device}p1  /boot/efi   vfat    umask=0077,shortname=winnt 0 2
-EOF
-fi
 
 memtotal=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
 if [ $memtotal -gt 16000000 ]; then
@@ -278,14 +332,8 @@ cat > /mnt/etc/udev/rules.d/50-dev-root.rules << EOF
 # If the system was booted without an initramfs, grubby
 # will look for the symbolic link "/dev/root" to figure
 # out the root file system block device.
-SUBSYSTEM=="block", KERNEL=="$root", SYMLINK+="root"
+SUBSYSTEM=="block", KERNEL=="$root_device", SYMLINK+="root"
 EOF
-
-if [[ "${PART_SCHEME}" == "SCHEME_B" ]]; then
-	sed -r -i -e "s@(^LOG_DIR=).*@\1/home/snap/log@" /mnt/usr/bin/rotate_nvme_snap_logs.sh
-	sed -i -e "s@^\$outchannel@# \$outchannel@" /mnt/etc/rsyslog.d/nvme_snap_logs.conf
-	sed -i -e "s@^## \$outchannel@\$outchannel@" /mnt/etc/rsyslog.d/nvme_snap_logs.conf
-fi
 
 # Update default.bfb
 bfb_location=/lib/firmware/mellanox/default.bfb
@@ -322,22 +370,26 @@ if (lspci -vv | grep -wq SimX); then
 	sed -i -r -e 's/earlycon=[^ ]* //g' /mnt/etc/default/grub
 fi
 
-chroot /mnt grub2-mkconfig -o /boot/efi/EFI/openEuler/grub.cfg
+ilog "$(chroot /mnt grub2-mkconfig -o /boot/efi/EFI/openEuler/grub.cfg 2>&1)"
 
-kdir=$(/bin/ls -1d /mnt/lib/modules/4.18* /mnt/lib/modules/4.19* /mnt/lib/modules/4.20* /mnt/lib/modules/5.* 2> /dev/null)
-kver=""
+kver=$(uname -r)
+if [ -d /mnt/lib/modules/$kver ]; then
+    kdir=/mnt/lib/modules/$kver
+else
+    kdir=$(/bin/ls -1d /mnt/lib/modules/4.18* /mnt/lib/modules/4.19* /mnt/lib/modules/4.20* /mnt/lib/modules/5.* 2> /dev/null)
+fi
 if [ -n "$kdir" ]; then
     kver=${kdir##*/}
-    DRACUT_CMD=`chroot /mnt /bin/ls -1 /sbin/dracut /usr/bin/dracut 2> /dev/null | head -n 1 | tr -d '\n'`
-    chroot /mnt grub2-set-default 0
-    chroot /mnt $DRACUT_CMD --kver ${kver} --force --add-drivers "sdhci-of-dwcmshc dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block mlxbf_tmfifo virtio_console nvme" /boot/initramfs-${kver}.img
+    DRACUT_CMD=$(chroot /mnt /bin/ls -1 /sbin/dracut /usr/bin/dracut 2> /dev/null | head -n 1 | tr -d '\n')
+    ilog "$(chroot /mnt grub2-set-default 0)"
+    ilog "$(chroot /mnt $DRACUT_CMD --kver ${kver} --force --add-drivers 'sdhci-of-dwcmshc dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block mlxbf_tmfifo virtio_console nvme' /boot/initramfs-${kver}.img)"
 else
     kver=$(/bin/ls -1 /mnt/lib/modules/ | head -1)
 fi
 
 echo openeuler | chroot /mnt passwd root --stdin
 
-if [ `wc -l /mnt/etc/hostname | cut -d ' ' -f 1` -eq 0 ]; then
+if [ $(wc -l /mnt/etc/hostname | cut -d ' ' -f 1) -eq 0 ]; then
 	echo "localhost" > /mnt/etc/hostname
 fi
 
@@ -356,12 +408,12 @@ else
 	UUIDGEN=/mnt/usr/bin/uuidgen
 fi
 
-p0m0_uuid=`$UUIDGEN`
-p1m0_uuid=`$UUIDGEN`
-p0m0_mac=`echo ${p0m0_uuid} | sed -e 's/-//;s/^\(..\)\(..\)\(..\)\(..\)\(..\).*$/02:\1:\2:\3:\4:\5/'`
-p1m0_mac=`echo ${p1m0_uuid} | sed -e 's/-//;s/^\(..\)\(..\)\(..\)\(..\)\(..\).*$/02:\1:\2:\3:\4:\5/'`
+p0m0_uuid=$($UUIDGEN)
+p1m0_uuid=$($UUIDGEN)
+p0m0_mac=$(echo ${p0m0_uuid} | sed -e 's/-//;s/^\(..\)\(..\)\(..\)\(..\)\(..\).*$/02:\1:\2:\3:\4:\5/')
+p1m0_mac=$(echo ${p1m0_uuid} | sed -e 's/-//;s/^\(..\)\(..\)\(..\)\(..\)\(..\).*$/02:\1:\2:\3:\4:\5/')
 
-pciids=`lspci -nD 2> /dev/null | grep 15b3:a2d[26c] | awk '{print $1}'`
+pciids=$(lspci -nD 2> /dev/null | grep 15b3:a2d[26c] | awk '{print $1}')
 
 mkdir -p /mnt/etc/mellanox
 echo > /mnt/etc/mellanox/mlnx-sf.conf
@@ -410,13 +462,13 @@ elif [ -x /mnt/usr/bin/mstflint ]; then
 	FLINT=/mnt/usr/bin/mstflint
 fi
 
-pciid=`echo $pciids | awk '{print $1}' | head -1`
+pciid=$(echo $pciids | awk '{print $1}' | head -1)
 if [ -e /mnt/usr/sbin/mlnx_snap_check_emulation.sh ]; then
 	sed -r -i -e "s@(NVME_SF_ECPF_DEV=).*@\1${pciid}@" /mnt/usr/sbin/mlnx_snap_check_emulation.sh
 fi
 if [ -n "$FLINT" ]; then
-	PSID=`$FLINT -d $pciid q | grep PSID | awk '{print $NF}'`
-
+	PSID=$($FLINT -d $pciid q | grep PSID | awk '{print $NF}')
+	ilog "PSID: $PSID"
 	case "${PSID}" in
 		MT_0000000634)
 		sed -r -i -e 's@(EXTRA_ARGS=).*@\1"--mem-size 1200"@' /mnt/etc/default/mlnx_snap
@@ -448,42 +500,39 @@ fi
 sync
 
 chroot /mnt umount /boot/efi
-if [[ "${PART_SCHEME}" == "SCHEME_A" ]]; then
-	chroot /mnt umount /boot
-fi
+chroot /mnt umount /boot
 umount /mnt/sys
 umount /mnt/dev
 umount /mnt/proc
-if [[ "${PART_SCHEME}" == "SCHEME_B" ]]; then
-	umount /mnt/var
-	umount /mnt/home
-fi
 umount /mnt
 
 sync
 
-bfrec --bootctl 2> /dev/null || true
-if [ -e /lib/firmware/mellanox/boot/capsule/boot_update2.cap ]; then
-	bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap
-fi
+UPDATE_BOOT=${UPDATE_BOOT:-1}
+if [ $UPDATE_BOOT -eq 1 ]; then
+	ilog "Updating ATF/UEFI:"
+	ilog "$(bfrec --bootctl || true)"
+	if [ -e /lib/firmware/mellanox/boot/capsule/boot_update2.cap ]; then
+		ilog "$(bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap)"
+	fi
 
-if [ -e /lib/firmware/mellanox/boot/capsule/efi_sbkeysync.cap ]; then
-	bfrec --capsule /lib/firmware/mellanox/boot/capsule/efi_sbkeysync.cap
+	if [ -e /lib/firmware/mellanox/boot/capsule/efi_sbkeysync.cap ]; then
+		ilog "$(bfrec --capsule /lib/firmware/mellanox/boot/capsule/efi_sbkeysync.cap)"
+	fi
 fi
-
-# Clean up actual boot entries.
-bfbootmgr --cleanall > /dev/null 2>&1
 
 if [ ! -d /sys/firmware/efi/efivars ]; then
 	mount -t efivarfs none /sys/firmware/efi/efivars
 fi
 
+ilog "Remove old boot entries"
+ilog "$(bfbootmgr --cleanall)"
 /bin/rm -f /sys/firmware/efi/efivars/Boot* > /dev/null 2>&1
 /bin/rm -f /sys/firmware/efi/efivars/dump-* > /dev/null 2>&1
-efibootmgr -c -d "$device" -p 1 -l "\EFI\openEuler\shimaa64.efi" -L $distro
+ilog "$(efibootmgr -c -d $device -p 1 -l '\EFI\openEuler\shimaa64.efi' -L $distro)"
 umount /sys/firmware/efi/efivars
 
-BFCFG=`which bfcfg 2> /dev/null`
+BFCFG=$(which bfcfg 2> /dev/null)
 if [ -n "$BFCFG" ]; then
 	# Create PXE boot entries
 	if [ -e /etc/bf.cfg ]; then
@@ -510,7 +559,14 @@ EOF
 	fi
 
 	RC=$((RC+rc))
+cat >> $LOG << EOF
 
+### Adding PXE boot entries: ###
+$(cat /etc/bf.cfg)
+### bfcfg LOG: ###
+$(cat /tmp/bfcfg.log)
+### bfcfg log End ###
+EOF
 	# Restore the original bf.cfg
 	/bin/rm -f /etc/bf.cfg
 	if [ -e /etc/bf.cfg.orig ]; then
@@ -528,6 +584,14 @@ if [ -n "$BFCFG" ]; then
 	fi
 
 	RC=$((RC+rc))
+cat >> $LOG << EOF
+
+### Applying original bf.cfg: ###
+$(cat /etc/bf.cfg)
+### bfcfg LOG: ###
+$(cat /tmp/bfcfg.log)
+### bfcfg log End ###
+EOF
 fi
 
 echo
@@ -544,17 +608,14 @@ log "INFO: Installation finished"
 if [ "$WITH_NIC_FW_UPDATE" == "yes" ]; then
 	if [ $NIC_FW_UPDATE_DONE -eq 1 ]; then
 		# Reset NIC FW
-		if [[ "${PART_SCHEME}" == "SCHEME_A" ]]; then
-			mount ${device}p3 /mnt
-		else
-			mount ${device}p2 /mnt
-		fi
+		mount ${device}p3 /mnt
 		bind_partitions
 		fw_reset
 		unmount_partitions
 	fi
 fi
 
+save_log
 sleep 3
 log "INFO: Rebooting..."
 # Wait for these messages to be pulled by the rshim service

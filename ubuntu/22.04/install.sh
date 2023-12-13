@@ -61,7 +61,7 @@ save_log()
 cat >> $LOG << EOF
 
 ########################## DMESG ##########################
-$(dmesg)
+$(dmesg -x)
 EOF
 	sync
 	if [ ! -d /mnt/root ]; then
@@ -181,7 +181,7 @@ CMDLINE:
 $(cat /proc/cmdline)
 
 PARTED:
-$(parted -l)
+$(parted -l -s)
 
 LSPCI:
 $(lspci)
@@ -488,7 +488,10 @@ EOF
 	ln -snf $vmlinuz /mnt/boot/vmlinuz
 	ln -snf $initrd /mnt/boot/initrd.img
 
-	kver=$(/bin/ls -1 /mnt/lib/modules/ | tail -1)
+	kver=$(uname -r)
+	if [ ! -d /mnt/lib/modules/$kver ]; then
+		kver=$(/bin/ls -1 /mnt/lib/modules/ | tail -1)
+	fi
 	cat >> /mnt/etc/initramfs-tools/modules << EOF
 dw_mmc-bluefield
 dw_mmc

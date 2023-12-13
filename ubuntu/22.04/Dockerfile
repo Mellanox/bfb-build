@@ -30,7 +30,7 @@ RUN apt update
 RUN apt upgrade -y
 RUN apt remove --purge -y snapd plymouth
 RUN apt autoremove -y
-RUN apt install -y grub-efi-arm64-signed grub-efi-arm64-bin shim-signed watchdog binutils sbsigntool rasdaemon net-tools nfs-common iptables-persistent rsync tcpdump nvme-cli iputils-arping iputils-ping iputils-tracepath bridge-utils iperf3 bc lm-sensors ifenslave acpid network-manager kexec-tools i2c-tools dc lldpad unzip ipmitool sysstat mmc-utils libhugetlbfs-bin uuid ntp libgdbm-dev jq
+RUN apt install -y grub-efi-arm64-signed grub-efi-arm64-bin shim-signed watchdog binutils sbsigntool rasdaemon net-tools nfs-common iptables-persistent rsync tcpdump nvme-cli iputils-arping iputils-ping iputils-tracepath bridge-utils iperf3 bc lm-sensors ifenslave acpid network-manager kexec-tools i2c-tools dc lldpad unzip ipmitool sysstat mmc-utils libhugetlbfs-bin uuid ntp libgdbm-dev jq libev4
 RUN apt install -y docker.io; systemctl disable docker.service || true; systemctl disable docker.socket || true
 RUN apt install -y qemu-user-static qemu-utils qemu-user
 RUN apt install -y python3-pip
@@ -80,7 +80,7 @@ RUN sed -i -r -e "s/^(MACAddressPolicy.*)/# \1/" /usr/lib/systemd/network/99-def
 RUN dpkg -i --force-overwrite /root/workspace/mlxbf-bootimages*.deb
 
 # Manage system services
-RUN systemctl enable mlx-regex.service || true
+RUN systemctl disable mlx-regex.service || true
 RUN systemctl enable NetworkManager.service || true
 RUN systemctl enable NetworkManager-wait-online.service || true
 RUN systemctl enable networking.service || true

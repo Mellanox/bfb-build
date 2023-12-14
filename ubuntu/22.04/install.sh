@@ -655,10 +655,22 @@ EOF
 	fi
 
 	if [ "X$ENABLE_SFC_HBN" == "Xyes" ]; then
-		NUM_VFs_PHYS_PORT0=${NUM_VFs_PHYS_PORT0:-14}
-		NUM_VFs_PHYS_PORT1=${NUM_VFs_PHYS_PORT1:-0}
+		ARG_PORT0=""
+		ARG_PORT1=""
+		if ! [ -z "${NUM_VFs_PHYS_PORT0}" ]; then
+			ARG_PORT0="--ecpf0 "${NUM_VFs_PHYS_PORT0}
+		fi
+		if ! [ -z "${NUM_VFs_PHYS_PORT1}" ]; then
+			ARG_PORT1="--ecpf1 "${NUM_VFs_PHYS_PORT1}
+		fi
+		HBN_UPLINKS=${HBN_UPLINKS:-"p0,p1"}
+		HBN_REPS=${HBN_REPS:-"pf0hpf,pf1hpf,pf0vf0-pf0vf13"}
+		HBN_DPU_SFS=${HBN_DPU_SFS:-"pf0dpu1,pf0dpu3"}
+		HUGEPAGE_SIZE=${HUGEPAGE_SIZE:-2048}
+		HUGEPAGE_COUNT=${HUGEPAGE_COUNT:-4096}
+		CLOUD_OPTION=${CLOUD_OPTION:-""}
 		log "INFO: Installing SFC HBN environment"
-		chroot /mnt /opt/mellanox/sfc-hbn/install.sh --ecpf0 $NUM_VFs_PHYS_PORT0 --ecpf1 $NUM_VFs_PHYS_PORT1
+		chroot /mnt HBN_UPLINKS=${HBN_UPLINKS} HBN_REPS=${HBN_REPS} HBN_DPU_SFS=${HBN_DPU_SFS} HUGEPAGE_SIZE=${HUGEPAGE_SIZE} HUGEPAGE_COUNT=${HUGEPAGE_COUNT} CLOUD_OPTION=${CLOUD_OPTION} /opt/mellanox/sfc-hbn/install.sh ${ARG_PORT0} ${ARG_PORT1}
 		NIC_FW_RESET_REQUIRED=1
 	fi
 

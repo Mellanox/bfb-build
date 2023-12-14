@@ -12,6 +12,7 @@ ADD create_bfb .
 ADD bootimages bootimages/
 
 ENV RUN_FW_UPDATER=no
+ENV KVER=5.10.134-13.1.an8.aarch64
 
 # Set releasever to 8.6
 RUN echo 8.6 > /etc/dnf/vars/dockerreleasever
@@ -60,7 +61,7 @@ baseurl=$BASE_URL/doca/$DOCA_VERSION/$DISTRO$DISTRO_VERSION/aarch64/ \n\
 gpgcheck=0 \n\
 enabled=1" > /etc/yum.repos.d/doca.repo
 
-RUN dnf install -y kernel kernel-modules kernel-devel kernel-core kernel-modules-extra
+RUN dnf install -y kernel-$KVER kernel-modules-$KVER kernel-devel-$KVER kernel-core-$KVER kernel-modules-extra-$KVER
 RUN dnf install -y openssl-1.1.1q openssl-devel-1.1.1q openssl-libs-1.1.1q openssl-perl-1.1.1q openssl-static-1.1.1q
 
 RUN dnf install --nogpgcheck -y mstflint-4.16.1
@@ -70,6 +71,7 @@ RUN dnf install --nogpgcheck -y dpacc dpacc-extract dpa-compiler
 RUN dnf install --nogpgcheck -y mmc-utils || dnf install --nogpgcheck -y $BASE_URL/bluefield/$BSP_VERSION/extras/mmc-utils/mmc-utils-0.1+git.20230209-1.1.aarch64.rpm || true
 
 RUN /usr/sbin/update-pciids || true
+RUN rpm -e --nodeps $(rpm -qa mlxbf-bootimages*)
 RUN rpm -ihv --force bootimages/mlxbf-bootimages-*.aarch64.rpm || true
 
 RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" -e "s/prod/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release

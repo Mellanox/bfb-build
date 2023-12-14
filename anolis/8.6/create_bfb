@@ -133,6 +133,7 @@ GRUB_CMDLINE_LINUX="crashkernel=auto console=hvc0 console=ttyAMA0 earlycon=pl011
 GRUB_DISABLE_RECOVERY="true"
 GRUB_TIMEOUT_STYLE=countdown
 GRUB_DISABLE_OS_PROBER=false
+GRUB_DISABLE_LINUX_UUID=false
 EOF
 
 case "$(file --brief --mime-type "$initramfs")" in

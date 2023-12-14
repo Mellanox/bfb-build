@@ -86,6 +86,7 @@ ex yum-config-manager --nogpgcheck --add-repo ${BASE_URL}/doca/${DOCA_VERSION}/r
 
 ex yum install --nogpgcheck -y doca-runtime-user doca-sdk-user doca-tools
 
+ex rpm -e --nodeps $(rpm -qa mlxbf-bootimages*)
 ex rpm -ihv --force /root/workspace/bootimages/mlxbf-bootimages*.aarch64.rpm
 
 /usr/sbin/update-pciids || true

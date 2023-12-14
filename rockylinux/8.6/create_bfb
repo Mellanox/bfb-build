@@ -88,7 +88,7 @@ done
 
 bootctl_module="mlxbf-bootctl"
 
-modinfo -n -k $kernel "mlx-bootctl" && bootctl_module="mlx-bootctl"
+modinfo -n -k $kernel "mlx-bootctl" > /dev/null 2>&1 && bootctl_module="mlx-bootctl"
 
 SCRIPTS_DIR=`dirname $0`
 
@@ -122,7 +122,10 @@ cd ${WDIR}
 
 initramfs=$WDIR/dump-initramfs-v0
 
-dracut --no-hostonly -m "bash network base shutdown" --add-drivers "${bootctl_module} sdhci-of-dwcmshc mlxbf_tmfifo dw_mmc_bluefield mmc_block virtio_console mlx5_core mlx5_ib mlxfw ib_umad nvme" --filesystems "xfs vfat" --gzip $initramfs ${kernel}
+dracut --no-hostonly -m "bash network base systemd systemd-initrd dracut-systemd shutdown udev-rules" \
+	--install "/usr/lib/udev/rules.d/91-tmfifo_net.rules /lib/udev/rules.d/92-oob_net.rules" \
+	--add-drivers "${bootctl_module} sdhci-of-dwcmshc mlxbf_tmfifo dw_mmc_bluefield mmc_block virtio_console mlx5_core mlx5_ib mlxfw ib_umad nvme" \
+	--filesystems "xfs vfat" --gzip $initramfs ${kernel}
 
 rm -f /etc/udev/rules.d/91-tmfifo_net.rules /etc/udev/rules.d/92-oob_net.rules
 
@@ -137,6 +140,7 @@ GRUB_CMDLINE_LINUX="crashkernel=auto console=hvc0 console=ttyAMA0 earlycon=pl011
 GRUB_DISABLE_RECOVERY="true"
 GRUB_TIMEOUT_STYLE=countdown
 GRUB_DISABLE_OS_PROBER=false
+GRUB_DISABLE_LINUX_UUID=false
 EOF
 
 case "$(file --brief --mime-type "$initramfs")" in
@@ -230,7 +234,7 @@ copy_rpm()
 }
 
 # Copy the content of RPM packages
-for package in mlxbf-bfscripts util-linux dosfstools e2fsprogs kmod pciutils usbutils chkconfig mft mft-oem kernel-mft kmod-kernel-mft-mlnx tar xfsprogs coreutils-single parted which curl openssl gawk $ADDON_RPMS
+for package in mlxbf-bfscripts util-linux dosfstools e2fsprogs kmod pciutils usbutils chkconfig mft mft-oem kernel-mft kmod-kernel-mft-mlnx tar xfsprogs coreutils-single nvme-cli mmc-utils parted which curl openssl gawk lvm2-libs device-mapper lvm2 $ADDON_RPMS
 do
     copy_rpm $package || true
 done
@@ -265,7 +269,7 @@ XZ_OPT="--threads=0 -9 --verbose" tar -cJp --exclude='./workspace' --exclude='./
 install -m 0755 ${SDIR}/install.sh ./rocky/install.sh
 
 mkdir scripts
-cat > scripts/install-rocky.sh << EOF
+cat > scripts/initrd-install << EOF
 #!/bin/sh
 
 echo
@@ -292,7 +296,23 @@ else
 fi
 EOF
 
-sed -i -e "s@source_conf /etc/conf.d@&\nbash -x /scripts/install-rocky.sh@" init
+chmod +x scripts/initrd-install
+
+cat > usr/lib/systemd/system/install-rocky.service << EOF
+[Unit]
+Description=Install Rocky Linux 
+After=initrd-root-fs.target initrd-parse-etc.service
+After=dracut-initqueue.service dracut-mount.service
+
+[Service]
+Type=oneshot
+ExecStart=/scripts/initrd-install
+StandardInput=null
+StandardOutput=syslog
+StandardError=syslog+console
+EOF
+
+ln -s /usr/lib/systemd/system/install-rocky.service etc/systemd/system/initrd.target.wants/install-rocky.service
 
 # Make initramfs
 find . | cpio -H newc -o | gzip -9 > $initramfs

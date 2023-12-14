@@ -10,6 +10,7 @@ ADD create_bfb .
 ADD bootimages bootimages/
 
 ENV RUN_FW_UPDATER=no
+ENV KVER=4.18.0-372.32.1.el8_6.aarch64
 
 RUN dnf install -y epel-release "dnf-command(config-manager)" && \
 	dnf config-manager --set-enabled powertools && \
@@ -33,20 +34,24 @@ RUN dnf update -y
 
 RUN dnf config-manager --nogpgcheck --add-repo $BASE_URL/doca/$DOCA_VERSION/rockylinux8.6/aarch64/
 
-RUN dnf install -y kernel-4.18.0-372.26.1.el8_6 \
-	kernel-core-4.18.0-372.26.1.el8_6 \
-	kernel-cross-headers-4.18.0-372.26.1.el8_6 \
-	kernel-devel-4.18.0-372.26.1.el8_6 \
-	kernel-headers-4.18.0-372.26.1.el8_6 \
-	kernel-modules-4.18.0-372.26.1.el8_6 \
-	kernel-modules-extra-4.18.0-372.26.1.el8_6
+RUN dnf install -y kernel-$KVER \
+	kernel-core-$KVER \
+	kernel-cross-headers-$KVER \
+	kernel-devel-$KVER \
+	kernel-headers-$KVER \
+	kernel-modules-$KVER \
+	kernel-modules-extra-$KVER
 
 RUN dnf install --nogpgcheck -y doca-runtime doca-tools doca-sdk
+RUN dnf install --nogpgcheck -y dpacc dpacc-extract dpa-compiler
+
+RUN dnf install --nogpgcheck -y mmc-utils || dnf install --nogpgcheck -y $BASE_URL/bluefield/$BSP_VERSION/extras/mmc-utils/mmc-utils-0.1+git.20230209-1.1.aarch64.rpm || true
 RUN dnf install --nogpgcheck -y mstflint
 
 RUN /usr/sbin/update-pciids || true
+RUN rpm -e --nodeps $(rpm -qa mlxbf-bootimages*)
 RUN rpm -ihv --force bootimages/mlxbf-bootimages-*.aarch64.rpm || true
 
 RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/;s/prod/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
 
-CMD ["/root/workspace/create_bfb", "-k", "4.18.0-372.26.1.el8_6.aarch64"]
+CMD ["/root/workspace/create_bfb", "-k", "4.18.0-372.32.1.el8_6.aarch64"]

@@ -158,6 +158,7 @@ GRUB_CMDLINE_LINUX="crashkernel=auto console=hvc0 console=ttyAMA0 earlycon=pl011
 GRUB_DISABLE_RECOVERY="true"
 GRUB_TIMEOUT_STYLE=countdown
 GRUB_DISABLE_OS_PROBER=false
+GRUB_DISABLE_LINUX_UUID=false
 EOF
 
 
@@ -252,7 +253,7 @@ copy_rpm()
 }
 
 # Copy the content of RPM packages
-for package in sdhci-of-dwcmshc mlxbf-bfscripts util-linux dosfstools e2fsprogs kmod pciutils usbutils chkconfig mft mft-oem kernel-mft kmod-kernel-mft-mlnx tar xfsprogs coreutils parted which curl openssl $ADDON_RPMS
+for package in sdhci-of-dwcmshc mlxbf-bfscripts util-linux dosfstools e2fsprogs kmod pciutils usbutils chkconfig mft mft-oem kernel-mft kmod-kernel-mft-mlnx tar xfsprogs coreutils parted which curl openssl nvme-cli mmc-utils $ADDON_RPMS
 do
 	copy_rpm $package || true
 done

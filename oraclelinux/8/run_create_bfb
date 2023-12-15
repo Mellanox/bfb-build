@@ -2,20 +2,30 @@
 
 rpm -ihv --nodeps /root/workspace/SoC/*.rpm
 
+bfb_name=$(cat /etc/mlnx-release)
+BMC_URL="https://linux.mellanox.com/public/repo/doca/2.5.0/OracleLinux8/BF3BMC"
+
+# Restore bfb name
+echo $bfb_name > /etc/mlnx-release
+
 for bootimage in /root/workspace/bootimages/*.rpm
 do
-	current_type=$(cat /etc/mlnx-release | grep -oE "unsigned|dev|prod")
+    current_type=$(cat /etc/mlnx-release | grep -oE "unsigned|dev|prod")
 	echo "Current type: $current_type"
-
+	fw_name_pattern="^mlnx-fw-updater"
 	case "$bootimage" in
-	*devsigned*)
-		type=dev
-		;;
 	*signed*)
+		full_fw_name=$(rpm -qa | grep "$fw_name_pattern")
+		rpm -e "$full_fw_name"
 		type=prod
-		;;
-	*)
-		type=unsigned
+		rpm -i /workspace/fw/with-signed/*.rpm
+		/bin/rm -f /workspace/BF3BMC/bmc/*
+		/bin/rm -f /workspace/BF3BMC/cec/*
+		/bin/rm -f /workspace/BF3BMC/golden_images/dpu/*
+		wget -P /workspace/BF3BMC/bmc -q --no-check-certificate ${BMC_URL}/bmc/bf3-bmc-23.10-5_opn.fwpkg
+		wget -P /workspace/BF3BMC/cec -q --no-check-certificate ${BMC_URL}/cec/cec1736-ecfw-00.02.0152.0000-n02-rel-prod.fwpkg
+		wget -P /workspace/BF3BMC/golden_images/dpu -q --no-check-certificate ${BMC_URL}/golden_images/dpu/BlueField-GA-4.5.0.12993_preboot-install.bfb
+        wget -P /workspace/BF3BMC/golden_images/fw -q --no-check-certificate -r --no-directories -l1 --no-parent -A 'fw*bfb' ${BMC_URL}/golden_images/fw/
 		;;
 	esac
 

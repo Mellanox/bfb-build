@@ -137,6 +137,11 @@ ex mkdir -p ${WDIR}
 ex cd ${WDIR}
 ex rm -rf initramfs
 
+# Note: /boot/initrd.img should be different from the one used in the BFB
+# The one in the BFB should include CX drivers to enable use of all the network
+# interfaces for the installation. /boot/initrd.img should not include CX
+# drivers and ib_umad as it will prevent /sbin/mlnx_bf_configure from running
+# upon boot
 initramfs=/boot/initrd.img-$kernel
 initramfs=$(realpath $initramfs)
 # ex mkinitramfs -o $WDIR/dump-initramfs-v0 $kernel
@@ -148,6 +153,8 @@ case "$(file --brief --mime-type "$initramfs")" in
 		cat_initrd="lzcat" ;;
 	"application/x-lz4")
 		cat_initrd="lz4cat" ;;
+	"application/zstd")
+		cat_initrd="zstdcat" ;;
 	*)
 		cat_initrd="zcat" ;;
 esac
@@ -205,6 +212,14 @@ copy_module()
 		return
 	fi
 
+	if (modinfo -k $kernel $1 2>/dev/null | grep "filename:" | grep -q builtin); then
+		return
+	fi
+
+	if ! (modinfo -k $kernel $1 2>/dev/null); then
+		return
+	fi
+
 	for mod in `modinfo -F depends -k $kernel $1 | tr -s ',' ' '`
 	do
 		copy_module $mod
@@ -228,7 +243,7 @@ for tool in `dpkg -L mlxbf-scripts | grep bin/` \
 		`dpkg -L tar | grep -v share` \
 		xz efibootmgr bash getopt hexdump mstflint lspci perl \
 		lsblk watchdog shutdown systemctl strings aarch64-linux-gnu-strings \
-		mlxbf-bootctl id dirname curl openssl $ADDON_TOOLS
+		mlxbf-bootctl id dirname curl openssl parted $ADDON_TOOLS
 do
 	if [ -d $tool ]; then
 		continue
@@ -250,11 +265,13 @@ do
 	done
 done
 
-for mod in nvme-rdma nvme-tcp nvme mlx5_ib mlxfw ib_umad ib_ipoib ib_iser $ADDON_KERNEL_MODULES
+for mod in mlxbf_tmfifo dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block sdhci sdhci-of-dwcmshc nvme-rdma nvme-tcp nvme mlx5_ib mlxfw ib_umad ib_ipoib ib_iser mst_pci mst_pciconf efivarfs vfat fat msdos nls_cp850 nls_cp437 nls_ascii mlxbf-tmfifo virtio_console sbsa_gwdt mlxbf-bootctl $ADDON_KERNEL_MODULES
 do
 	copy_module $mod
 done
+
 sudo depmod -a -b ./ $kernel
+
 sudo mkdir -p usr/share/misc/ bin/ var/log/watchdog
 sudo cp /usr/share/misc/pci.ids usr/share/misc/
 sudo cp /etc/watchdog.conf etc
@@ -272,12 +289,16 @@ if [ -z "$bootctl_ko" ]; then
 	exit 1
 fi
 sudo cp $bootctl_ko ./mlx-bootctl.ko
-sudo cp /lib/modules/$kernel/updates/sdhci-of-dwcmshc.ko .
 sudo cp /lib/modules/$kernel/kernel/drivers/watchdog/sbsa_gwdt.ko .
 sudo mkdir -p ./lib/firmware/mellanox/boot/
 sudo cp /lib/firmware/mellanox/boot/default.bfb ./lib/firmware/mellanox/boot/default.bfb
 sudo cp -a /lib/firmware/mellanox/boot/capsule ./lib/firmware/mellanox/boot/
 sudo mkdir -p mnt dev sys proc
+
+sudo mkdir -p ./lib/udev/rules.d
+sudo cp /lib/udev/rules.d/82-net-setup-link.rules ./lib/udev/rules.d/82-net-setup-link.rules
+sudo mkdir -p ./etc/infiniband
+sudo cp /etc/infiniband/vf-net-link-name.sh ./etc/infiniband/vf-net-link-name.sh
 
 # CVE-2021-4034 workaround
 chmod 0755 /usr/bin/pkexec
@@ -296,13 +317,6 @@ printf_msg()
 	return 0
 }
 
-modprobe -a sdhci-of-dwcmshc dw_mmc-bluefield > /dev/null 2>&1
-modprobe -a mlx5_ib mlxfw ib_umad
-modprobe nvme > /dev/null 2>&1
-modprobe mlxbf_tmfifo > /dev/null 2>&1
-insmod /mlx-bootctl.ko > /dev/null 2>&1
-insmod /sdhci-of-dwcmshc.ko > /dev/null 2>&1
-insmod /sbsa_gwdt.ko > /dev/null 2>&1
 /usr/sbin/watchdog > /dev/null 2>&1
 
 printf_msg "================================="
@@ -351,7 +365,18 @@ printf "console=hvc0 console=ttyAMA0 earlycon=pl011,0x13010000 initrd=initramfs"
 printf "VenHw(F019E406-8C9C-11E5-8797-001ACA00BFC4)/Image" > "$boot_path"
 printf "Linux from rshim" > "$boot_desc"
 vmlinuz=$WDIR/vmlinuz
-sudo cat /boot/vmlinuz-$kernel > "$vmlinuz"
+case "$(file --brief --mime-type /boot/vmlinuz-$kernel)" in
+	application/x-dosexec|application/octet-stream)
+		CAT=cat
+		;;
+	application/gzip)
+		CAT=zcat
+		;;
+	*)
+		CAT=cat
+		;;
+esac
+sudo $CAT /boot/vmlinuz-$kernel > "$vmlinuz"
 
 mkdir -p /workspace
 

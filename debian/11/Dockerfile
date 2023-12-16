@@ -65,9 +65,9 @@ RUN dpkg -i /root/workspace/doca-repo.deb
 RUN apt update || true
 
 RUN apt install -y -f --allow-downgrades \
-        linux-image-5.10.194-bf.2.g006d584=5.10.194-bf.2.g006d584-1 \
-        linux-headers-5.10.194-bf.2.g006d584=5.10.194-bf.2.g006d584-1 \
-        linux-libc-dev=5.10.194-bf.2.g006d584-1
+        linux-image-5.10.203-bf.2.gd330ef1=5.10.203-bf.2.gd330ef1-1 \
+        linux-headers-5.10.203-bf.2.gd330ef1=5.10.203-bf.2.gd330ef1-1 \
+        linux-libc-dev=5.10.203-bf.2.gd330ef1-1
 RUN apt install -y -f doca-runtime-user || true
 RUN apt install -y -f doca-runtime-kernel || true
 RUN apt install -y -f doca-sdk-user || true
@@ -132,4 +132,4 @@ RUN mkdir -p /boot/efi/EFI/debian/; \
 
 RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" -e "s/prod/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
 
-CMD ["/root/workspace/create_bfb", "-k", "5.10.194-bf.2.g006d584"]
+CMD ["/root/workspace/create_bfb", "-k", "5.10.203-bf.2.gd330ef1"]

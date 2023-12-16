@@ -60,7 +60,7 @@ save_log()
 cat >> $LOG << EOF
 
 ########################## DMESG ##########################
-$(dmesg)
+$(dmesg -x)
 EOF
 	sync
 	if [ ! -d /mnt/root ]; then
@@ -197,7 +197,7 @@ CMDLINE:
 $(cat /proc/cmdline)
 
 PARTED:
-$(parted -l)
+$(parted -l -s)
 
 LSPCI:
 $(lspci)
@@ -334,8 +334,8 @@ tar Jxf $fspath/image.tar.xz --warning=no-timestamp -C /mnt
 sync
 
 cat > /mnt/etc/fstab << EOF
-LABEL=writable / auto defaults 0 1
-LABEL=system-boot  /boot/efi       vfat    umask=0077      0       2
+$(lsblk -o UUID -P ${device}p2) / auto defaults 0 1
+$(lsblk -o UUID -P ${device}p1) /boot/efi vfat umask=0077 0 2
 EOF
 
 memtotal=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
@@ -362,16 +362,40 @@ initrd=$(cd /mnt/boot; /bin/ls -1 initrd.img-* | tail -1 | sed -e "s/.old-dkms//
 ln -snf $vmlinuz /mnt/boot/vmlinuz
 ln -snf $initrd /mnt/boot/initrd.img
 
-kver=$(/bin/ls -1 /mnt/lib/modules/ |grep bf | head -1)
-echo sdhci-of-dwcmshc >> /mnt/etc/initramfs-tools/modules
-echo dw_mmc-bluefield >> /mnt/etc/initramfs-tools/modules
-echo dw_mmc >> /mnt/etc/initramfs-tools/modules
-echo dw_mmc-pltfm >> /mnt/etc/initramfs-tools/modules
-echo mmc_block >> /mnt/etc/initramfs-tools/modules
-echo mlxbf_tmfifo >> /mnt/etc/initramfs-tools/modules
-echo virtio_console >> /mnt/etc/initramfs-tools/modules
-echo nvme >> /mnt/etc/initramfs-tools/modules
+cat <<EOF > /mnt/etc/initramfs-tools/modules
+efivarfs
+vfat
+fat
+msdos
+nls_cp850
+nls_cp437
+nls_ascii
+nsl_utf8
+mlxbf-tmfifo
+virtio_console
+sbsa_gwdt
+mlxbf-bootctl
+sdhci-of-dwcmshc
+nvme-rdma
+nvme-tcp
+nvme
+EOF
+
+
+kver=$(uname -r)
+if [ ! -d /mnt/lib/modules/$kver ]; then
+	kver=$(/bin/ls -1 /mnt/lib/modules/ |grep bf | head -1)
+fi
 ilog "$(chroot /mnt update-initramfs -k ${kver} -u)"
+
+mkdir -p /mnt/etc/systemd/system/ssh.service.d/
+
+cat > /mnt/etc/systemd/system/ssh.service.d/regenerate-host-keys.conf <<EOF
+[Service]
+ExecStartPre=
+ExecStartPre=-/usr/bin/ssh-keygen -A
+ExecStartPre=/usr/sbin/sshd -t
+EOF
 
 cat > /mnt/etc/resolv.conf << EOF
 nameserver 127.0.0.53

@@ -53,17 +53,17 @@ RUN dpkg -i /root/workspace/doca-repo.deb
 RUN apt update || true
 
 RUN apt install -y -f \
-    linux-bluefield=5.4.0.1066.61 \
-    linux-bluefield-headers-5.4.0-1066=5.4.0-1066.72 \
-    linux-bluefield-tools-5.4.0-1066=5.4.0-1066.72 \
-    linux-headers-5.4.0-1066-bluefield=5.4.0-1066.72 \
-    linux-headers-bluefield=5.4.0.1066.61 \
-    linux-image-5.4.0-1066-bluefield=5.4.0-1066.72 \
-    linux-image-bluefield=5.4.0.1066.61 \
+    linux-bluefield=5.4.0.1076.71 \
+    linux-bluefield-headers-5.4.0-1076=5.4.0-1076.82 \
+    linux-bluefield-tools-5.4.0-1076=5.4.0-1076.82 \
+    linux-headers-5.4.0-1076-bluefield=5.4.0-1076.82 \
+    linux-headers-bluefield=5.4.0.1076.71 \
+    linux-image-5.4.0-1076-bluefield=5.4.0-1076.82 \
+    linux-image-bluefield=5.4.0.1076.71 \
     linux-libc-dev:arm64 \
-    linux-modules-5.4.0-1066-bluefield=5.4.0-1066.72 \
-    linux-tools-5.4.0-1066-bluefield=5.4.0-1066.72 \
-    linux-tools-bluefield=5.4.0.1066.61 \
+    linux-modules-5.4.0-1076-bluefield=5.4.0-1076.82 \
+    linux-tools-5.4.0-1076-bluefield=5.4.0-1076.82 \
+    linux-tools-bluefield=5.4.0.1076.71 \
     linux-tools-common
 
 
@@ -124,4 +124,4 @@ RUN mkdir -p /boot/efi/EFI/ubuntu/; \
 
 RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
 
-CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1066-bluefield"]
+CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1076-bluefield"]

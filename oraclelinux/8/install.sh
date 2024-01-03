@@ -413,7 +413,7 @@ update_nic_firmware()
 reset_nic_firmware()
 {
 	if [ $NIC_FW_UPDATE_DONE -eq 1 ]; then
-		if [ $NIC_FW_UPDATE_PASSED -eq 1]; then
+		if [ $NIC_FW_UPDATE_PASSED -eq 1 ]; then
 			# Reset NIC FW
 			mount ${device}p2 /mnt
 			bind_partitions

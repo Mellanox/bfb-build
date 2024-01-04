@@ -12,13 +12,9 @@ for bootimage in /root/workspace/bootimages/*.rpm
 do
     current_type=$(cat /etc/mlnx-release | grep -oE "unsigned|dev|prod")
 	echo "Current type: $current_type"
-	fw_name_pattern="^mlnx-fw-updater"
 	case "$bootimage" in
 	*signed*)
-		full_fw_name=$(rpm -qa | grep "$fw_name_pattern")
-		rpm -e "$full_fw_name"
 		type=prod
-		rpm -i /workspace/fw/with-signed/*.rpm
 		/bin/rm -f /workspace/BF3BMC/bmc/*
 		/bin/rm -f /workspace/BF3BMC/cec/*
 		/bin/rm -f /workspace/BF3BMC/golden_images/dpu/*

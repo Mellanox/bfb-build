@@ -1,0 +1,96 @@
+NIC_FW_UPDATE_DONE=0
+NIC_FW_RESET_REQUIRED=0
+
+fw_update()
+{
+	if [ ! -d /mnt/root ]; then
+		mount -t $ROOTFS /dev/${root_device} /mnt
+		bind_partitions
+	fi
+	FW_UPDATER=/opt/mellanox/mlnx-fw-updater/mlnx_fw_updater.pl
+	FW_DIR=/opt/mellanox/mlnx-fw-updater/firmware/
+
+	if [[ -x /mnt/${FW_UPDATER} && -d /mnt/${FW_DIR} ]]; then
+		log "INFO: Updating NIC firmware..."
+		chroot /mnt ${FW_UPDATER} --log /tmp/mlnx_fw_update.log -v \
+			--force-fw-update \
+			--fw-dir ${FW_DIR} > /tmp/mlnx_fw_update.out 2>&1
+		rc=$?
+		sync
+		if [ -e /tmp/mlnx_fw_update.out ]; then
+			cat /tmp/mlnx_fw_update.out > /dev/hvc0
+			cat /tmp/mlnx_fw_update.out > /dev/ttyAMA0
+			cat /tmp/mlnx_fw_update.out >> $LOG
+		fi
+		if [ -e /tmp/mlnx_fw_update.log ]; then
+			cat /tmp/mlnx_fw_update.log > /dev/hvc0
+			cat /tmp/mlnx_fw_update.log > /dev/ttyAMA0
+			cat /tmp/mlnx_fw_update.log >> $LOG
+		fi
+		if [ $rc -eq 0 ]; then
+			NIC_FW_UPDATE_PASSED=1
+			log "INFO: NIC firmware update done"
+		else
+			NIC_FW_UPDATE_PASSED=0
+			log "INFO: NIC firmware update failed"
+		fi
+	else
+		log "WARNING: NIC Firmware files were not found"
+	fi
+}
+
+fw_reset()
+{
+	/sbin/modprobe -a mlx5_core ib_umad
+	ilog "Running mlnx_bf_configure:"
+	ilog "$(chroot /mnt /sbin/mlnx_bf_configure)"
+
+	MLXFWRESET_TIMEOUT=${MLXFWRESET_TIMEOUT:-180}
+	SECONDS=0
+	while ! (chroot /mnt mlxfwreset -d /dev/mst/mt*_pciconf0 q 2>&1 | grep -w "Driver is the owner" | grep -qw "\-Supported")
+	do
+		if [ $SECONDS -gt $MLXFWRESET_TIMEOUT ]; then
+			log "INFO: NIC Firmware reset is not supported. Host power cycle is required"
+			return
+		fi
+		sleep 1
+	done
+
+	log "INFO: Running NIC Firmware reset"
+	save_log
+	if [ "X$mode" == "Xmanufacturing" ]; then
+		log "INFO: Rebooting..."
+	fi
+	# Wait for these messages to be pulled by the rshim service
+	# as mlxfwreset will restart the DPU
+	sleep 3
+
+	msg=$(chroot /mnt mlxfwreset -d /dev/mst/mt*_pciconf0 -y -l 3 --sync 1 r 2>&1)
+	if [ $? -ne 0 ]; then
+		log "INFO: NIC Firmware reset failed"
+		log "INFO: $msg"
+	else
+		log "INFO: NIC Firmware reset done"
+	fi
+}
+
+update_nic_firmware()
+{
+	if [ $NIC_FW_UPDATE_DONE -eq 0 ]; then
+		fw_update
+		NIC_FW_UPDATE_DONE=1
+	fi
+}
+
+reset_nic_firmware()
+{
+	if [ $NIC_FW_UPDATE_DONE -eq 1 ]; then
+		if [ $NIC_FW_UPDATE_PASSED -eq 1 ]; then
+			# Reset NIC FW
+			mount -t ${ROOTFS} ${ROOT_PARTITION} /mnt
+			bind_partitions
+			fw_reset
+			unmount_partitions
+		fi
+	fi
+}

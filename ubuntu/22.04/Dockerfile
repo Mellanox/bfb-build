@@ -13,11 +13,15 @@ ARG DOCA_VERSION
 ARG BSP_VERSION
 ARG DISTRO
 ARG DISTRO_VERSION
+ARG MLNX_FW_UPDATER=mlnx-fw-updater-signed
 WORKDIR /root/workspace
 ADD install.sh .
+ADD install.env ./install.env
 ADD create_bfb .
 ADD build_ubuntu_bfb .
 ADD mlxbf-bootimages.deb .
+ADD BF2BMC ./BF2BMC
+ADD BF3BMC ./BF3BMC
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV FLASH_KERNEL_SKIP=yes
@@ -63,8 +67,8 @@ RUN apt-mark hold kubelet cri-tools kubernetes-cni
 RUN dpkg -i /var/doca-dpu-repo-ubuntu2204-local/*mstflint*.deb || true
 RUN apt-mark hold mstflint
 RUN apt remove -y --purge $(dpkg --list "*openipmi*" | grep openipmi | awk '{print $2}') || true
+RUN apt install -y -f $MLNX_FW_UPDATER
 RUN apt install -y -f doca-runtime doca-tools doca-sdk || true
-RUN dpkg -i /var/doca-dpu-repo-ubuntu2204-local/mlxbf-gige-modules*.deb || true
 RUN dpkg -i /var/doca-dpu-repo-ubuntu2204-local/mlx-*openipmi*.deb || true
 RUN apt --fix-broken install -y || true
 RUN dpkg -i /var/doca-dpu-repo-ubuntu2204-local/mlnx-snap_*arm64.deb || true
@@ -105,6 +109,8 @@ RUN systemctl disable ModemManager.service || true
 RUN /usr/sbin/update-pciids || true
 
 RUN /bin/rm -f /var/lib/dbus/machine-id /etc/machine-id; touch /var/lib/dbus/machine-id /etc/machine-id
+
+RUN /bin/rm -f /etc/ssh/sshd_config.d/60-cloudimg-settings.conf || true
 
 # openibd to support MLNX_OFED drivers coming with Canonical's deb
 RUN sed -i -e "s/FORCE_MODE=.*/FORCE_MODE=yes/" /etc/infiniband/openib.conf

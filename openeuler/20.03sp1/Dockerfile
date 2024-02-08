@@ -4,10 +4,14 @@ ADD qemu-aarch64-static /usr/bin/
 ARG BASE_URL
 ARG DOCA_VERSION
 ARG BSP_VERSION
+ARG MLNX_FW_UPDATER=mlnx-fw-updater-signed
 WORKDIR /root/workspace
 ADD install.sh .
+ADD install.env ./install.env
 ADD create_bfb .
 ADD bootimages bootimages/
+ADD BF2BMC ./BF2BMC
+ADD BF3BMC ./BF3BMC
 
 ENV RUN_FW_UPDATER=no
 
@@ -27,7 +31,7 @@ RUN dnf install -y --allowerasing --nobest --disableexcludes=kubernetes \
 	glib2-devel python3-devel elfutils-devel binutils-devel pciutils-devel openssl-devel \
 	libnl3-devel selinux-policy-devel numactl-devel unbound-devel libpcap-devel tcl-devel \
 	valgrind-devel iptables-devel libdb-devel libmnl-devel libcap-ng-devel systemd-devel \
-	grubby grub2-efi-aa64 efibootmgr shim \
+	grubby grub2-efi-aa64 efibootmgr shim sshpass \
 	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libmd-1.1.0-1.el8.aarch64.rpm \
 	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libmd-devel-1.1.0-1.el8.aarch64.rpm \
 	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libbsd-devel-0.11.7-2.el8.aarch64.rpm \
@@ -48,6 +52,7 @@ RUN dnf install -y kernel-4.19.90-2109.1.0.0108.oe1.aarch64 kernel-devel-4.19.90
 
 RUN dnf install --nogpgcheck -y --exclude network-scripts-openvswitch doca-runtime doca-tools doca-sdk
 RUN dnf install --nogpgcheck -y mstflint
+RUN dnf install --nogpgcheck -y $MLNX_FW_UPDATER
 RUN dnf install --nogpgcheck -y dpacc dpacc-extract dpa-compiler
 
 RUN dnf install --nogpgcheck -y mmc-utils || dnf install --nogpgcheck -y $BASE_URL/bluefield/$BSP_VERSION/extras/mmc-utils/mmc-utils-0.1+git.20230209-1.1.aarch64.rpm || true

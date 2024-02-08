@@ -1,36 +1,31 @@
 #!/bin/bash
 
-# Copyright (c) 2020, Mellanox Technologies
-# All rights reserved.
+###############################################################################
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
+# Copyright 2023 NVIDIA Corporation
 #
-# 1. Redistributions of source code must retain the above copyright notice, this
-#    list of conditions and the following disclaimer.
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-#    this list of conditions and the following disclaimer in the documentation
-#    and/or other materials provided with the distribution.
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
-# ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
 #
-# The views and conclusions contained in the software and documentation are those
-# of the authors and should not be interpreted as representing official policies,
-# either expressed or implied, of the FreeBSD Project.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+###############################################################################
 
 set -e
 
 LANG=C
-BF_HOSTNAME="localhost"
 SDIR="/root/workspace"
 BFB="${BFB:-/lib/firmware/mellanox/boot/default.bfb}"
 CAPSULE="${CAPSULE:-/lib/firmware/mellanox/boot/capsule/boot_update2.cap}"
@@ -44,10 +39,9 @@ fi
 
 usage() {
 cat << EOF
-Usage: `basename $0` [ OPTIONS ]
+Usage: $(basename $0) [ OPTIONS ]
 OPTIONS:
--H, -hostname,       --hostname <hostname>      Hostname for the SmartNIC. Default: $BF_HOSTNAME
--k, -kernel,         --kernel <kernel version>  Kernel version for the SmartNIC. Default: $kernel
+-k, -kernel,    --kernel <kernel version>  Kernel version for the SmartNIC. Default: $kernel
 -v, -verbose,   --verbose                       Run script in verbose mode. Will print out each step of execution.
 -h, -help,      --help                          Display help
 
@@ -55,7 +49,7 @@ OPTIONS:
 EOF
 }
 
-options=$(getopt -l "hostname:,kernel:,help,verbose" -o "H:k:hv" -a -- "$@")
+options=$(getopt -l "kernel:,help,verbose" -o "k:hv" -a -- "$@")
 
 eval set -- "$options"
 
@@ -66,10 +60,6 @@ do
                     usage
                     exit 0
                     ;;
-				-H|--hostname)
-					shift
-					BF_HOSTNAME=$1
-					;;
 				-k|--kernel)
 					shift
 					kernel=$1
@@ -87,19 +77,19 @@ done
 
 bootctl_module="mlxbf-bootctl"
 
-modinfo -n -k $kernel "mlx-bootctl" && bootctl_module="mlx-bootctl"
+modinfo -n -k $kernel "mlx-bootctl" > /dev/null 2>&1 && bootctl_module="mlx-bootctl"
 
-SCRIPTS_DIR=`dirname $0`
+SCRIPTS_DIR=$(dirname $0)
 
 WDIR=${WDIR:-/root/workspace/bfb}
 
 echo "Work directory: $WDIR"
 
-CENTOS_IMAGE=`cat /etc/mlnx-release`
+CENTOS_IMAGE=$(cat /etc/mlnx-release)
 CENTOS_BFB=${CENTOS_IMAGE}.bfb
 
 PATH=$PATH:/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/opt/mellanox/scripts:/opt/mellanox/scripts/bin
-mkbfb=`which mlx-mkbfb`
+mkbfb=$(which mlx-mkbfb)
 
 if [ ! -x "${mkbfb}" ]; then
 	echo "- ERROR: mlx-mkbfb is required to build BFB image"
@@ -121,10 +111,6 @@ ex()
         fi
 }
 
-echo ${BF_HOSTNAME} > /etc/hostname
-
-hostname ${BF_HOSTNAME}
-
 ex /bin/rm -rf ${WDIR}
 ex mkdir -p ${WDIR}
 ex cd ${WDIR}
@@ -143,9 +129,46 @@ if ! ( rpm -q parted-3.2 > /dev/null 2>&1 ); then
 	rpm -Uhv /tmp/parted-3.2-39.el7.aarch64.rpm || true
 fi
 
-ex dracut --no-hostonly -m "bash network base shutdown" --force-drivers "${bootctl_module} sdhci-of-dwcmshc mlxbf_tmfifo dw_mmc_bluefield mmc_block virtio_console mlx5_core mlx5_ib mlxfw ib_umad nvme nvme-tcp nvme-rdma nvme-fc nvme-fabrics nvme-core" --filesystems "xfs vfat" --gzip $initramfs ${kernel}
 
-rm -f /etc/udev/rules.d/91-tmfifo_net.rules /etc/udev/rules.d/92-oob_net.rules
+kmods=""
+for kmod in dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block mlxbf-bootctl \
+			virtio_net virtio_console sdhci dw_mmc-pltfm sdhci-of-dwcmshc \
+			xfs vfat  mlxbf-tmfifo mlx5_core mlx5_ib ib_umad nvme nvme-tcp \
+			nvme-rdma nvme-fc nvme-fabrics nvme-core gpio-mlxbf3 mlxbf_gige pinctrl-mlxbf3 8021q
+do
+    if (modinfo -k $kernel $kmod 2>/dev/null | grep "filename:" | grep -q builtin); then
+        continue
+    fi
+
+    mod=$(find /lib/modules/$kernel -name "${kmod}.ko*" 2> /dev/null || true)
+    if [ -n "$mod" ]; then
+        kmods="$kmods $kmod"
+    fi
+done
+
+# Create ssh keys
+yes | /usr/bin/ssh-keygen -A  -N ""
+mkdir -p /root/.ssh
+chmod 0700 /root/.ssh
+touch /root/.ssh/authorized_keys
+chmod 600 /root/.ssh/authorized_keys
+echo "Building BFB's initramfs with: $kmods"
+
+dracut_modules=""
+for dm in bash network base systemd systemd-initrd dracut-systemd shutdown sshd ssh-client udev-rules
+do
+	if (dracut --list-modules --no-kernel 2> /dev/null | grep -qw $dm); then
+		dracut_modules+=" $dm"
+	fi
+done
+
+dracut --no-hostonly -m "$dracut_modules" \
+		--install "/usr/lib/udev/rules.d/91-tmfifo_net.rules /lib/udev/rules.d/92-oob_net.rules" \
+		--force-drivers "$kmods" --gzip $initramfs ${kernel}
+if [ $? -ne 0 ]; then
+	echo "ERROR: dracut failed"
+	exit 1
+fi
 
 cat > /etc/default/grub << EOF
 GRUB_TIMEOUT=0
@@ -160,7 +183,6 @@ GRUB_TIMEOUT_STYLE=countdown
 GRUB_DISABLE_OS_PROBER=false
 GRUB_DISABLE_LINUX_UUID=false
 EOF
-
 
 case "$(file --brief --mime-type "$initramfs")" in
 	"application/x-lzma")
@@ -182,30 +204,30 @@ copy_bin()
 	if [ -e $1 ]; then
 		bin=$1
 	else
-		bin=`which $1 2> /dev/null`
+		bin=$(which $1 2> /dev/null)
 	fi
 	if [ -z "$bin" ]; then
-		echo "ERROR: Cannot find $1"
+		echo "WARNING: Cannot find $1"
 		return 1
 	fi
-	sudo mkdir -p .`dirname $bin`
+	sudo mkdir -p .$(dirname $bin)
 	if [ -e .${bin} ]; then
 		/bin/rm -f .${bin}
 	fi
 	sudo cp -a $bin .${bin}
 
 	# Copy dependencies
-	for lib in `ldd $bin 2> /dev/null | grep '=>' | awk '{print $3}' | grep -v '(0x0'`
+	for lib in $(ldd $bin 2> /dev/null | grep '=>' | awk '{print $3}' | grep -v '(0x0')
 	do
 		if [ -e .$lib ]; then
 			continue
 		fi
-		sudo mkdir -p .`dirname $lib`
+		sudo mkdir -p .$(dirname $lib)
 		sudo cp -a $lib .$lib
 		if [ -h $lib ]; then
-			tlib=`readlink -f $lib`
+			tlib=$(readlink -f $lib)
 			if [ ! -e .$tlib ]; then
-				sudo mkdir -p .`dirname $tlib`
+				sudo mkdir -p .$(dirname $tlib)
 				sudo cp $tlib .$tlib
 			fi
 		fi
@@ -222,7 +244,7 @@ copy_rpm()
 
 	case $package in
 		chkconfig)
-			for f in `rpm -ql $package | grep -v share`
+			for f in $(rpm -ql $package | grep -v share)
 			do
 				if [ -d $f ]; then
 					mkdir -p .${f}
@@ -231,8 +253,8 @@ copy_rpm()
 				fi
 			done
 			;;
-		*mft*)
-			for f in `rpm -ql $package | grep -v man`
+		*mft*|mstflint)
+			for f in $(rpm -ql $package | grep -v man)
 			do
 				if [ -d $f ]; then
 					continue
@@ -241,7 +263,7 @@ copy_rpm()
 			done
 			;;
 		*)
-			for f in `rpm -ql $package | grep -vE 'share|build-id'`
+			for f in $(rpm -ql $package | grep -vE 'share|build-id')
 			do
 				if [ -d $f ]; then
 					continue
@@ -252,16 +274,29 @@ copy_rpm()
 	esac
 }
 
+if (rpm -q kernel-mft > /dev/null 2>&1); then
+	kernel_mft="kernel-mft"
+elif (rpm -q kmod-kernel-mft-mlnx > /dev/null 2>&1); then
+	kernel_mft="kmod-kernel-mft-mlnx"
+fi
+
 # Copy the content of RPM packages
-for package in sdhci-of-dwcmshc mlxbf-bfscripts util-linux dosfstools e2fsprogs kmod pciutils usbutils chkconfig mft mft-oem kernel-mft kmod-kernel-mft-mlnx tar xfsprogs coreutils parted which curl openssl nvme-cli mmc-utils $ADDON_RPMS
+for package in gawk mlxbf-bfscripts mlxbf-bootctl util-linux dosfstools \
+			   e2fsprogs kmod pciutils usbutils chkconfig mstflint mft \
+			   mft-oem $kernel_mft tar xfsprogs coreutils parted which curl \
+			   openssl net-tools wget dhcp-client ipcalc iputils dbus-tools \
+			   systemd-udev initscripts shadow-utils crypto-policies \
+			   openssh openssh-server rng-tools passwd dmidecode \
+			   python36 jq sshpass openssh-clients nvme-cli mmc-utils sdhci-of-dwcmshc \
+			   findutils $ADDON_RPMS
 do
 	copy_rpm $package || true
 done
 
 # Copy tools
-for tool in	xz efibootmgr bash getopt hexdump mstflint lspci perl \
+for tool in	xz efibootmgr bash getopt hexdump lspci perl \
 		lsblk shutdown systemctl strings \
-		mlxbf-bootctl id grep $ADDON_TOOLS
+		id grep jq $ADDON_TOOLS
 do
 	if [ -d $tool ]; then
 		continue
@@ -279,6 +314,27 @@ sudo cp -a /lib/firmware/mellanox/boot/capsule ./lib/firmware/mellanox/boot/
 sudo cp $CAPSULE ./lib/firmware/mellanox/boot/capsule/
 sudo mkdir -p mnt
 
+if [ -d ${SDIR}/BF3BMC/ ]; then
+	/bin/rm -rf BF3BMC
+	if (grep -q prod /etc/mlnx-release); then
+		cp -a ${SDIR}/BF3BMC/pk ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
+	elif (grep -q dev /etc/mlnx-release); then
+		cp -a ${SDIR}/BF3BMC/dk ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
+	else
+		cp -a ${SDIR}/BF3BMC/qp ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
+	fi
+	[ -d ${SDIR}/BF3BMC/golden_images ] && cp -a ${SDIR}/BF3BMC/golden_images ./BF3BMC
+fi
+
+if [ -d ${SDIR}/BF2BMC/ ]; then
+	/bin/rm -rf BF2BMC
+	if (grep -q prod /etc/mlnx-release); then
+		cp -a ${SDIR}/BF2BMC/pk ./BF2BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
+	else
+		cp -a ${SDIR}/BF2BMC/qp/ ./BF2BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
+	fi
+fi
+
 # CVE-2021-4034 workaround
 chmod 0755 /usr/bin/pkexec
 
@@ -286,9 +342,10 @@ ex mkdir -p centos
 # Tar the image
 XZ_OPT="--threads=0 -9 --verbose" tar -cJp --exclude='./workspace' --exclude='./signing-local' --exclude='./signing-shared' --exclude='./var/run/docker.sock' --exclude='./root/workspace' --exclude='./tmp/*' --exclude='./run/*' --exclude='./sys/*' --exclude='./proc/*' --exclude='./dev/*' --exclude='./.dockerenv' --exclude='./root/rpmbuild' --exclude='./root/.rpmmacros' --exclude='./root/.bash_history' --exclude='./var/tmp/*rpm' --exclude='./bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-arm-static' --exclude='./var/lib/yum/*' --exclude='./var/cache/yum/*' -f ./centos/image.tar.xz -C / .
 ex install -m 0755 ${SDIR}/install.sh ./centos/install.sh
+ex cp -a ${SDIR}/install.env ./centos/
 
 mkdir scripts
-cat > scripts/install-centos.sh << EOF
+cat > scripts/initrd-install << EOF
 #!/bin/sh
 
 echo
@@ -296,7 +353,7 @@ echo "=================================" | tee /dev/kmsg
 echo "Installing CentOS. Please wait..." | tee /dev/kmsg
 echo "=================================" | tee /dev/kmsg
 
-modprobe -a sdhci-of-dwcmshc mlxbf_tmfifo dw_mmc_bluefield mmc_block virtio_console nvme ${bootctl_module} 2>&1 | tee /dev/kmsg
+modprobe -a sdhci-of-dwcmshc mlxbf_tmfifo mlxbf_gige pinctrl-mlxbf3 8021q dw_mmc_bluefield mmc_block virtio_console nvme ${bootctl_module} 2>&1 | tee /dev/kmsg
 modprobe -a mlx5_ib mlxfw ib_umad 2>&1 | tee /dev/kmsg
 
 sleep 5
@@ -315,7 +372,30 @@ else
 fi
 EOF
 
-sed -i -e "s@source_conf /etc/conf.d@&\nbash -x /scripts/install-centos.sh@" init
+chmod +x scripts/initrd-install
+
+case "$(file --brief --mime-type $(readlink -f init))" in
+	"application/x-sharedlib")
+	cat > usr/lib/systemd/system/install-centos.service << EOF
+[Unit]
+Description=Install anolis Linux
+After=initrd-root-fs.target initrd-parse-etc.service
+After=dracut-initqueue.service dracut-mount.service
+
+[Service]
+Type=oneshot
+ExecStart=/scripts/initrd-install
+StandardInput=null
+StandardOutput=syslog
+StandardError=syslog+console
+EOF
+
+	ln -s /usr/lib/systemd/system/install-centos.service usr/lib/systemd/system/initrd.target.wants/install-centos.service
+	;;
+	*)
+	sed -i -e "s@source_conf /etc/conf.d@&\nbash -x /scripts/initrd-install@" init
+	;;
+esac
 
 # Make initramfs with new centos
 find . | cpio -H newc -o | gzip -9 > $initramfs
@@ -359,4 +439,4 @@ ex $mkbfb \
 	${BFB} /workspace/${CENTOS_BFB}
 cd ..
 
-echo "BFB is ready: `readlink -f /workspace/${CENTOS_BFB}`"
+echo "BFB is ready: $(readlink -f /workspace/${CENTOS_BFB})"

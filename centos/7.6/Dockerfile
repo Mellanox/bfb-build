@@ -4,11 +4,15 @@ ADD qemu-aarch64-static /usr/bin/
 ARG BASE_URL
 ARG DOCA_VERSION
 ARG BSP_VERSION
+ARG MLNX_FW_UPDATER=mlnx-fw-updater-signed
 WORKDIR /root/workspace
 ADD install.sh .
+ADD install.env ./install.env
 ADD create_bfb .
 ADD bootimages bootimages/
 ADD parted-3.2-39.el7.aarch64.rpm .
+ADD BF2BMC ./BF2BMC
+ADD BF3BMC ./BF3BMC
 
 ENV RUN_FW_UPDATER=no
 
@@ -39,8 +43,10 @@ RUN yum-config-manager --nogpgcheck --add-repo @BASE_URL@/doca/@DOCA_VERSION@/ce
 
 RUN yum install --nogpgcheck -y doca-runtime doca-tools doca-sdk
 RUN yum install --nogpgcheck -y mstflint
+RUN yum install --nogpgcheck -y $MLNX_FW_UPDATER
 
 RUN /usr/sbin/update-pciids || true
+RUN rpm -e --nodeps $(rpm -qa | grep mlxbf-bootimages)
 RUN rpm -ihv --force bootimages/mlxbf-bootimages-*.aarch64.rpm || true
 
 RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" -e "s/prod/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release

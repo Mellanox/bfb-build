@@ -4,10 +4,14 @@ ADD qemu-aarch64-static /usr/bin/
 ARG BASE_URL
 ARG DOCA_VERSION
 ARG BSP_VERSION
+ARG MLNX_FW_UPDATER=mlnx-fw-updater-signed
 WORKDIR /root/workspace
 ADD install.sh .
+ADD install.env ./install.env
 ADD create_bfb .
 ADD bootimages bootimages/
+ADD BF2BMC ./BF2BMC
+ADD BF3BMC ./BF3BMC
 
 ENV RUN_FW_UPDATER=no
 ENV KVER=4.18.0-372.32.1.el8_6.aarch64
@@ -42,6 +46,7 @@ RUN dnf install -y kernel-$KVER \
 	kernel-modules-$KVER \
 	kernel-modules-extra-$KVER
 
+RUN dnf install --nogpgcheck -y $MLNX_FW_UPDATER
 RUN dnf install --nogpgcheck -y doca-runtime doca-tools doca-sdk
 RUN dnf install --nogpgcheck -y dpacc dpacc-extract dpa-compiler
 

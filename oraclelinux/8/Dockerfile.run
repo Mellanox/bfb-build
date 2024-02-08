@@ -74,7 +74,7 @@ RUN dnf install -y https://linux.mellanox.com/public/repo/doca/@DOCA_VERSION@/ex
 
 RUN dnf install -y rdma-core rdma-core-devel libibverbs-utils.aarch64 mstflint infiniband-diags infiniband-diags-compat libibumad librdmacm-utils python3-pyverbs
 
-RUN dnf install -y bf-release doca-cx-apps doca-cx-apps-devel doca-cx-libs doca-cx-libs-devel doca-cx-prime-runtime doca-cx-prime-sdk doca-cx-prime-tools doca-cx-samples meson mlnx-dpdk mlnx-dpdk-devel mlnx-tools mlxbf-bfscripts mlxbf-bootctl openvswitch openvswitch-ipsec python3-openvswitch mlx-OpenIPMI mft mft-oem mlnx-fw-updater
+RUN dnf install -y bf-release doca-cx-apps doca-cx-apps-devel doca-cx-libs doca-cx-libs-devel doca-cx-prime-runtime doca-cx-prime-sdk doca-cx-prime-tools doca-cx-samples meson mlnx-dpdk mlnx-dpdk-devel mlnx-tools mlxbf-bfscripts mlxbf-bootctl openvswitch openvswitch-ipsec python3-openvswitch mlx-OpenIPMI mft mft-oem mft-autocomplete mlnx-fw-updater-signed optee-client
 
 RUN echo BlueField_OS_@BF_VERSION@_OL_@DISTRO_VERSION@-@BUILDVER@.@IMAGE_TYPE@@CUSTOM_VERSION@ > /etc/mlnx-release
 

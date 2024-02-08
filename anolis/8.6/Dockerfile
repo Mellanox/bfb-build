@@ -6,10 +6,14 @@ ARG DOCA_VERSION
 ARG BSP_VERSION
 ARG DISTRO
 ARG DISTRO_VERSION
+ARG MLNX_FW_UPDATER=mlnx-fw-updater-signed
 WORKDIR /root/workspace
 ADD install.sh .
+ADD install.env ./install.env
 ADD create_bfb .
 ADD bootimages bootimages/
+ADD BF2BMC ./BF2BMC
+ADD BF3BMC ./BF3BMC
 
 ENV RUN_FW_UPDATER=no
 ENV KVER=5.10.134-13.1.an8.aarch64
@@ -65,6 +69,7 @@ RUN dnf install -y kernel-$KVER kernel-modules-$KVER kernel-devel-$KVER kernel-c
 RUN dnf install -y openssl-1.1.1q openssl-devel-1.1.1q openssl-libs-1.1.1q openssl-perl-1.1.1q openssl-static-1.1.1q
 
 RUN dnf install --nogpgcheck -y mstflint-4.16.1
+RUN dnf install --nogpgcheck -y $MLNX_FW_UPDATER
 RUN dnf install --nogpgcheck -y doca-runtime doca-tools doca-sdk
 RUN dnf install --nogpgcheck -y dpacc dpacc-extract dpa-compiler
 

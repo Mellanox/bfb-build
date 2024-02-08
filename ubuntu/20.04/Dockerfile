@@ -3,12 +3,16 @@ FROM scratch
 ADD ubuntu-20.04-server-cloudimg-arm64-root.tar.xz /
 ADD qemu-aarch64-static /usr/bin/
 
+ARG MLNX_FW_UPDATER=mlnx-fw-updater-signed
 WORKDIR /root/workspace
 ADD install.sh .
+ADD install.env ./install.env
 ADD create_bfb .
 ADD build_ubuntu_bfb .
 ADD mlxbf-bootimages.deb .
 ADD doca-repo.deb .
+ADD BF2BMC ./BF2BMC
+ADD BF3BMC ./BF3BMC
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV FLASH_KERNEL_SKIP=yes
@@ -48,24 +52,25 @@ RUN apt install -y bridge-utils cpu-checker libvirt-clients libvirt-daemon qemu 
 RUN apt install -y kubelet=1.25.3-00 runc containerd cri-tools=1.25.0-00 kubernetes-cni=1.1.1-00
 RUN apt-mark hold kubelet cri-tools kubernetes-cni
 RUN apt upgrade -y
-RUN wget -qO - @NV_BASE_URL@/doca/@DOCA_VERSION@/ubuntu20.04/aarch64/GPG-KEY-Mellanox.pub | sudo apt-key add -
-RUN echo "deb [trusted=yes] @NV_BASE_URL@/doca/@DOCA_VERSION@/ubuntu20.04/\$(ARCH) ./" | tee /etc/apt/sources.list.d/doca.tmp.list
+RUN wget -qO - @BASE_URL@/doca/@DOCA_VERSION@/ubuntu20.04/aarch64/GPG-KEY-Mellanox.pub | sudo apt-key add -
+RUN echo "deb [trusted=yes] @BASE_URL@/doca/@DOCA_VERSION@/ubuntu20.04/\$(ARCH) ./" | tee /etc/apt/sources.list.d/doca.tmp.list
 RUN dpkg -i /root/workspace/doca-repo.deb
 RUN apt update || true
 RUN dpkg -i /var/doca-dpu-repo-ubuntu2004-local/*mstflint*.deb || true
 RUN apt-mark hold mstflint
+RUN apt install -y -f $MLNX_FW_UPDATER
 
 RUN apt install -y -f \
-	linux-bluefield=5.4.0.1076.71 \
-	linux-bluefield-headers-5.4.0-1076=5.4.0-1076.82 \
-	linux-bluefield-tools-5.4.0-1076=5.4.0-1076.82 \
-	linux-headers-5.4.0-1076-bluefield=5.4.0-1076.82 \
-	linux-headers-bluefield=5.4.0.1076.71 \
-	linux-image-5.4.0-1076-bluefield=5.4.0-1076.82 \
-	linux-image-bluefield=5.4.0.1076.71 \
-	linux-modules-5.4.0-1076-bluefield=5.4.0-1076.82 \
-	linux-tools-5.4.0-1076-bluefield=5.4.0-1076.82 \
-	linux-tools-bluefield=5.4.0.1076.71 \
+	linux-bluefield=5.4.0.1078.73 \
+	linux-bluefield-headers-5.4.0-1078=5.4.0-1078.84 \
+	linux-bluefield-tools-5.4.0-1078=5.4.0-1078.84 \
+	linux-headers-5.4.0-1078-bluefield=5.4.0-1078.84 \
+	linux-headers-bluefield=5.4.0.1078.73 \
+	linux-image-5.4.0-1078-bluefield=5.4.0-1078.84 \
+	linux-image-bluefield=5.4.0.1078.73 \
+	linux-modules-5.4.0-1078-bluefield=5.4.0-1078.84 \
+	linux-tools-5.4.0-1078-bluefield=5.4.0-1078.84 \
+	linux-tools-bluefield=5.4.0.1078.73 \
 	linux-libc-dev:arm64 \
 	linux-tools-common
 

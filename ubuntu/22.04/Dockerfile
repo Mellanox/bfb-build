@@ -30,6 +30,7 @@ ENV RUN_FW_UPDATER=no
 # Avoid running flash-kernel post install
 RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
 
+RUN add-apt-repository -y ppa:canonical-kernel-bluefield/release
 RUN apt update
 RUN apt upgrade -y
 RUN apt remove --purge -y snapd plymouth

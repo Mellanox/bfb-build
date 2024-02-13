@@ -41,11 +41,18 @@ fi
 
 DISTRO="debian"
 DISTRO_VERSION="12"
-DOCA_VERSION="2.5.0"
-BSP_VERSION="4.5.0-12993"
-MLNX_OFED_VERSION="23.10-1.2.0.0"
+DOCA_VERSION="2.6.0"
+BSP_VERSION="4.6.0-13035"
+MLNX_OFED_VERSION="24.01-0.3.3.0"
+BF2_BMC_VERSION="24.01-5"
+BF3_BMC_VERSION="24.01-5"
+BF2_CEC_VERSION="04.0f"
+BF3_CEC_VERSION="00.02.0152.0000"
+BF3_NIC_FW_VERSION="32_40_1000"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-""}
+INCLUDE_BF2BMC=${INCLUDE_BF2BMC:-"yes"}
+INCLUDE_BF3BMC=${INCLUDE_BF3BMC:-"yes"}
 BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
 
 WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
@@ -58,13 +65,31 @@ echo "Downloading mlxbf-bootimages..."
 wget -q -P $WDIR -r --no-verbose --no-directories -l1 --no-parent -A 'mlxbf-bootimages*arm64.deb' ${BASE_URL}/bluefield/${BSP_VERSION}/bootimages/${IMAGE_TYPE}/
 mv $WDIR/mlxbf-bootimages*arm64.deb $WDIR/mlxbf-bootimages.deb
 
-cp	Dockerfile \
+cp -a \
+	Dockerfile \
 	create_bfb \
 	install.sh \
+	install.env \
 	../../common/tools/qemu-aarch64-static \
 	$WDIR
 
 cd $WDIR
+
+if [ "${INCLUDE_BF2BMC}" == "yes" ]; then
+	mkdir -p BF2BMC/pk/{bmc,cec} BF2BMC/qp
+	echo "Downloading BlueField-2 BMC software..."
+	wget -q -P $WDIR/BF2BMC/pk/bmc -r --no-verbose --no-directories -l1 --no-parent -A 'bf2-bmc*tar' ${BASE_URL}/bluefield/BMC/BF2/bmc/${BF2_BMC_VERSION}/
+	wget -q -P $WDIR/BF2BMC/pk/cec -r --no-verbose --no-directories -l1 --no-parent -A 'cec*bin' ${BASE_URL}/bluefield/BMC/BF2/cec/${BF2_CEC_VERSION}/
+fi
+
+if [ "${INCLUDE_BF3BMC}" == "yes" ]; then
+	mkdir -p BF3BMC/pk/{bmc,cec,golden_images/dpu,golden_images/fw} BF3BMC/{dk,qp}
+	echo "Downloading BlueField-3 BMC software..."
+	wget -q -P $WDIR/BF3BMC/pk/bmc -r --no-verbose --no-directories -l1 --no-parent -A 'bf3-bmc*fwpkg' ${BASE_URL}/bluefield/BMC/BF3/bmc/${BF3_BMC_VERSION}/
+	wget -q -P $WDIR/BF3BMC/pk/cec -r --no-verbose --no-directories -l1 --no-parent -A 'cec*fwpkg' ${BASE_URL}/bluefield/BMC/BF3/cec/${BF3_CEC_VERSION}/
+	wget -q -P $WDIR/BF3BMC/pk/golden_images/dpu -r --no-verbose --no-directories -l1 --no-parent -A 'BlueField*.bfb' ${BASE_URL}/bluefield/BMC/BF3/golden_images/dpu/${BSP_VERSION}/
+	wget -q -P $WDIR/BF3BMC/pk/golden_images/fw -r --no-verbose --no-directories -l1 --no-parent -A 'fw*.bfb' ${BASE_URL}/bluefield/BMC/BF3/golden_images/nic-fw/${BF3_NIC_FW_VERSION}/
+fi
 
 cat > debian.sources << 'EOF'
 Types: deb
@@ -116,4 +141,4 @@ docker run -t --rm --privileged -e container=docker \
 
 readlink -f *.bfb
 
-echo "Default root password is: root"
+echo "Default root password is: debian"

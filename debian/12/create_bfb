@@ -29,7 +29,6 @@
 
 set -e
 
-BF_HOSTNAME="localhost"
 SDIR="/root/workspace"
 BFB="${BFB:-/lib/firmware/mellanox/boot/default.bfb}"
 CAPSULE="${CAPSULE:-/lib/firmware/mellanox/boot/capsule/boot_update2.cap}"
@@ -43,10 +42,9 @@ fi
 
 usage() {
 cat << EOF
-Usage: `basename $0` [ OPTIONS ]
+Usage: $(basename $0) [ OPTIONS ]
 OPTIONS:
 -i, -install_bfb,    --install_bfb <BFB>        Installation BFB to be used as a basis for the target BFB. Default: $BFB
--H, -hostname,       --hostname <hostname>      Hostname for the SmartNIC. Default: $BF_HOSTNAME
 -k, -kernel,         --kernel <kernel version>  Kernel version for the SmartNIC. Default: $kernel
 -v, -verbose,   --verbose                       Run script in verbose mode. Will print out each step of execution.
 -h, -help,      --help                          Display help
@@ -55,7 +53,7 @@ EOF
 }
 
 
-options=$(getopt -l "install_bfb:,hostname:,kernel:,help,verbose" -o "i:H:k:hv" -a -- "$@")
+options=$(getopt -l "install_bfb:,kernel:,help,verbose" -o "i:k:hv" -a -- "$@")
 
 eval set -- "$options"
 
@@ -69,10 +67,6 @@ do
 		-i|--install_bfb)
 			shift
 			BFB=$1
-			;;
-		-H|--hostname)
-			shift
-			BF_HOSTNAME=$1
 			;;
 		-k|--kernel)
 			shift
@@ -89,17 +83,17 @@ do
 	shift
 done
 
-SCRIPTS_DIR=`dirname $0`
+SCRIPTS_DIR=$(dirname $0)
 
 WDIR=${WDIR:-/root/workspace/bfb}
 
 echo "Work directory: $WDIR"
 
-debian_IMAGE=`cat /etc/mlnx-release`
+debian_IMAGE=$(cat /etc/mlnx-release)
 debian_BFB=${debian_IMAGE}.bfb
 
 PATH=$PATH:/opt/mellanox/scripts:/opt/mellanox/scripts/bin
-mkbfb=`which mlx-mkbfb`
+mkbfb=$(which mlx-mkbfb)
 
 if [ ! -x "${mkbfb}" ]; then
 	echo "- ERROR: mlx-mkbfb is required to build BFB image"
@@ -126,10 +120,6 @@ ex()
 		exit 1
 	fi
 }
-
-echo ${BF_HOSTNAME} > /etc/hostname
-
-hostname ${BF_HOSTNAME}
 
 /usr/sbin/update-initramfs -u -k $kernel
 
@@ -170,29 +160,29 @@ copy_bin()
 	if [ -e $1 ]; then
 		bin=$1
 	else
-		bin=`which $1 2> /dev/null`
+		bin=$(which $1 2> /dev/null)
 	fi
 	if [ -z "$bin" ]; then
 		echo "ERROR: Cannot find $1"
 		exit 1
 	fi
-	sudo mkdir -p .`dirname $bin`
+	sudo mkdir -p .$(dirname $bin)
 	if [ ! -e .${bin} ]; then
 		sudo cp -a $bin .${bin}
 	fi
 
 	# Copy dependencies
-	for lib in `ldd $bin 2> /dev/null | grep '=>' | awk '{print $3}'`
+	for lib in  $(ldd $bin 2> /dev/null | grep '=>' | awk '{print $3}')
 	do
 		if [ -e .$lib ]; then
 			continue
 		fi
-		sudo mkdir -p .`dirname $lib`
+		sudo mkdir -p .$(dirname $lib)
 		sudo cp -a $lib .$lib
 		if [ -h $lib ]; then
-			tlib=`readlink -f $lib`
+			tlib=$(readlink -f $lib)
 			if [ ! -e .$tlib ]; then
-				sudo mkdir -p .`dirname $tlib`
+				sudo mkdir -p .$(dirname $tlib)
 				sudo cp $tlib .$tlib
 			fi
 		fi
@@ -201,7 +191,7 @@ copy_bin()
 
 module_exist()
 {
-	mod=`find ./lib/modules/$kernel -name "${1}.ko*" 2> /dev/null`
+	mod=$(find ./lib/modules/$kernel -name "${1}.ko*" 2> /dev/null)
 	test -n "$mod"
 	return $?
 }
@@ -220,30 +210,33 @@ copy_module()
 		return
 	fi
 
-	for mod in `modinfo -F depends -k $kernel $1 | tr -s ',' ' '`
+	for mod in $(modinfo -F depends -k $kernel $1 | tr -s ',' ' ')
 	do
 		copy_module $mod
 	done
 
-	mod_ko=`modinfo -F filename -k $kernel $1`
-	mkdir -p ./`dirname ${mod_ko}`
+	mod_ko=$(modinfo -F filename -k $kernel $1)
+	mkdir -p ./$(dirname ${mod_ko})
 	sudo cp ${mod_ko} ./${mod_ko}
 }
 
-for tool in `dpkg -L mlxbf-scripts | grep bin/` \
-		`dpkg -L dosfstools | grep -v share` \
-		`dpkg -L e2fsprogs | grep -v share` \
-		`dpkg -L fdisk | grep -v share` \
-		`dpkg -L kmod | grep -v share` \
-		`dpkg -L pciutils | grep -v share` \
-		`dpkg -L usbutils | grep -v share` \
-		`dpkg -L mft` \
-		`dpkg -L mft-oem` \
-		`dpkg -L kernel-mft-modules` \
-		`dpkg -L tar | grep -v share` \
-		xz efibootmgr bash getopt hexdump mstflint lspci perl \
+/bin/rm -f ./usr/bin/dmesg ./sbin/ip ./usr/sbin/ip ./usr/bin/mount ./bin/mount
+cp $(readlink -f /usr/bin/which) ./usr/bin/which
+
+for tool in $(dpkg -L mlxbf-scripts | grep bin/) \
+		$(dpkg -L dosfstools | grep -v share) \
+		$(dpkg -L e2fsprogs | grep -v share) \
+		$(dpkg -L fdisk | grep -v share) \
+		$(dpkg -L kmod | grep -v share) \
+		$(dpkg -L pciutils | grep -v share) \
+		$(dpkg -L usbutils | grep -v share) \
+		$(dpkg -L mft) \
+		$(dpkg -L mft-oem) \
+		$(dpkg -L kernel-mft-modules) \
+		$(dpkg -L tar | grep -v share) \
+		xz efibootmgr bash getopt hexdump mstflint lspci perl grep sed hwclock find mount \
 		lsblk watchdog shutdown systemctl strings aarch64-linux-gnu-strings \
-		mlxbf-bootctl id dirname curl openssl parted $ADDON_TOOLS
+		mlxbf-bootctl id dirname curl openssl parted jq dmesg $ADDON_TOOLS
 do
 	if [ -d $tool ]; then
 		continue
@@ -253,9 +246,9 @@ do
 	copy_bin $tool
 done
 
-for deb in coreutils nvme-cli mmc-utils $ADDON_DEBS
+for deb in coreutils nvme-cli mmc-utils iputils-ping uuid-runtime sshpass openssh-client gawk iproute2 $ADDON_DEBS
 do
-	for tool in `dpkg -L $deb | grep -v share`
+	for tool in $(dpkg -L $deb | grep -v share)
 	do
 		if [ -d $tool ]; then
 			continue
@@ -265,7 +258,7 @@ do
 	done
 done
 
-for mod in mlxbf_tmfifo dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block sdhci sdhci-of-dwcmshc nvme-rdma nvme-tcp nvme mlx5_ib mlxfw ib_umad ib_ipoib ib_iser mst_pci mst_pciconf efivarfs vfat fat msdos nls_cp850 nls_cp437 nls_ascii mlxbf-tmfifo virtio_console sbsa_gwdt mlxbf-bootctl $ADDON_KERNEL_MODULES
+for mod in mlxbf_tmfifo dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block sdhci sdhci-of-dwcmshc nvme-rdma nvme-tcp nvme mlx5_ib mlxfw ib_umad ib_ipoib ib_iser mst_pci mst_pciconf efivarfs vfat fat msdos nls_cp850 nls_cp437 nls_ascii mlxbf-tmfifo virtio_console sbsa_gwdt mlxbf-bootctl gpio-mlxbf2 gpio-mlxbf3 mlxbf-gige pinctrl-mlxbf3 8021q $ADDON_KERNEL_MODULES
 do
 	copy_module $mod
 done
@@ -273,13 +266,14 @@ done
 sudo depmod -a -b ./ $kernel
 
 sudo mkdir -p usr/share/misc/ bin/ var/log/watchdog
+sudo ln -sfn gawk usr/bin/awk
 sudo cp /usr/share/misc/pci.ids usr/share/misc/
 sudo cp /etc/watchdog.conf etc
 # Make sure we can load mlx-bootctl
 bootctl_ko=""
 for driver in mlxbf-bootctl mlx-bootctl
 do
-	bootctl_ko=`modinfo -F filename -k $kernel $driver || true`
+	bootctl_ko=$(modinfo -F filename -k $kernel $driver || true)
 	if [ ! -z $bootctl_ko ]; then
 		break
 	fi
@@ -301,14 +295,34 @@ sudo mkdir -p ./etc/infiniband
 sudo cp /etc/infiniband/vf-net-link-name.sh ./etc/infiniband/vf-net-link-name.sh
 
 # CVE-2021-4034 workaround
-if [ -e /usr/bin/pkexec ]; then
-    chmod 0755 /usr/bin/pkexec
+chmod 0755 /usr/bin/pkexec
+
+if [ -d ${SDIR}/BF3BMC/ ]; then
+	/bin/rm -rf BF3BMC
+	if (grep -q prod /etc/mlnx-release); then
+		cp -a ${SDIR}/BF3BMC/pk ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
+	elif (grep -q dev /etc/mlnx-release); then
+		cp -a ${SDIR}/BF3BMC/dk ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
+	else
+		cp -a ${SDIR}/BF3BMC/qp ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
+	fi
+	[ -d ${SDIR}/BF3BMC/golden_images ] && cp -a ${SDIR}/BF3BMC/golden_images ./BF3BMC
+fi
+
+if [ -d ${SDIR}/BF2BMC/ ]; then
+	/bin/rm -rf BF2BMC
+	if (grep -q prod /etc/mlnx-release); then
+		cp -a ${SDIR}/BF2BMC/pk ./BF2BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
+	else
+		cp -a ${SDIR}/BF2BMC/qp/ ./BF2BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
+	fi
 fi
 
 ex mkdir -p debian
 # Tar the image
 XZ_OPT="--threads=0 -9 --verbose" tar -cJp --exclude='./workspace' --exclude='./signing-local' --exclude='./signing-shared' --exclude='./var/run/docker.sock' --exclude='./root/workspace' --exclude='./tmp/*' --exclude='./run/*' --exclude='./sys/*' --exclude='./proc/*' --exclude='./dev/*' --exclude='./.dockerenv' --exclude='./root/.bash_history' --exclude='./var/tmp/*' --exclude='./bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-arm-static' --exclude='./var/cache/apt/*' --exclude='./var/lib/apt/lists/*' -f ./debian/image.tar.xz -C / .
 ex install -m 0755 ${SDIR}/install.sh ./debian/install.sh
+ex cp -a ${SDIR}/install.env ./debian/
 
 cat > scripts/initrd-install << EOF
 #!/bin/bash
@@ -318,6 +332,11 @@ printf_msg()
 	echo "$@" | tee /dev/kmsg
 	return 0
 }
+
+modprobe -a sdhci sdhci_pltfm sdhci_of_dwcmshc > /dev/kmsg 2>&1
+modprobe mlxbf_tmfifo > /dev/null 2>&1
+modprobe -a mlx5_ib mlxfw ib_umad
+modprobe nvme > /dev/null 2>&1
 
 /usr/sbin/watchdog > /dev/null 2>&1
 
@@ -393,4 +412,4 @@ ex $mkbfb \
 
 cd ..
 
-echo "BFB is ready: `readlink -f /workspace/${debian_BFB}`"
+echo "BFB is ready: $(readlink -f /workspace/${debian_BFB})"

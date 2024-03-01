@@ -256,17 +256,11 @@ copy_rpm()
 	esac
 }
 
-if (rpm -q kernel-mft > /dev/null 2>&1); then
-	kernel_mft="kernel-mft"
-elif (rpm -q kmod-kernel-mft-mlnx > /dev/null 2>&1); then
-	kernel_mft="kmod-kernel-mft-mlnx"
-fi
-
 # Copy the content of RPM packages
 			   #  openssh-server 
 for package in gawk mlxbf-bfscripts mlxbf-bootctl util-linux dosfstools \
-			   e2fsprogs kmod pciutils usbutils chkconfig mstflint mft \
-			   mft-oem $kernel_mft tar xfsprogs coreutils parted which curl \
+			   e2fsprogs kmod pciutils usbutils chkconfig mstflint \
+			   tar xfsprogs coreutils parted which curl \
 			   openssl net-tools wget dhcp-client ipcalc iputils dbus-tools \
 			   systemd-udev initscripts shadow-utils crypto-policies \
 			   openssh openssh-server rng-tools passwd dmidecode \

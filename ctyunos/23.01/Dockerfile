@@ -1,4 +1,4 @@
-from --platform=linux/arm64 ctyunos2/ctyunos2:23.01
+from --platform=linux/arm64 ctyunos3/ctyunos3:23.01
 ADD qemu-aarch64-static /usr/bin/
 
 WORKDIR /root/workspace

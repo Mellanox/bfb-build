@@ -289,7 +289,9 @@ sudo cp /lib/firmware/mellanox/boot/default.bfb ./lib/firmware/mellanox/boot/def
 sudo cp -a /lib/firmware/mellanox/boot/capsule ./lib/firmware/mellanox/boot/
 sudo cp $CAPSULE ./lib/firmware/mellanox/boot/capsule/
 sudo mkdir -p mnt
-sudo cp -a /workspace/BF3BMC/ ./
+if [ -d /workspace/BF3BMC/ ]; then
+	sudo cp -a /workspace/BF3BMC/ ./
+fi
 
 if [ -e /usr/bin/pkexec ]; then
     # CVE-2021-4034 workaround

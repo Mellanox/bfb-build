@@ -53,8 +53,8 @@ RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python2.7 10
 
 RUN wget -qO - $BASE_URL/doca/$DOCA_VERSION/ubuntu22.04/aarch64/GPG-KEY-Mellanox.pub | sudo apt-key add -
-RUN wget -qO - https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key --keyring /usr/share/keyrings/kubernetes-archive-keyring.gpg add -
-RUN echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | tee /etc/apt/sources.list.d/kubernetes.list
+RUN echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.25/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+RUN curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.25/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
 RUN apt update
 # Install Libvirt+QEMU+KVM
 RUN apt install -y bridge-utils cpu-checker libvirt-clients libvirt-daemon qemu qemu-kvm
@@ -62,7 +62,7 @@ RUN dpkg -i /tmp/doca-repo.deb
 RUN apt update
 RUN apt upgrade -y
 RUN apt install -y containerd=1.7.2-0ubuntu1~22.04.1 runc
-RUN apt install -y kubelet=1.25.3-00 cri-tools=1.25.0-00 kubernetes-cni=1.1.1-00
+RUN apt install -y kubelet cri-tools kubernetes-cni
 RUN apt-mark hold kubelet cri-tools kubernetes-cni
 RUN dpkg -i /var/doca-dpu-repo-ubuntu2204-local/*mstflint*.deb || true
 RUN apt-mark hold mstflint

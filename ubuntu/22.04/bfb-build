@@ -42,17 +42,25 @@ fi
 DISTRO="ubuntu"
 DISTRO_VERSION="22.04"
 DISTRO_BASE_URL="https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-arm64-root.tar.xz"
-VERSION="4.0.0-alpha"
+DOCA_VERSION="2.5.1"
+BSP_VERSION="4.5.1-13053"
+MLNX_OFED_VERSION="23.10-2.1.3.1"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-""}
 
 WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
+BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
 
 mkdir -p $WDIR
-wget --no-verbose -O $WDIR/mlxbf-bootimages.deb https://linux.mellanox.com/public/repo/doca/tmp/ubuntu22.04/aarch64/mlxbf-bootimages_4.0.bu1-12263_arm64.deb
-wget --no-verbose -O $WDIR/doca-repo.deb https://linux.mellanox.com/public/repo/doca/tmp/ubuntu22.04/aarch64/doca-repo-aarch64-ubuntu2204-local_1.4.0078-1.5.7.0.3.2.0.bf.4.0.bu1.12263_arm64.deb
+echo "Downloading doca-dpu-repo..."
+wget -q -P $WDIR -r --no-verbose --no-directories -l1 --no-parent -A 'doca-dpu-repo*arm64.deb' ${BASE_URL}/doca/${DOCA_VERSION}/${DISTRO}${DISTRO_VERSION}/aarch64/
+mv $WDIR/doca-dpu-repo*arm64.deb $WDIR/doca-repo.deb
+echo "Downloading mlxbf-bootimages..."
+wget -q -P $WDIR -r --no-verbose --no-directories -l1 --no-parent -A 'mlxbf-bootimages*arm64.deb' ${BASE_URL}/bluefield/${BSP_VERSION}/bootimages/${IMAGE_TYPE}/
+mv $WDIR/mlxbf-bootimages*arm64.deb $WDIR/mlxbf-bootimages.deb
 
 cp	Dockerfile \
+	build_ubuntu_bfb \
 	create_bfb \
 	install.sh \
 	../../common/tools/qemu-aarch64-static \
@@ -60,17 +68,34 @@ cp	Dockerfile \
 
 cd $WDIR
 
-wget --no-check-certificate $DISTRO_BASE_URL
+echo "Downloading DOCA services..."
+wget --quiet -r -np -nH --cut-dirs=5 -R "index.html*" ${BASE_URL}/doca/${DOCA_VERSION}/services/
+echo "Downloading $DISTRO base image..."
+wget -q --no-check-certificate $DISTRO_BASE_URL
+docker_image=bfb_runtime_${DISTRO,,}${DISTRO_VERSION,,}
 
-sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/" Dockerfile
+docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION} 2> /dev/null
 
-docker build -t bfb_runtime_${DISTRO}${DISTRO_VERSION} -f Dockerfile .
+sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/g;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/g" \
+    -e "s,@BASE_URL@,$BASE_URL,g" \
+    -e "s/@DOCA_VERSION@/$DOCA_VERSION/g" Dockerfile
+
+docker build -t ${docker_image} \
+	--build-arg BASE_URL=$BASE_URL \
+	--build-arg DOCA_VERSION=$DOCA_VERSION \
+	--build-arg BSP_VERSION=$BSP_VERSION \
+	--build-arg DISTRO=$DISTRO \
+	--build-arg DISTRO_VERSION=$DISTRO_VERSION \
+	-f Dockerfile .
+
 docker run -t --rm --privileged -e container=docker \
 	-v $PWD:/workspace \
 	--name BlueField_OS_${DISTRO}_${DISTRO_VERSION} \
 	--mount type=bind,source=/dev,target=/dev \
 	--mount type=bind,source=/sys,target=/sys \
 	--mount type=bind,source=/proc,target=/proc \
-	bfb_runtime_${DISTRO}${DISTRO_VERSION}
+	${docker_image}
 
 readlink -f *.bfb
+
+echo "Default user/password is: ubuntu/ubuntu"

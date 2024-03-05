@@ -1,26 +1,31 @@
 #!/bin/bash
-###############################################################################
+
+# Copyright (c) 2020, Mellanox Technologies
+# All rights reserved.
 #
-# Copyright 2022 NVIDIA Corporation
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
 #
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
+# 1. Redistributions of source code must retain the above copyright notice, this
+#    list of conditions and the following disclaimer.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+#    this list of conditions and the following disclaimer in the documentation
+#    and/or other materials provided with the distribution.
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+# ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-###############################################################################
+# The views and conclusions contained in the software and documentation are those
+# of the authors and should not be interpreted as representing official policies,
+# either expressed or implied, of the FreeBSD Project.
 
 set -e
 
@@ -202,6 +207,14 @@ copy_module()
 		return
 	fi
 
+	if (modinfo -k $kernel $1 2>/dev/null | grep "filename:" | grep -q builtin); then
+		return
+	fi
+
+	if ! (modinfo -k $kernel $1 2>/dev/null); then
+		return
+	fi
+
 	for mod in `modinfo -F depends -k $kernel $1 | tr -s ',' ' '`
 	do
 		copy_module $mod
@@ -213,24 +226,6 @@ copy_module()
 }
 
 (cd usr/bin; sudo ln -s xz xzcat)
-# Remove tools coming with busybox
-for tool in `dpkg -L mlxbf-scripts | grep bin/` \
-		`dpkg -L dosfstools` \
-		`dpkg -L e2fsprogs` \
-		`dpkg -L fdisk` \
-		`dpkg -L kmod | grep -v share` \
-		`dpkg -L pciutils | grep -v share` \
-		`dpkg -L usbutils | grep -v share` \
-		`dpkg -L mft` \
-		`dpkg -L mft-oem` \
-		`dpkg -L kernel-mft-modules` \
-		`dpkg -L tar`
-do
-	if [ -d $tool ]; then
-		continue
-	fi
-	/bin/rm -f .${tool}
-done
 
 for tool in `dpkg -L mlxbf-scripts | grep bin/` \
 		`dpkg -L dosfstools | grep -v share` \
@@ -245,15 +240,29 @@ for tool in `dpkg -L mlxbf-scripts | grep bin/` \
 		`dpkg -L tar | grep -v share` \
 		xz efibootmgr bash getopt hexdump mstflint lspci perl \
 		lsblk watchdog shutdown systemctl strings aarch64-linux-gnu-strings \
-		mlxbf-bootctl id dirname
+		mlxbf-bootctl id dirname curl openssl parted $ADDON_TOOLS
 do
 	if [ -d $tool ]; then
 		continue
 	fi
+	# Remove tools coming with busybox
+	/bin/rm -f .${tool}
 	copy_bin $tool
 done
 
-for mod in nvme-rdma nvme-tcp nvme mlx5_ib ib_ipoib ib_iser
+for deb in coreutils nvme-cli mmc-utils $ADDON_DEBS
+do
+	for tool in `dpkg -L $deb | grep -v share`
+	do
+		if [ -d $tool ]; then
+			continue
+		fi
+		/bin/rm -f .${tool}
+		copy_bin $tool
+	done
+done
+
+for mod in mlxbf_tmfifo dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block sdhci sdhci-of-dwcmshc nvme-rdma nvme-tcp nvme mlx5_ib mlxfw ib_umad ib_ipoib ib_iser mst_pci mst_pciconf $ADDON_KERNEL_MODULES
 do
 	copy_module $mod
 done
@@ -263,8 +272,19 @@ sudo mkdir -p usr/share/misc/ bin/ var/log/watchdog
 sudo cp /usr/share/misc/pci.ids usr/share/misc/
 sudo cp /etc/watchdog.conf etc
 # Make sure we can load mlx-bootctl
-bootctl_ko=`modinfo -F filename -k $kernel mlx-bootctl`
-sudo cp $bootctl_ko .
+bootctl_ko=""
+for driver in mlxbf-bootctl mlx-bootctl
+do
+	bootctl_ko=`modinfo -F filename -k $kernel $driver || true`
+	if [ ! -z $bootctl_ko ]; then
+		break
+	fi
+done
+if [ -z "$bootctl_ko" ]; then
+	echo "ERROR: Cannot find mlxbf-bootctl or mlx-bootctl drivers"
+	exit 1
+fi
+sudo cp $bootctl_ko ./mlx-bootctl.ko
 sudo cp /lib/modules/$kernel/kernel/drivers/watchdog/sbsa_gwdt.ko .
 sudo mkdir -p ./lib/firmware/mellanox/boot/
 sudo cp /lib/firmware/mellanox/boot/default.bfb ./lib/firmware/mellanox/boot/default.bfb
@@ -279,7 +299,7 @@ sudo mkdir -p mnt
 
 ex mkdir -p ubuntu
 # Tar the image
-XZ_OPT="--threads=0 -9 --verbose" tar -cJp --exclude='./workspace' --exclude='./signing-local' --exclude='./signing-shared' --exclude='./var/run/docker.sock' --exclude='./root/workspace' --exclude='./tmp/*' --exclude='./run/*' --exclude='./sys/*' --exclude='./proc/*' --exclude='./dev/*' --exclude='./.dockerenv' --exclude='./root/.bash_history' --exclude='./var/tmp/*' --exclude='./bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-arm-static' --exclude='./var/cache/apt/*' -f ./ubuntu/image.tar.xz -C / .
+XZ_OPT="--threads=0 -9 --verbose" tar -cJp --exclude='./workspace' --exclude='./signing-local' --exclude='./signing-shared' --exclude='./var/run/docker.sock' --exclude='./root/workspace' --exclude='./tmp/*' --exclude='./run/*' --exclude='./sys/*' --exclude='./proc/*' --exclude='./dev/*' --exclude='./.dockerenv' --exclude='./root/.bash_history' --exclude='./var/tmp/*' --exclude='./bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-arm-static' --exclude='./var/cache/apt/*' --exclude='./var/lib/apt/lists/*' -f ./ubuntu/image.tar.xz -C / .
 ex install -m 0755 ${SDIR}/install.sh ./ubuntu/install.sh
 
 cat > scripts/initrd-install << EOF
@@ -291,6 +311,10 @@ printf_msg()
 	return 0
 }
 
+modprobe -a sdhci-of-dwcmshc dw_mmc-bluefield > /dev/null 2>&1
+modprobe mlxbf_tmfifo > /dev/null 2>&1
+modprobe -a mlx5_ib mlxfw ib_umad
+modprobe nvme > /dev/null 2>&1
 insmod /mlx-bootctl.ko > /dev/null 2>&1
 insmod /sbsa_gwdt.ko > /dev/null 2>&1
 /usr/sbin/watchdog > /dev/null 2>&1
@@ -330,18 +354,43 @@ if [ ! -e $CAPSULE ]; then
 fi
 
 boot_args=$(mktemp)
+boot_args2=$(mktemp)
 boot_path=$(mktemp)
 boot_desc=$(mktemp)
-printf "console=ttyAMA1 console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 earlycon=pl011,0x01800000 initrd=initramfs quiet" > \
+printf "console=ttyAMA1 console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 earlycon=pl011,0x01800000 initrd=initramfs" > \
 	"$boot_args"
+printf "console=hvc0 console=ttyAMA0 earlycon=pl011,0x13010000 initrd=initramfs" > \
+	"$boot_args2"
 
 printf "VenHw(F019E406-8C9C-11E5-8797-001ACA00BFC4)/Image" > "$boot_path"
 printf "Linux from rshim" > "$boot_desc"
 vmlinuz=$WDIR/vmlinuz
 if [ -e $SDIR/vmlinuz ]; then
-	sudo cat $SDIR/vmlinuz > "$vmlinuz"
+	case "$(file --brief --mime-type $SDIR/vmlinuz)" in
+		application/x-dosexec|application/octet-stream)
+			CAT=cat
+			;;
+		application/gzip)
+			CAT=zcat
+			;;
+		*)
+			CAT=cat
+			;;
+	esac
+	sudo $CAT $SDIR/vmlinuz > "$vmlinuz"
 else
-	sudo cat /boot/vmlinuz-$kernel > "$vmlinuz"
+	case "$(file --brief --mime-type /boot/vmlinuz-$kernel)" in
+		application/x-dosexec|application/octet-stream)
+			CAT=cat
+			;;
+		application/gzip)
+			CAT=zcat
+			;;
+		*)
+			CAT=cat
+			;;
+	esac
+	sudo $CAT /boot/vmlinuz-$kernel > "$vmlinuz"
 fi
 
 mkdir -p /workspace
@@ -349,7 +398,8 @@ mkdir -p /workspace
 ex $mkbfb \
 	--image "$vmlinuz" --initramfs "$initramfs" \
 	--capsule "$CAPSULE" \
-	--boot-args "$boot_args" \
+	--boot-args-v0 "$boot_args" \
+	--boot-args-v2 "$boot_args2" \
 	--boot-path "$boot_path" \
 	--boot-desc "$boot_desc" \
 	${BFB} /workspace/${ubuntu_BFB}

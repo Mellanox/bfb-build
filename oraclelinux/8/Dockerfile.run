@@ -22,15 +22,6 @@ gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-oracle \n\
 gpgcheck=1 \n\
 enabled=1' > /etc/yum.repos.d/oracle-epel-ol8.repo
 
-#Kublet
-RUN echo -e '[kubernetes] \n\
-name=Kubernetes \n\
-baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-$basearch \n\
-gpgcheck=1 \n\
-enabled=1 \n\
-gpgkey=https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg \n\
-exclude=kubelet kubeadm kubectl' > /etc/yum.repos.d/kubernetes.repo
-
 # ol8 does not have lm_sensors-sensord
 RUN dnf install --disableexcludes=kubernetes -y \
 	grub2-tools grubby grub2-tools-minimal grub2-efi-aa64 \

@@ -555,6 +555,10 @@ configure_grub()
 	# Then, set boot arguments: Read current 'console' and 'earlycon'
 	# parameters, and append the root filesystem parameters.
 	bootarg="$(cat /proc/cmdline | sed 's/initrd=initramfs//;s/console=.*//')"
+	redfish_osarg="$(bfcfg --dump-osarg 2> /dev/null)"
+	if [ -n "$redfish_osarg" ]; then
+		bootarg="$bootarg $redfish_osarg"
+	fi
 	sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"crashkernel=auto $bootarg console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 net.ifnames=0 biosdevname=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
 	if (hexdump -C /sys/firmware/acpi/tables/SSDT* | grep -q MLNXBF33); then
 		# BlueField-3

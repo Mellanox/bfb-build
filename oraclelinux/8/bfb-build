@@ -19,8 +19,8 @@ fi
 
 DISTRO="oraclelinux"
 DISTRO_VERSION="8"
-DOCA_VERSION="2.6.0"
-BSP_VERSION="4.6.0-13035"
+DOCA_VERSION="2.7.0"
+BSP_VERSION="4.7.0-13101"
 BF_VERSION=${BSP_VERSION%-*}
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 
@@ -44,6 +44,7 @@ cp	Dockerfile.* \
 	install.sh \
 	build_ol_bfb \
 	run_create_bfb \
+	docker-ce.repo \
 	../../common/tools/qemu-aarch64-static \
 	$WDIR
 

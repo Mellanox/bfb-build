@@ -22,6 +22,19 @@ gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-oracle \n\
 gpgcheck=1 \n\
 enabled=1' > /etc/yum.repos.d/oracle-epel-ol8.repo
 
+#Kublet
+RUN echo -e '[kubernetes-1.28] \n\
+name=Kubernetes \n\
+baseurl=https://pkgs.k8s.io/core:/stable:/v1.28/rpm/ \n\
+gpgcheck=1 \n\
+enabled=1 \n\
+gpgkey=https://pkgs.k8s.io/core:/stable:/v1.28/rpm/repodata/repomd.xml.key \n' > /etc/yum.repos.d/kubernetes.repo
+
+ADD docker-ce.repo /etc/yum.repos.d/docker-ce.repo
+# RUN yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+
+RUN sed -i 's|https://download.docker.com/linux|https://urm.nvidia.com/artifactory/docker-linux-rpm-remote|g' /etc/yum.repos.d/docker-ce.repo
+
 # ol8 does not have lm_sensors-sensord
 RUN dnf install --disableexcludes=kubernetes -y \
 	grub2-tools grubby grub2-tools-minimal grub2-efi-aa64 \
@@ -32,11 +45,15 @@ RUN dnf install --disableexcludes=kubernetes -y \
 	kexec-tools jq python3-pip libnghttp2 wget annobin kernel-rpm-macros \
 	iproute-tc NetworkManager NetworkManager-initscripts-updown usbutils nfs-utils python3-six chkconfig \
 	dosfstools e2fsprogs openssh-server ipmitool \
-	@BASE_URL@/doca/@DOCA_VERSION@/extras/addons/containerd.io-1.6.22-3.1.el8.aarch64.rpm \
-    @BASE_URL@/doca/@DOCA_VERSION@/extras/addons/cri-tools-1.25.0-0.aarch64.rpm \
-    @BASE_URL@/doca/@DOCA_VERSION@/extras/addons/kubernetes-cni-1.1.1-0.aarch64.rpm \
-    @BASE_URL@/doca/@DOCA_VERSION@/extras/addons/kubelet-1.25.3-0.aarch64.rpm \
-	systemd-timesyncd chrony
+	containerd.io kubelet-1.28.8 cri-tools-1.28.0 kubernetes-cni-1.2.0 kubeadm-1.28.8 \
+	systemd-timesyncd chrony sshpass libunwind \
+	gawk util-linux kmod dracut-tools \
+	tar xfsprogs coreutils parted which curl \
+	openssl net-tools dhcp-client ipcalc iputils dbus-tools \
+	systemd-udev shadow-utils crypto-policies \
+	rng-tools passwd dmidecode python36
+
+RUN rm -f /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf
 
 RUN echo -e '[ol8_developer_CODEREADY] \n\
 name=Oracle Linux $releasever CodeReady Packages for Development ($basearch) \n\
@@ -65,7 +82,44 @@ RUN dnf install -y https://linux.mellanox.com/public/repo/doca/@DOCA_VERSION@/ex
 
 RUN dnf install -y rdma-core rdma-core-devel libibverbs-utils.aarch64 mstflint infiniband-diags infiniband-diags-compat libibumad librdmacm-utils python3-pyverbs
 
-RUN dnf install -y bf-release doca-cx-apps doca-cx-apps-devel doca-cx-libs doca-cx-libs-devel doca-cx-prime-runtime doca-cx-prime-sdk doca-cx-prime-tools doca-cx-samples meson mlnx-dpdk mlnx-dpdk-devel mlnx-tools mlxbf-bfscripts mlxbf-bootctl openvswitch openvswitch-ipsec python3-openvswitch mlx-OpenIPMI mlnx-fw-updater-signed optee-client
+RUN dnf install -y bf-release \
+		doca-cx-apps \
+		doca-cx-libs \
+		doca-cx-libs-devel \
+		doca-cx-libs-trace \
+		doca-cx-prime-devel \
+		doca-cx-prime-dev-tools \
+		doca-cx-prime-runtime \
+		doca-cx-prime-runtime-tools \
+		doca-cx-samples \
+		doca-openvswitch \
+		doca-openvswitch-devel \
+		doca-openvswitch-selinux-policy \
+		doca-openvswitch-test \
+		dpacc \
+		dpacc-extract \
+		dpaeumgmt \
+		dpa-gdbserver \
+		dpa-ps \
+		dpa-statistics \
+		flexio \
+		flexio-samples \
+		libckteec0 \
+		libseteec0 \
+		libteeacl0 \
+		libteec1 \
+		meson \
+		mlnx-dpdk \
+		mlnx-dpdk-devel \
+		mlnx-fw-updater-signed \
+		mlnx-tools \
+		mlxbf-bfscripts \
+		mlxbf-bootctl \
+		mlx-OpenIPMI \
+		optee-client \
+		optee-client-devel \
+		spdk \
+		virtio-net-controller
 
 RUN echo BlueField_OS_@BF_VERSION@_OL_@DISTRO_VERSION@-@BUILDVER@.@IMAGE_TYPE@@CUSTOM_VERSION@ > /etc/mlnx-release
 

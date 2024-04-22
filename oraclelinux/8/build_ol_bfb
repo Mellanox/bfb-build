@@ -56,10 +56,27 @@ build_rpm()
 mkdir -p $WDIR/{SPECS,RPMS,BUILD,SOURCES}
 cd $WDIR
 
+# Install mlxbf-bootimages for dependency
+rpm -ihv $(/bin/ls -1 /workspace/bootimages/*.rpm | head -1)
+
+# kernel-devel is required by mlnx-dpdk
+rpm -ihv /workspace/uek/kernel-[0-9]*rpm /workspace/uek/kernel-devel-[0-9]*rpm
+rpm -Uhv /workspace/uek/kernel-headers-[0-9]*rpm
+
 build_rpm "mlxbf-bootctl" "https://github.com/Mellanox/mlxbf-bootctl" "master"
 build_rpm "mlxbf-bfscripts" "https://github.com/Mellanox/bfscripts" "master"
 build_rpm "mlnx-tools" "https://github.com/Mellanox/mlnx-tools" "master"
 build_rpm "bf-release" "https://github.com/Mellanox/bf-release" "master"
 
-find $WDIR/RPMS -type f -exec cp '{}' /workspace \;
+if [ -x /workspace/packages/packages.py ]; then
+	yum install -y python3-pip
+	pip3 install graphlib-backport
+	# Extend the python path to point at the local installed pip package
+	export PYTHONPATH=${PYTHONPATH}:/usr/local/lib/python3.9/site-packages/
+	git clone --depth 1 git://lint-arm1-ci-builder/signing-utils /tmp/signing-utils
+	chmod +x /tmp/signing-utils/sign-dpa.sh
+	DPA_SIGNING_SCRIPT="/tmp/signing-utils/sign-dpa.sh" SIGNING_MODE="prod" ENABLE_SIGNING="true" /workspace/packages/packages.py --debug
+fi
+
+find /workspace -type f -name '*.rpm' -a ! -name '*.src.rpm' -a ! -name 'kernel*rpm' -exec cp '{}' /workspace \;
 /bin/rm -rf $WDIR/RPMS/*

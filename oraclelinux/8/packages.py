@@ -41,6 +41,7 @@ import subprocess
 import datetime
 import json
 import csv
+import graphlib
 from pprint import pprint
 
 __author__ = "Vladimir Sokolovsky <vlad@mellanox.com>"
@@ -53,7 +54,6 @@ os.environ['DEBIAN_FRONTEND'] = 'noninteractive'
 AllPackages = {}
 debug_enabled = False
 run_quiet = 0
-RSYNC_PASSWORD = '3tango11'
 distro = ""
 kernel = ""
 skip_type_kernel = False
@@ -131,7 +131,7 @@ def get_rpm_source(rpm):
     cmd = "rpm -qp --queryformat '[%{f}]' {r} ".format(f="{SOURCE}", r=rpm)
     rc, output = get_status_output(cmd, print_in_fail=False)
     return output.strip()
-    
+
 def is_installed(name):
     if is_debian:
         cmd = "/usr/bin/dpkg-query -l {n} 2> /dev/null | awk '/^[rhi][iU]/{f}'".format(f="{print $2}", n=name)
@@ -172,7 +172,7 @@ def install_distro_package(name):
             cmd = "yum install -y --enablerepo=updates --enablerepo=extras {}".format(name)
 
     rc, output = get_status_output(cmd, print_in_fail=True)
-    return rc
+    return rc, output
 
 
 def remove_distro_package(name):
@@ -438,12 +438,16 @@ class Package:
             for p in self.os_build_dep:
                 if not is_installed(p):
                     print("{} is not installed".format(p))
-                    install_distro_package(p)
+                    rc, output = install_distro_package(p)
+                    debug("RC: {}".format(rc))
+                    debug("Output: {}".format(output))
         if self.os_run_dep:
             for p in self.os_run_dep:
                 if not is_installed(p):
                     print("{} is not installed".format(p))
-                    install_distro_package(p)
+                    rc, output = install_distro_package(p)
+                    debug("RC: {}".format(rc))
+                    debug("Output: {}".format(output))
         return 0
 
     def build_package(self):
@@ -539,6 +543,12 @@ class Package:
                 return rc
         self.is_installed = 1
 
+def sort_packages_topologically(all_packages):
+    graph = {}
+    for package in all_packages.keys():
+        graph[package] = { p for p in all_packages[package].internal_build_dep }
+    ts = graphlib.TopologicalSorter(graph)
+    return list(ts.static_order())
 
 def package_handler(package):
     if not AllPackages[package].is_available():
@@ -614,7 +624,9 @@ def main():
     for p in DISTRO_REQUIRED_PACKAGES:
         if not is_installed(p):
             print("{} is not installed".format(p))
-            install_distro_package(p)
+            rc, output = install_distro_package(p)
+            debug("RC: {}".format(rc))
+            debug("Output: {}".format(output))
 
     json_files = glob.glob("{}/*.json".format(manifests_dir))
     for j_file in json_files:
@@ -632,7 +644,14 @@ def main():
         else:
             passed_packages[package] = AllPackages[package].version
     else:
-        for package in AllPackages.keys():
+        sorted_packages = sort_packages_topologically(AllPackages)
+        print("#" * 64)
+        print("Building in the following order")
+        for package in sorted_packages:
+            print(f"- {package}")
+        print("#" * 64)
+
+        for package in sorted_packages:
             if AllPackages[package].type == "kernel" and args.skip_type_kernel:
                 info(f"Skipping kenrel package {package}...")
                 continue

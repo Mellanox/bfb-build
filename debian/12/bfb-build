@@ -41,28 +41,40 @@ fi
 
 DISTRO="debian"
 DISTRO_VERSION="12"
-DOCA_VERSION="2.6.0"
-BSP_VERSION="4.6.0-13035"
-MLNX_OFED_VERSION="24.01-0.3.3.0"
-BF2_BMC_VERSION="24.01-5"
-BF3_BMC_VERSION="24.01-5"
+DISTRO_KERNEL=${DISTRO_KERNEL:-"-6.10"}
+ARCH=${ARCH:-"arm64-dpu"}
+DOCA_VERSION="2.7.0"
+BSP_VERSION="4.7.0-13127"
+MLNX_OFED_VERSION="24.01-0.6.6.0"
+BF2_BMC_VERSION="24.04-5"
+BF3_BMC_VERSION="24.04-5"
 BF2_CEC_VERSION="04.0f"
-BF3_CEC_VERSION="00.02.0152.0000"
-BF3_NIC_FW_VERSION="32_40_1000"
+BF3_CEC_VERSION="00.02.0182.0000"
+BF3_NIC_FW_VERSION="32_41_1000"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-""}
 INCLUDE_BF2BMC=${INCLUDE_BF2BMC:-"yes"}
 INCLUDE_BF3BMC=${INCLUDE_BF3BMC:-"yes"}
 BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
 
-WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
+WDIR=/tmp/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}.$$
 
 mkdir -p $WDIR
-echo "Downloading doca-dpu-repo..."
-wget -q -P $WDIR -r --no-verbose --no-directories -l1 --no-parent -A 'doca-dpu-repo*arm64.deb' ${BASE_URL}/doca/${DOCA_VERSION}/${DISTRO}${DISTRO_VERSION}/aarch64/
-mv $WDIR/doca-dpu-repo*arm64.deb $WDIR/doca-repo.deb
+
 echo "Downloading mlxbf-bootimages..."
-wget -q -P $WDIR -r --no-verbose --no-directories -l1 --no-parent -A 'mlxbf-bootimages*arm64.deb' ${BASE_URL}/bluefield/${BSP_VERSION}/bootimages/${IMAGE_TYPE}/
+case "$IMAGE_TYPE" in
+	prod)
+		bootimages="mlxbf-bootimages-signed_${BSP_VERSION}_arm64.deb"
+		;;
+	dev)
+		bootimages="mlxbf-bootimages-devsigned_${BSP_VERSION}_arm64.deb"
+		;;
+	unsigned)
+		bootimages="mlxbf-bootimages_${BSP_VERSION}_arm64.deb"
+		;;
+esac
+
+wget -P $WDIR ${BASE_URL}/doca/${DOCA_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/${ARCH}/$bootimages
 mv $WDIR/mlxbf-bootimages*arm64.deb $WDIR/mlxbf-bootimages.deb
 
 cp -a \
@@ -74,6 +86,8 @@ cp -a \
 	$WDIR
 
 cd $WDIR
+
+mkdir BF3BMC BF2BMC
 
 if [ "${INCLUDE_BF2BMC}" == "yes" ]; then
 	mkdir -p BF2BMC/pk/{bmc,cec} BF2BMC/qp
@@ -107,17 +121,9 @@ Components: main
 Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
 EOF
 
-cat > docker.list << 'EOF'
-deb [arch=arm64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable
-EOF
+docker_image=bfb_runtime_${DISTRO,,}${DISTRO_VERSION,,}${DISTRO_KERNEL}
 
-cat > kubernetes.list << 'EOF'
-deb [signed-by=/etc/apt/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main
-EOF
-
-docker_image=bfb_runtime_${DISTRO,,}${DISTRO_VERSION,,}
-
-docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION} 2> /dev/null
+docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION}${DISTRO_KERNEL} 2> /dev/null
 
 sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/g;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/g" \
     -e "s,@BASE_URL@,$BASE_URL,g" \
@@ -129,11 +135,12 @@ docker build -t ${docker_image} \
 	--build-arg BSP_VERSION=$BSP_VERSION \
 	--build-arg DISTRO=$DISTRO \
 	--build-arg DISTRO_VERSION=$DISTRO_VERSION \
+	--build-arg DISTRO_KERNEL=$DISTRO_KERNEL \
 	-f Dockerfile .
 
 docker run -t --rm --privileged -e container=docker \
 	-v $PWD:/workspace \
-	--name BlueField_OS_${DISTRO}_${DISTRO_VERSION} \
+	--name BlueField_OS_${DISTRO}_${DISTRO_VERSION}${DISTRO_KERNEL} \
 	--mount type=bind,source=/dev,target=/dev \
 	--mount type=bind,source=/sys,target=/sys \
 	--mount type=bind,source=/proc,target=/proc \

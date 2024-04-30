@@ -6,6 +6,8 @@ ARG DOCA_VERSION
 ARG BSP_VERSION
 ARG DISTRO
 ARG DISTRO_VERSION
+ARG DISTRO_KERNEL
+ARG MLXBF_BOOTIMAGES=mlxbf-bootimages
 ARG MLNX_FW_UPDATER=mlnx-fw-updater-signed
 WORKDIR /root/workspace
 ADD install.sh .
@@ -14,10 +16,7 @@ ADD create_bfb .
 ADD mlxbf-bootimages.deb .
 ADD BF2BMC ./BF2BMC
 ADD BF3BMC ./BF3BMC
-ADD doca-repo.deb .
 ADD debian.sources /etc/apt/sources.list.d/debian.sources
-ADD docker.list /etc/apt/sources.list.d/docker.list
-ADD kubernetes.list /etc/apt/sources.list.d/kubernetes.list
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV FLASH_KERNEL_SKIP=yes
@@ -27,32 +26,39 @@ ENV RUN_FW_UPDATER=no
 RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
 
 # Install Docker
-RUN apt-get update -y -q; \
-        apt-get install -y -q \
-        apt-transport-https \
-        ca-certificates \
-        curl \
-        sudo \
-        gnupg-agent \
-        software-properties-common \
-        apt-utils; \
-        install -m 0755 -d /etc/apt/keyrings; \
-        curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc; \
-        chmod a+r /etc/apt/keyrings/docker.asc; \
-        echo \
-          "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
-          $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-          sudo tee /etc/apt/sources.list.d/docker.list > /dev/null; \
-        curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.25/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg; \
-        echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.25/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list; \
-        apt update -y -q; \
-        apt install -y docker-ce docker-ce-cli containerd.io kubelet cri-tools kubernetes-cni
+RUN apt-get update -y -q
+RUN apt-get install -y -q \
+    apt-transport-https \
+    ca-certificates \
+    curl \
+    sudo \
+    gnupg-agent \
+    software-properties-common \
+    apt-utils
+RUN install -m 0755 -d /etc/apt/keyrings
+RUN curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+RUN chmod a+r /etc/apt/keyrings/docker.asc
+RUN echo \
+    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
+    $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+    sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+RUN curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+RUN echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+RUN curl -fsSL https://linux.mellanox.com/public/repo/doca/GPG-KEY-Mellanox.pub | gpg --dearmor > /etc/apt/trusted.gpg.d/GPG-KEY-Mellanox.pub
+RUN apt update -y -q
+RUN apt install -y docker-ce docker-ce-cli containerd.io kubelet=1.29.3-1.1 kubernetes-cni=1.3.0-1.1 cri-tools=1.29.0-1.1 kubeadm=1.29.3-1.1
+RUN rm -f /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf
 
 RUN apt install -y grub-efi
 
-RUN dpkg -i /root/workspace/doca-repo.deb
+RUN echo "deb [trusted=yes] ${BASE_URL}/doca/${DOCA_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/arm64-dpu/ /" | sudo tee /etc/apt/sources.list.d/doca.base.list
 
 RUN apt-get update -y -q
+
+RUN apt-get install --no-install-recommends -y -q \
+						  libgrpc-dev=1.39.0-2 \
+						  python3-protobuf=3.17.3 \
+						  python3-grpcio=1.50.0
 
 RUN apt-get install --no-install-recommends -y -q \
                           linux-image-6.1.0-11-arm64 \
@@ -87,7 +93,7 @@ RUN apt-get install --no-install-recommends -y -q \
                           hwdata \
                           less \
                           nvi \
-                          dhcpcd \
+                          isc-dhcp-client \
                           iptables-persistent \
                           zstd \
                           efibootmgr \
@@ -134,6 +140,7 @@ RUN apt-get install --no-install-recommends -y -q \
                           ntp \
                           libgdbm-dev \
                           jq \
+                          xxd \
                           libev4 \
                           python3-pip \
                           build-essential
@@ -142,15 +149,14 @@ RUN apt-get install --no-install-recommends -y -q \
                           mstflint \
                           $MLXBF_BOOTIMAGES \
                           $MLNX_FW_UPDATER \
-                          openvswitch-common=2.17.8-1 \
-                          libopenvswitch=2.17.8-1 \
-                          openvswitch-ipsec=2.17.8-1 \
-                          openvswitch-switch=2.17.8-1 \
-                          python3-openvswitch=2.17.8-1 \
+                          doca-openvswitch-common \
+                          doca-libopenvswitch \
+                          doca-openvswitch-ipsec \
+                          doca-openvswitch-switch \
+                          python3-doca-openvswitch \
                           strongswan-swanctl=5.9.10-1.bf \
                           doca-runtime \
-                          doca-tools \
-                          doca-sdk \
+                          doca-devel \
                           mlx-openipmi \
                           mlnx-snap \
                           '*mlx*-modules' \
@@ -158,8 +164,7 @@ RUN apt-get install --no-install-recommends -y -q \
                           flexio \
                           bluefield-edac-modules \
                           bf-release && \
-                        apt-mark hold mstflint openvswitch-common libopenvswitch openvswitch-ipsec openvswitch-switch python3-openvswitch strongswan-swanctl && \
-                        apt-get remove --purge -y 'doca-dpu-repo*' && \
+                        apt-mark hold mstflint strongswan-swanctl kubelet cri-tools kubernetes-cni kubeadm && \
                         apt-get clean -y -q && \
                         dpkg-reconfigure bf-release && \
                         rm -rf /var/lib/apt/lists/* && \
@@ -167,6 +172,8 @@ RUN apt-get install --no-install-recommends -y -q \
                         systemctl enable NetworkManager NetworkManager-wait-online networking mlnx_snap acpid mlx-openipmi mlx_ipmid set_emu_param && \
                         truncate -s0 /etc/machine-id && \
                         sed -i -r -e "s/^(MACAddressPolicy.*)/# \1/" /usr/lib/systemd/network/99-default.link
+
+RUN /usr/sbin/update-pciids || true
 
 RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" -e "s/prod/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
 

@@ -246,7 +246,7 @@ do
 	copy_bin $tool
 done
 
-for deb in coreutils nvme-cli mmc-utils iputils-ping uuid-runtime sshpass openssh-client gawk iproute2 $ADDON_DEBS
+for deb in coreutils nvme-cli mmc-utils iputils-ping uuid-runtime sshpass openssh-client gawk iproute2 wget $ADDON_DEBS
 do
 	for tool in $(dpkg -L $deb | grep -v share)
 	do
@@ -299,22 +299,24 @@ chmod 0755 /usr/bin/pkexec
 
 if [ -d ${SDIR}/BF3BMC/ ]; then
 	/bin/rm -rf BF3BMC
-	if (grep -q prod /etc/mlnx-release); then
-		cp -a ${SDIR}/BF3BMC/pk ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
-	elif (grep -q dev /etc/mlnx-release); then
-		cp -a ${SDIR}/BF3BMC/dk ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
+	if (grep -q prod /etc/mlnx-release) && [ -d ${SDIR}/BF3BMC/pk ]; then
+		cp -a ${SDIR}/BF3BMC/pk ./BF3BMC
+	elif (grep -q dev /etc/mlnx-release) && [ -d ${SDIR}/BF3BMC/dk ]; then
+		cp -a ${SDIR}/BF3BMC/dk ./BF3BMC
+	elif [ -d ${SDIR}/BF3BMC/qp ]; then
+		cp -a ${SDIR}/BF3BMC/qp ./BF3BMC
 	else
-		cp -a ${SDIR}/BF3BMC/qp ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
+		echo "WARNING: BF3 BMC Software was not found"
 	fi
-	[ -d ${SDIR}/BF3BMC/golden_images ] && cp -a ${SDIR}/BF3BMC/golden_images ./BF3BMC
+	[ -d ${SDIR}/BF3BMC/golden_images ] && cp -a ${SDIR}/BF3BMC/golden_images ./BF3BMC || echo "WARNING: BF3 Golden Images for BMC were not found"
 fi
 
 if [ -d ${SDIR}/BF2BMC/ ]; then
 	/bin/rm -rf BF2BMC
 	if (grep -q prod /etc/mlnx-release); then
-		cp -a ${SDIR}/BF2BMC/pk ./BF2BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
+		[ -d ${SDIR}/BF2BMC/pk ] && cp -a ${SDIR}/BF2BMC/pk ./BF2BMC || echo "WARNING: BF2 BMC Software was not found"
 	else
-		cp -a ${SDIR}/BF2BMC/qp/ ./BF2BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
+		[ -d ${SDIR}/BF2BMC/qp ] && cp -a ${SDIR}/BF2BMC/qp ./BF2BMC || echo "WARNING: BF2 BMC Software was not found"
 	fi
 fi
 

@@ -4,6 +4,9 @@ ADD qemu-aarch64-static /usr/bin/
 ARG BASE_URL
 ARG DOCA_VERSION
 ARG BSP_VERSION
+ARG DISTRO
+ARG DISTRO_VERSION
+ARG DISTRO_KERNEL
 ARG MLNX_FW_UPDATER=mlnx-fw-updater-signed
 WORKDIR /root/workspace
 ADD install.sh .
@@ -31,11 +34,12 @@ RUN dnf install -y --allowerasing --nobest --disableexcludes=kubernetes \
 	glib2-devel python3-devel elfutils-devel binutils-devel pciutils-devel openssl-devel \
 	libnl3-devel selinux-policy-devel numactl-devel unbound-devel libpcap-devel tcl-devel \
 	valgrind-devel iptables-devel libdb-devel libmnl-devel libcap-ng-devel systemd-devel \
-	grubby grub2-efi-aa64 efibootmgr shim sshpass \
+	grubby grub2-efi-aa64 efibootmgr shim \
+	https://linux.mellanox.com/public/repo/bluefield/4.7.0-13127/extras/addons/sshpass-1.09-1.oe2203.aarch64.rpm \
 	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libmd-1.1.0-1.el8.aarch64.rpm \
 	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libmd-devel-1.1.0-1.el8.aarch64.rpm \
-	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libbsd-devel-0.11.7-2.el8.aarch64.rpm \
-	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libbsd-0.11.7-2.el8.aarch64.rpm \
+	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libbsd-devel-0.12.2-1.el8.aarch64.rpm \
+	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libbsd-0.12.2-1.el8.aarch64.rpm \
 	https://download.fedoraproject.org/pub/epel/7/aarch64/Packages/l/lcov-1.13-1.el7.noarch.rpm \
 	https://download.fedoraproject.org/pub/epel/7/aarch64/Packages/r/re2c-0.14.3-2.el7.aarch64.rpm \
 	https://vault.centos.org/centos/8/BaseOS/aarch64/os/Packages/watchdog-5.15-2.el8.aarch64.rpm
@@ -44,13 +48,13 @@ RUN dnf install -y rpm-build rpm-sign automake meson cmake gcc-c++
 
 RUN echo -e "[doca] \n\
 name=Nvidia DOCA repository \n\
-baseurl=$BASE_URL/doca/$DOCA_VERSION/openeuler20.03sp1/aarch64/ \n\
+baseurl=$BASE_URL/doca/$DOCA_VERSION/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/arm64-dpu/ \n\
 gpgcheck=0 \n\
 enabled=1" > /etc/yum.repos.d/doca.repo
 
 RUN dnf install -y kernel-4.19.90-2109.1.0.0108.oe1.aarch64 kernel-devel-4.19.90-2109.1.0.0108.oe1.aarch64
 
-RUN dnf install --nogpgcheck -y --exclude network-scripts-openvswitch doca-runtime doca-tools doca-sdk
+RUN dnf install --nogpgcheck -y --exclude network-scripts-openvswitch doca-runtime doca-devel
 RUN dnf install --nogpgcheck -y mstflint
 RUN dnf install --nogpgcheck -y $MLNX_FW_UPDATER
 RUN dnf install --nogpgcheck -y dpacc dpacc-extract dpa-compiler

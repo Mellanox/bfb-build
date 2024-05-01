@@ -1,18 +1,53 @@
 NIC_FW_UPDATE_DONE=0
+FORCE_NIC_FW_UPDATE=${FORCE_NIC_FW_UPDATE:-"no"}
 NIC_FW_RESET_REQUIRED=0
+BFB_NIC_FW_UPDATE=0
+NIC_FW_FOUND=0
+FW_UPDATER=/opt/mellanox/mlnx-fw-updater/mlnx_fw_updater.pl
+FW_DIR=/opt/mellanox/mlnx-fw-updater/firmware/
+CHROOT=
+
+running_nic_fw()
+{
+	mstflint -d $cx_pcidev q 2>&1 | grep -w 'FW Version:' | awk '{print $NF}'
+}
+
+provided_nic_fw()
+{
+	if [ ! -z "${PSID}" ]; then
+		$CHROOT ${FW_DIR}/mlxfwmanager_sriov_dis_aarch64_${cx_dev_id} --list 2> /dev/null | grep -w "${PSID}" | awk '{print $4}'
+	fi
+}
 
 fw_update()
 {
-	if [ ! -d /mnt/root ]; then
-		mount -t $ROOTFS /dev/${root_device} /mnt
-		bind_partitions
-	fi
-	FW_UPDATER=/opt/mellanox/mlnx-fw-updater/mlnx_fw_updater.pl
-	FW_DIR=/opt/mellanox/mlnx-fw-updater/firmware/
+	if [[ -x ${FW_UPDATER} && -d ${FW_DIR} ]]; then
+		BFB_NIC_FW_UPDATE=1
+		NIC_FW_FOUND=1
+	else
+		if [ ! -d /mnt/root ]; then
+			mount -t $ROOTFS /dev/${root_device} /mnt
+			bind_partitions
+		fi
 
-	if [[ -x /mnt/${FW_UPDATER} && -d /mnt/${FW_DIR} ]]; then
+		if [[ -x /mnt/${FW_UPDATER} && -d /mnt/${FW_DIR} ]]; then
+			CHROOT="chroot /mnt"
+			NIC_FW_FOUND=1
+		fi
+	fi
+
+	if [ $NIC_FW_FOUND -eq 1 ]; then
+		if [ "$(running_nic_fw)" == "$(provided_nic_fw)" ]; then
+			if [ "${FORCE_NIC_FW_UPDATE}" == "yes" ]; then
+				log "INFO: Installed NIC Firmware is the same as provided. FORCE_NIC_FW_UPDATE is set."
+			else
+				log "INFO: Installed NIC Firmware is the same as provided. Skipping NIC Firmware update."
+				return
+			fi
+		fi
+
 		log "INFO: Updating NIC firmware..."
-		chroot /mnt ${FW_UPDATER} --log /tmp/mlnx_fw_update.log -v \
+		$CHROOT ${FW_UPDATER} --log /tmp/mlnx_fw_update.log -v \
 			--force-fw-update \
 			--fw-dir ${FW_DIR} > /tmp/mlnx_fw_update.out 2>&1
 		rc=$?
@@ -27,13 +62,14 @@ fw_update()
 			cat /tmp/mlnx_fw_update.log > /dev/ttyAMA0
 			cat /tmp/mlnx_fw_update.log >> $LOG
 		fi
-		if [ $rc -eq 0 ]; then
-			NIC_FW_UPDATE_PASSED=1
-			log "INFO: NIC firmware update done"
-		else
+		if [ $rc -ne 0 ] || (grep -q '\-E- Failed' /tmp/mlnx_fw_update.log); then
 			NIC_FW_UPDATE_PASSED=0
 			log "INFO: NIC firmware update failed"
+		else
+			NIC_FW_UPDATE_PASSED=1
+			log "INFO: NIC firmware update done"
 		fi
+		NIC_FW_UPDATE_DONE=1
 	else
 		log "WARNING: NIC Firmware files were not found"
 	fi
@@ -43,11 +79,15 @@ fw_reset()
 {
 	/sbin/modprobe -a mlx5_core ib_umad
 	ilog "Running mlnx_bf_configure:"
-	ilog "$(chroot /mnt /sbin/mlnx_bf_configure)"
+	if [ ! -x /sbin/mlnx_bf_configure ]; then
+		CHROOT="chroot /mnt"
+	fi
+
+	ilog "$($CHROOT /sbin/mlnx_bf_configure)"
 
 	MLXFWRESET_TIMEOUT=${MLXFWRESET_TIMEOUT:-180}
 	SECONDS=0
-	while ! (chroot /mnt mlxfwreset -d /dev/mst/mt*_pciconf0 q 2>&1 | grep -w "Driver is the owner" | grep -qw "\-Supported")
+	while ! ($CHROOT mlxfwreset -d /dev/mst/mt*_pciconf0 q 2>&1 | grep -w "Driver is the owner" | grep -qw "\-Supported")
 	do
 		if [ $SECONDS -gt $MLXFWRESET_TIMEOUT ]; then
 			log "INFO: NIC Firmware reset is not supported. Host power cycle is required"
@@ -65,7 +105,7 @@ fw_reset()
 	# as mlxfwreset will restart the DPU
 	sleep 3
 
-	msg=$(chroot /mnt mlxfwreset -d /dev/mst/mt*_pciconf0 -y -l 3 --sync 1 r 2>&1)
+	msg=$($CHROOT mlxfwreset -d /dev/mst/mt*_pciconf0 -y -l 3 --sync 1 r 2>&1)
 	if [ $? -ne 0 ]; then
 		log "INFO: NIC Firmware reset failed"
 		log "INFO: $msg"
@@ -78,7 +118,6 @@ update_nic_firmware()
 {
 	if [ $NIC_FW_UPDATE_DONE -eq 0 ]; then
 		fw_update
-		NIC_FW_UPDATE_DONE=1
 	fi
 }
 

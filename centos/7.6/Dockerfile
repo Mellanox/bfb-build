@@ -41,7 +41,7 @@ RUN yum-config-manager --nogpgcheck --add-repo https://download-ib01.fedoraproje
 
 RUN yum-config-manager --nogpgcheck --add-repo @BASE_URL@/doca/@DOCA_VERSION@/centos7.6/aarch64/
 
-RUN yum install --nogpgcheck -y doca-runtime doca-tools doca-sdk
+RUN yum install --nogpgcheck -y doca-runtime doca-devel
 RUN yum install --nogpgcheck -y mstflint
 RUN yum install --nogpgcheck -y $MLNX_FW_UPDATER
 

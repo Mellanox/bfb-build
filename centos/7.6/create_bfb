@@ -134,7 +134,7 @@ kmods=""
 for kmod in dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block mlxbf-bootctl \
 			virtio_net virtio_console sdhci dw_mmc-pltfm sdhci-of-dwcmshc \
 			xfs vfat  mlxbf-tmfifo mlx5_core mlx5_ib ib_umad nvme nvme-tcp \
-			nvme-rdma nvme-fc nvme-fabrics nvme-core gpio-mlxbf3 mlxbf_gige pinctrl-mlxbf3 8021q
+			nvme-rdma nvme-fc nvme-fabrics nvme-core gpio-mlxbf3 mlxbf_gige pinctrl-mlxbf3 8021q vitesse
 do
     if (modinfo -k $kernel $kmod 2>/dev/null | grep "filename:" | grep -q builtin); then
         continue
@@ -288,7 +288,7 @@ for package in gawk mlxbf-bfscripts mlxbf-bootctl util-linux dosfstools \
 			   systemd-udev initscripts shadow-utils crypto-policies \
 			   openssh openssh-server rng-tools passwd dmidecode \
 			   python36 jq sshpass openssh-clients nvme-cli mmc-utils sdhci-of-dwcmshc \
-			   findutils $ADDON_RPMS
+			   findutils mokutil nss-softokn nss selinux-policy ca-certificates $ADDON_RPMS
 do
 	copy_rpm $package || true
 done
@@ -353,7 +353,7 @@ echo "=================================" | tee /dev/kmsg
 echo "Installing CentOS. Please wait..." | tee /dev/kmsg
 echo "=================================" | tee /dev/kmsg
 
-modprobe -a sdhci-of-dwcmshc mlxbf_tmfifo mlxbf_gige pinctrl-mlxbf3 8021q dw_mmc_bluefield mmc_block virtio_console nvme ${bootctl_module} 2>&1 | tee /dev/kmsg
+modprobe -a sdhci-of-dwcmshc mlxbf_tmfifo mlxbf_gige pinctrl-mlxbf3 8021q vitesse dw_mmc_bluefield mmc_block virtio_console nvme ${bootctl_module} 2>&1 | tee /dev/kmsg
 modprobe -a mlx5_ib mlxfw ib_umad 2>&1 | tee /dev/kmsg
 
 sleep 5
@@ -378,7 +378,7 @@ case "$(file --brief --mime-type $(readlink -f init))" in
 	"application/x-sharedlib")
 	cat > usr/lib/systemd/system/install-centos.service << EOF
 [Unit]
-Description=Install anolis Linux
+Description=Install CentOS Linux
 After=initrd-root-fs.target initrd-parse-etc.service
 After=dracut-initqueue.service dracut-mount.service
 

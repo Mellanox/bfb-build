@@ -11,6 +11,7 @@ BMC_IP_TIMEOUT=${BMC_IP_TIMEOUT:-600}
 BMC_TASK_TIMEOUT=${BMC_TASK_TIMEOUT:-"1800"}
 UPDATE_BMC_FW=${UPDATE_BMC_FW:-"yes"}
 BMC_REBOOT=${BMC_REBOOT:-"no"}
+FIELD_MODE_SET=0
 UPDATE_CEC_FW=${UPDATE_CEC_FW:-"yes"}
 UPDATE_DPU_GOLDEN_IMAGE=${UPDATE_DPU_GOLDEN_IMAGE:-"yes"}
 UPDATE_NIC_FW_GOLDEN_IMAGE=${UPDATE_NIC_FW_GOLDEN_IMAGE:-"yes"}
@@ -33,6 +34,7 @@ export CEC_PATH
 
 BMC_CREDENTIALS="'{\"username\":\"$BMC_USER\", \"password\":\"${BMC_PASSWORD}\"}'"
 BMC_LINK_UP="no"
+BMC_FIRMWARE_UPDATED="no"
 export BMC_TOKEN=""
 export task_id=""
 export task_state=""
@@ -40,6 +42,16 @@ export task_status=""
 
 SSH="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
 SCP="scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
+
+skip_bmc()
+{
+	rlog "WARN Skipping BMC components upgrade."
+	RC=$((RC+1))
+	UPDATE_BMC_FW="no"
+	UPDATE_CEC_FW="no"
+	UPDATE_DPU_GOLDEN_IMAGE="no"
+	UPDATE_NIC_FW_GOLDEN_IMAGE="no"
+}
 
 wait_for_bmc_ip()
 {
@@ -49,6 +61,7 @@ wait_for_bmc_ip()
         sleep 10
         if [ $SECONDS -gt $BMC_IP_TIMEOUT ]; then
             if ! (ping -c 3 $BMC_IP > /dev/null 2>&1); then
+                rlog "ERR Failed to access BMC"
                 ilog "- ERROR: Failed to access $BMC_IP after $SECONDS sec."
                 RC=$((RC+1))
             fi
@@ -70,20 +83,24 @@ create_vlan()
 	SECONDS=0
 	while ! ip link show vlan4040 | grep -w '<BROADCAST,MULTICAST,UP,LOWER_UP>'; do
 		if [ $SECONDS -gt $BMC_IP_TIMEOUT ]; then
+			rlog "ERR Failed to create VLAN."
 			ilog "- ERROR: Failed to create VLAN interface after $SECONDS sec. All the BMC related operations will be skipped."
-			RC=$((RC+1))
+			skip_bmc
 			return
 		fi
 		ip link add link ${OOB_IF} name vlan4040 type vlan id 4040
-		ip addr add ${OOB_IP}/${OOB_NETPREFIX} brd + dev vlan4040
+		if ! (dhclient vlan4040); then
+			ip addr add ${OOB_IP}/${OOB_NETPREFIX} brd + dev vlan4040
+		fi
 		ip link set dev ${OOB_IF} up
 		ip link set dev vlan4040 up
 		sleep 1
 	done
 	while ! ping -c 3 $BMC_IP; do
 		if [ $SECONDS -gt $BMC_IP_TIMEOUT ]; then
-			ilog "- ERROR: Failed to access $BMC_IP after $SECONDS sec. All the BMC related operations will be skipped."
-			RC=$((RC+1))
+			rlog "ERR Failed to access BMC"
+			ilog "- ERROR: Failed to access $BMC_IP after $SECONDS sec."
+			skip_bmc
 			return
 		fi
 		sleep 1
@@ -103,15 +120,31 @@ prepare_sshpass_environment()
         fi
 }
 
+get_field_mode()
+{
+    mode=$(ipmitool raw 0x32 0x68 2> /dev/null | tr -d ' ')
+    return $mode
+}
+
+set_field_mode()
+{
+    hvalue=$1
+
+    ilog "Setting Field Mode to $hvalue"
+    ilog "$(ipmitool raw 0x32 0x67 ${hvalue} 2>&1)"
+}
+
 get_bmc_token()
 {
 	cmd=$(echo curl -sSk -H \"Content-Type: application/json\" -X POST https://${BMC_IP}/login -d $BMC_CREDENTIALS)
 	BMC_TOKEN=$(eval $cmd | jq -r ' .token')
-	if [ -z "$BMC_TOKEN" ]; then
-		ilog "- ERROR: Failed to get BMC token using command: $cmd"
+	if [[ -z "$BMC_TOKEN" || "$BMC_TOKEN" == "null" ]]; then
+		rlog "ERR Failed to get BMC token. Check BMC user/password"
+		ilog "- ERROR: Failed to get BMC token using command: $cmd. Check BMC user/password."
 		RC=$((RC+1))
-		return
+		return 1
 	fi
+	return 0
 }
 
 get_bmc_public_key()
@@ -209,6 +242,7 @@ update_bmc_fw()
 	ilog "Proceeding with the BMC firmware update."
 	uri="/redfish/v1/UpdateService"
 	curl -sSk -H "X-Auth-Token: $BMC_TOKEN" -H "Content-Type: application/octet-stream" -X POST -T ${image} https://${BMC_IP}${uri}
+	BMC_FIRMWARE_UPDATED="yes"
 
 	wait_bmc_task_complete
 	if [ "$BMC_REBOOT" != "yes" ]; then
@@ -273,6 +307,12 @@ bmc_reboot()
 	curl -sSk -H "X-Auth-Token: $BMC_TOKEN" -H "Content-Type: application/json" -X POST https://${BMC_IP}/redfish/v1/Managers/Bluefield_BMC/Actions/Manager.Reset -d '{"ResetType":"GracefulRestart"}'
 	sleep 10
 	wait_for_bmc_ip
+}
+
+bmc_reboot_from_dpu()
+{
+	ipmitool mc reset cold
+	sleep 10
 }
 
 update_dpu_golden_image()
@@ -341,13 +381,17 @@ bmc_components_update()
 	fi
 
 	if [[ "$UPDATE_BMC_FW" == "yes" || "$UPDATE_CEC_FW" == "yes" || "$UPDATE_DPU_GOLDEN_IMAGE" == "yes" || "$UPDATE_NIC_FW_GOLDEN_IMAGE" == "yes" ]]; then
+		ilog "INFO: Running BMC components update flow"
 		if [[ -z "$BMC_USER" || -z "$BMC_PASSWORD" ]]; then
 			ilog "BMC_USER and/or BMC_PASSWORD are not defined. Skipping BMC components upgrade."
-			UPDATE_BMC_FW="no"
-			UPDATE_CEC_FW="no"
-			UPDATE_DPU_GOLDEN_IMAGE="no"
-			UPDATE_NIC_FW_GOLDEN_IMAGE="no"
+			skip_bmc
+			return
 		else
+			if [ "$(get_field_mode)" == "01" ]; then
+				set_field_mode '00'
+				FIELD_MODE_SET=1
+				bmc_reboot_from_dpu
+			fi
 			create_vlan
 			# get_bmc_public_key
 			if [ "$BMC_LINK_UP" == "yes" ]; then
@@ -355,16 +399,32 @@ bmc_components_update()
 					ilog "BMC password has the default value. Changing to the temporary password."
 					BMC_PASSWORD="$TMP_BMC_PASSWORD"
 					BMC_CREDENTIALS="'{\"username\":\"$BMC_USER\", \"password\":\"${BMC_PASSWORD}\"}'"
-					curl -k -u $BMC_USER:$DEFAULT_BMC_PASSWORD  -H "Content-Type: application/json" -X PATCH https://${BMC_IP}/redfish/v1/AccountService/Accounts/root -d $BMC_CREDENTIALS
+					TMP_BMC_CREDENTIALS="'{\"Password\":\"${BMC_PASSWORD}\"}'"
+					cmd=$(echo curl -k -u $BMC_USER:$DEFAULT_BMC_PASSWORD  -H \"Content-Type: application/json\" -X PATCH https://${BMC_IP}/redfish/v1/AccountService/Accounts/$BMC_USER -d $TMP_BMC_CREDENTIALS)
+					output=$(eval $cmd)
+					status=$(echo $output | jq '."@Message.ExtendedInfo"[0].Message')
+					if [ "$status" != "\"The request completed successfully."\" ]; then
+						rlog "ERR Failed to change BMC $BMC_USER password."
+						ilog "Failed to change the password. Output: $output"
+						skip_bmc
+						return
+					fi
 					RESET_BMC_PASSWORD=1
+
 				fi
 			else
-				UPDATE_BMC_FW="no"
-				UPDATE_CEC_FW="no"
-				UPDATE_DPU_GOLDEN_IMAGE="no"
-				UPDATE_NIC_FW_GOLDEN_IMAGE="no"
+				skip_bmc
+				return
 			fi
 		fi
+
+		if ! get_bmc_token; then
+			skip_bmc
+			return
+		fi
+
+	else
+		return
 	fi
 
 	if function_exists bmc_custom_action1; then
@@ -390,7 +450,7 @@ bmc_components_update()
 		bmc_custom_action3
 	fi
 
-	if [[ "$UPDATE_BMC_FW" == "yes" && "$BMC_LINK_UP" == "yes" && "$BMC_REBOOT" == "yes" ]]; then
+	if [[ "$UPDATE_BMC_FW" == "yes" && "$BMC_LINK_UP" == "yes" && "$BMC_REBOOT" == "yes" && "$BMC_FIRMWARE_UPDATED" == "yes" ]]; then
 		bmc_reboot
 	fi
 
@@ -405,11 +465,28 @@ bmc_components_update()
 
 	if [ $RESET_BMC_PASSWORD -eq 1 ]; then
 		ilog "Reset BMC configuration to default"
-		curl -k -u $BMC_USER:"$BMC_PASSWORD" -H "Content-Type: application/json" -X POST https://${BMC_IP}/redfish/v1/Managers/Bluefield_BMC/Actions/Manager.ResetToDefaults -d '{"ResetToDefaultsType": "ResetAll"}'
+		output=$(curl -k -u $BMC_USER:"$BMC_PASSWORD" -H "Content-Type: application/json" -X POST https://${BMC_IP}/redfish/v1/Managers/Bluefield_BMC/Actions/Manager.ResetToDefaults -d '{"ResetToDefaultsType": "ResetAll"}')
+		status=$(echo $output | jq '."@Message.ExtendedInfo"[0].Message')
+		if [ "$status" != "\"The request completed successfully."\" ]; then
+			rlog "ERR Failed to reset BMC $BMC_USER password."
+			ilog "Failed to reset BMC $BMC_USER password. Output: $output"
+		fi
 	fi
 
 	if [[ "$UPDATE_NIC_FW_GOLDEN_IMAGE" == "yes" && "$BMC_LINK_UP" == "yes" ]]; then
-		update_nic_firmware_golden_image
+		if [ -z "${dpu_part_number}" ]; then
+			log "Cannot identify DPU Part Number. Skipping NIC firmware Golden Image update."
+		else
+			update_nic_firmware_golden_image
+		fi
+	fi
+
+	if [ $FIELD_MODE_SET -eq 1 ]; then
+		if [ "$(get_field_mode)" == "00" ]; then
+			set_field_mode '01'
+			FIELD_MODE_SET=0
+			bmc_reboot_from_dpu
+		fi
 	fi
 
 	if function_exists post_bmc_components_update; then

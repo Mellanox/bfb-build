@@ -41,21 +41,21 @@ fi
 
 DISTRO="centos"
 DISTRO_VERSION="7.6"
-DOCA_VERSION="2.6.0"
-BSP_VERSION="4.6.0-13035"
-MLNX_OFED_VERSION="24.01-0.3.3.0"
-BF2_BMC_VERSION="24.01-5"
-BF3_BMC_VERSION="24.01-5"
+DOCA_VERSION="2.7.0"
+BSP_VERSION="4.7.0-13127"
+MLNX_OFED_VERSION="24.01-0.6.6.0"
+BF2_BMC_VERSION="24.04-5"
+BF3_BMC_VERSION="24.04-5"
 BF2_CEC_VERSION="04.0f"
-BF3_CEC_VERSION="00.02.0152.0000"
-BF3_NIC_FW_VERSION="32_40_1000"
+BF3_CEC_VERSION="00.02.0182.0000"
+BF3_NIC_FW_VERSION="32_41_1000"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-""}
 INCLUDE_BF2BMC=${INCLUDE_BF2BMC:-"yes"}
 INCLUDE_BF3BMC=${INCLUDE_BF3BMC:-"yes"}
+BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
 
 WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
-BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
 
 mkdir -p $WDIR/bootimages
 wget -P $WDIR/bootimages -r --no-verbose --no-directories -l1 --no-parent -A 'mlxbf-bootimages*.aarch64.rpm' ${BASE_URL}/bluefield/${BSP_VERSION}/bootimages/${IMAGE_TYPE}/
@@ -97,6 +97,8 @@ docker build -t ${docker_image} \
 	--build-arg BASE_URL=$BASE_URL \
 	--build-arg DOCA_VERSION=$DOCA_VERSION \
 	--build-arg BSP_VERSION=$BSP_VERSION \
+	--build-arg DISTRO=$DISTRO \
+	--build-arg DISTRO_VERSION=$DISTRO_VERSION \
 	-f Dockerfile .
 
 docker run -t --rm --privileged -e container=docker \

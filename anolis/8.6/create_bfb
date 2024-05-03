@@ -103,9 +103,20 @@ cd ${WDIR}
 
 initramfs=$WDIR/dump-initramfs-v0
 
+for mod in mlxbf-bootctl sdhci-of-dwcmshc mlxbf_tmfifo dw_mmc_bluefield mmc_block virtio_console mlx5_core mlx5_ib mlxfw ib_umad nvme gpio-mlxbf2 gpio-mlxbf3 mlxbf-gige pinctrl-mlxbf3 8021q vitesse
+do
+    if (modinfo -k $kernel $mod 2>/dev/null | grep "filename:" | grep -q builtin); then
+        continue
+    fi
+    if ! (modinfo -k $kernel $mod 2>/dev/null); then
+        continue
+    fi
+    ADD_DRIVERS="$ADD_DRIVERS $mod"
+done
+
 dracut --no-hostonly -m "bash network base systemd systemd-initrd dracut-systemd shutdown udev-rules" \
 	--install "/usr/lib/udev/rules.d/91-tmfifo_net.rules /lib/udev/rules.d/92-oob_net.rules" \
-	--add-drivers "mlxbf-bootctl sdhci-of-dwcmshc mlxbf-tmfifo dw_mmc-bluefield mmc_block virtio_console mlx5_core mlx5_ib mlxfw ib_umad nvme gpio-mlxbf2 gpio-mlxbf3 mlxbf-gige pinctrl-mlxbf3 8021q" \
+	--add-drivers "${ADD_DRIVERS}" \
 	--filesystems "xfs vfat" --gzip $initramfs ${kernel}
 
 rm -f /etc/udev/rules.d/91-tmfifo_net.rules /etc/udev/rules.d/92-oob_net.rules
@@ -215,7 +226,7 @@ copy_rpm()
 }
 
 # Copy the content of RPM packages
-for package in mlxbf-bfscripts kmod util-linux dosfstools e2fsprogs pciutils usbutils chkconfig mft mft-oem kernel-mft tar xfsprogs coreutils-single parted which curl openssl gawk passwd net-tools wget nvme-cli mmc-utils iputils sshpass openssh-clients findutils $ADDON_RPMS
+for package in mlxbf-bfscripts kmod util-linux dosfstools e2fsprogs pciutils usbutils chkconfig mft mft-oem kernel-mft tar xfsprogs coreutils-single parted which curl openssl gawk passwd net-tools wget nvme-cli mmc-utils iputils sshpass openssh-clients findutils mokutil $ADDON_RPMS
 do
     copy_rpm $package || true
 done
@@ -243,22 +254,24 @@ mkdir -p mnt
 
 if [ -d ${SDIR}/BF3BMC/ ]; then
 	/bin/rm -rf BF3BMC
-	if (grep -q prod /etc/mlnx-release); then
-		cp -a ${SDIR}/BF3BMC/pk ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
-	elif (grep -q dev /etc/mlnx-release); then
-		cp -a ${SDIR}/BF3BMC/dk ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
+	if (grep -q prod /etc/mlnx-release) && [ -d ${SDIR}/BF3BMC/pk ]; then
+		cp -a ${SDIR}/BF3BMC/pk ./BF3BMC
+	elif (grep -q dev /etc/mlnx-release) && [ -d ${SDIR}/BF3BMC/dk ]; then
+		cp -a ${SDIR}/BF3BMC/dk ./BF3BMC
+	elif [ -d ${SDIR}/BF3BMC/qp ]; then
+		cp -a ${SDIR}/BF3BMC/qp ./BF3BMC
 	else
-		cp -a ${SDIR}/BF3BMC/qp ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
+		echo "WARNING: BF3 BMC Software was not found"
 	fi
-	[ -d ${SDIR}/BF3BMC/golden_images ] && cp -a ${SDIR}/BF3BMC/golden_images ./BF3BMC
+	[ -d ${SDIR}/BF3BMC/golden_images ] && cp -a ${SDIR}/BF3BMC/golden_images ./BF3BMC || echo "WARNING: BF3 Golden Images for BMC were not found"
 fi
 
 if [ -d ${SDIR}/BF2BMC/ ]; then
 	/bin/rm -rf BF2BMC
 	if (grep -q prod /etc/mlnx-release); then
-		cp -a ${SDIR}/BF2BMC/pk ./BF2BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
+		[ -d ${SDIR}/BF2BMC/pk ] && cp -a ${SDIR}/BF2BMC/pk ./BF2BMC || echo "WARNING: BF2 BMC Software was not found"
 	else
-		cp -a ${SDIR}/BF2BMC/qp/ ./BF2BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
+		[ -d ${SDIR}/BF2BMC/qp ] && cp -a ${SDIR}/BF2BMC/qp ./BF2BMC || echo "WARNING: BF2 BMC Software was not found"
 	fi
 fi
 
@@ -280,7 +293,7 @@ echo "=================================" | tee /dev/kmsg
 echo "Installing Anolis Linux. Please wait..." | tee /dev/kmsg
 echo "=================================" | tee /dev/kmsg
 
-modprobe -a sdhci-of-dwcmshc mlxbf_tmfifo mlxbf_gige pinctrl-mlxbf3 8021q dw_mmc-bluefield mmc_block virtio_console mlxbf-bootctl 2>&1 | tee /dev/kmsg
+modprobe -a sdhci-of-dwcmshc mlxbf_tmfifo mlxbf_gige pinctrl-mlxbf3 8021q vitesse dw_mmc-bluefield mmc_block virtio_console mlxbf-bootctl 2>&1 | tee /dev/kmsg
 
 sleep 5
 

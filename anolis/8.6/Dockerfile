@@ -6,6 +6,7 @@ ARG DOCA_VERSION
 ARG BSP_VERSION
 ARG DISTRO
 ARG DISTRO_VERSION
+ARG DISTRO_KERNEL
 ARG MLNX_FW_UPDATER=mlnx-fw-updater-signed
 WORKDIR /root/workspace
 ADD install.sh .
@@ -32,13 +33,12 @@ enabled=1 \n\
 gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-ANOLIS \n\
 gpgcheck=1" > /etc/yum.repos.d/AnolisOS-Experimental.repo
 
-RUN echo -e "[kubernetes] \n\
+RUN echo -e "[kubernetes-1.29] \n\
 name=Kubernetes \n\
-baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-aarch64 \n\
+baseurl=https://pkgs.k8s.io/core:/stable:/v1.29/rpm/ \n\
 enabled=1 \n\
 gpgcheck=1 \n\
-gpgkey=https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg \n\
-exclude=kubelet kubeadm kubectl kubernetes-cni" > /etc/yum.repos.d/kubernetes.repo
+gpgkey=https://pkgs.k8s.io/core:/stable:/v1.29/rpm/repodata/repomd.xml.key" > /etc/yum.repos.d/kubernetes.repo
 
 RUN dnf install -y --disableexcludes=kubernetes \
 	rpm-build rpm-sign automake meson cmake gcc-c++ \
@@ -56,21 +56,22 @@ RUN dnf install -y --disableexcludes=kubernetes \
 	grubby grub2-efi-aa64 shim-aa64 efibootmgr re2c watchdog libmd libmd-devel libbsd libbsd-devel
 
 RUN dnf install -y --disableexcludes=kubernetes \
-    kubelet-1.25.3 kubernetes-cni-1.1.1 cri-tools
+    kubelet-1.29.3 kubernetes-cni-1.3.0 cri-tools
 RUN dnf install -y rpm-build rpm-sign automake meson cmake gcc-c++
 
 RUN echo -e "[doca] \n\
 name=Nvidia DOCA repository \n\
-baseurl=$BASE_URL/doca/$DOCA_VERSION/$DISTRO$DISTRO_VERSION/aarch64/ \n\
+baseurl=$BASE_URL/doca/$DOCA_VERSION/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/arm64-dpu/ \n\
 gpgcheck=0 \n\
 enabled=1" > /etc/yum.repos.d/doca.repo
 
 RUN dnf install -y kernel-$KVER kernel-modules-$KVER kernel-devel-$KVER kernel-core-$KVER kernel-modules-extra-$KVER
 RUN dnf install -y openssl-1.1.1q openssl-devel-1.1.1q openssl-libs-1.1.1q openssl-perl-1.1.1q openssl-static-1.1.1q
 
-RUN dnf install --nogpgcheck -y mstflint-4.16.1
+RUN dnf install --nogpgcheck -y mstflint
 RUN dnf install --nogpgcheck -y $MLNX_FW_UPDATER
-RUN dnf install --nogpgcheck -y doca-runtime doca-tools doca-sdk
+RUN bash -c "rpm -e $(rpm -qa | grep openvswitch)" || true
+RUN dnf install --nogpgcheck -y doca-runtime doca-devel
 RUN dnf install --nogpgcheck -y dpacc dpacc-extract dpa-compiler
 
 RUN dnf install --nogpgcheck -y mmc-utils || dnf install --nogpgcheck -y $BASE_URL/bluefield/$BSP_VERSION/extras/mmc-utils/mmc-utils-0.1+git.20230209-1.1.aarch64.rpm || true

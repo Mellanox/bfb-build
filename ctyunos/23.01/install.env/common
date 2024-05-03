@@ -1,6 +1,7 @@
 rshimlog=$(which bfrshlog 2> /dev/null)
 RC=0
 err_msg=""
+export LC_ALL=C
 
 logfile=${distro}.installation.log
 LOG=/tmp/$logfile
@@ -8,19 +9,17 @@ LOG=/tmp/$logfile
 fspath=$(readlink -f "$(dirname $0)")
 
 cx_pcidev=$(lspci -nD 2> /dev/null | grep 15b3:a2d[26c] | awk '{print $1}' | head -1)
+cx_dev_id=$(lspci -nD -s ${cx_pcidev} 2> /dev/null | awk -F ':' '{print strtonum("0x" $NF)}')
 pciids=$(lspci -nD 2> /dev/null | grep 15b3:a2d[26c] | awk '{print $1}')
-dpu_part_number=$(flint -d $cx_pcidev q full | grep "Part Number:" | awk '{print $NF}')
+dpu_part_number=$(mstflint -d $cx_pcidev q full | grep "Part Number:" | awk '{print $NF}')
 PSID=$(mstflint -d $cx_pcidev q | grep PSID | awk '{print $NF}')
 
-log()
+rlog()
 {
-	msg="[$(date +%H:%M:%S)] $*"
-	echo "$msg" > /dev/ttyAMA0
-	echo "$msg" > /dev/hvc0
+	msg=$(echo "$*" | sed 's/INFO://;s/ERROR:/ERR/;s/WARNING:/WARN/')
 	if [ -n "$rshimlog" ]; then
-		$rshimlog "$*"
+		$rshimlog "$msg"
 	fi
-	echo "$msg" >> $LOG
 }
 
 ilog()
@@ -31,6 +30,12 @@ ilog()
 	echo "$msg" > /dev/hvc0
 }
 
+log()
+{
+	ilog "$*"
+	rlog "$*"
+}
+
 bind_partitions()
 {
 	mount --bind /proc /mnt/proc
@@ -39,28 +44,47 @@ bind_partitions()
 	mount -t efivarfs none /mnt/sys/firmware/efi/efivars
 }
 
+unmount_partition()
+{
+	if (grep -wq $1 /proc/mounts); then
+		ilog "Unmounting $1"
+		ilog "$(umount $1)"
+		sync
+	fi
+}
+
 unmount_partitions()
 {
-	umount /mnt/sys/fs/fuse/connections > /dev/null 2>&1 || true
-	umount /mnt/sys/firmware/efi/efivars 2>&1 || true
-	umount /mnt/sys > /dev/null 2>&1
-	umount /mnt/dev > /dev/null 2>&1
-	umount /mnt/proc > /dev/null 2>&1
-	umount /mnt/boot/efi > /dev/null 2>&1
-	if [[ "${PART_SCHEME}" == "SCHEME_A" ]]; then
-		umount /mnt/boot
-	fi
-	if [[ "${PART_SCHEME}" == "SCHEME_B" ]]; then
-		umount /mnt/var
-		umount /mnt/home
-	fi
-	umount /mnt > /dev/null 2>&1
-	while grep -q mnt /proc/mounts
+	ilog "Unmount partitions"
+	for part in \
+		/mnt/boot/efi \
+		/mnt/boot \
+		/mnt/sys/fs/fuse/connections \
+		/mnt/sys/firmware/efi/efivars \
+		/mnt/sys \
+		/mnt/dev \
+		/mnt/proc \
+		/mnt/var \
+		/mnt/home \
+		/mnt
 	do
-		for mp in $(grep mnt /proc/mounts | awk '{print $2}')
+		unmount_partition $part
+	done
+
+	sync
+
+	UNMOUNT_RETRIES=${UNMOUNT_RETRIES:-"3"}
+	unmount_retry=1
+	while grep -qw '/mnt' /proc/mounts
+	do
+		if [ $unmount_retry -gt $UNMOUNT_RETRIES ]; then
+			break
+		fi
+		for mp in $(grep -w '/mnt' /proc/mounts | awk '{print $2}' | sort -r)
 		do
-				umount $mp > /dev/null 2>&1
+			unmount_partition $mp
 		done
+		unmount_retry=$((unmount_retry+1))
 	done
 }
 
@@ -121,6 +145,11 @@ cat >> $LOG << EOF
 $(dmesg -x)
 EOF
 	sync
+
+	if [ "$UPDATE_DPU_OS" != "yes" ]; then
+		return
+	fi
+
 	if [ ! -d /mnt/root ]; then
 		mount -t $ROOTFS $ROOT_PARTITION /mnt
 	fi
@@ -371,6 +400,16 @@ interface "oob_net0" {
   send vendor-class-identifier "$DHCP_CLASS_ID_OOB";
 }
 EOF
+
+if [ -e /mnt/etc/dhcpcd.conf ]; then
+	if ! (grep -q "^noipv4ll" /mnt/etc/dhcpcd.conf); then
+		cat >> /mnt/etc/dhcpcd.conf << EOF
+
+# Disable IPv4 Link-Local
+noipv4ll
+EOF
+	fi
+fi
 }
 
 update_default_bfb()
@@ -390,6 +429,10 @@ configure_default_grub()
 	# Then, set boot arguments: Read current 'console' and 'earlycon'
 	# parameters, and append the root filesystem parameters.
 	bootarg="$(cat /proc/cmdline | sed 's/initrd=initramfs//;s/console=.*//')"
+	redfish_osarg="$(bfcfg --dump-osarg 2> /dev/null)"
+	if [ -n "$redfish_osarg" ]; then
+		bootarg="$bootarg $redfish_osarg"
+	fi
 	sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=auto $bootarg console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 modprobe.blacklist=mlx5_core,mlx5_ib selinux=0 net.ifnames=0 biosdevname=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
 	if (hexdump -C /sys/firmware/acpi/tables/SSDT* | grep -q MLNXBF33); then
 		# BlueField-3
@@ -484,6 +527,10 @@ os_installation_flow()
 		enable_sfc_hbn
 	fi
 
+	if [ "X$ENABLE_BR_HBN" == "Xyes" ]; then
+		enable_sfc_hbn
+	fi
+
 	cleanup_target_os
 
 	update_efi_bootmgr
@@ -527,7 +574,6 @@ global_installation_flow()
 	fi
 
 	if function_exists bmc_components_update; then
-		ilog "INFO: Running BMC components update flow"
 		bmc_components_update
 	fi
 
@@ -544,6 +590,19 @@ global_installation_flow()
 
 	log "INFO: Installation finished"
 }
+
+if [ -z "${dpu_part_number}" ]; then
+	# Secure boot
+	ilog "Secure Boot is enabled"
+	mst start > /dev/null 2>&1
+	cx_pcidev=$(/bin/ls -1 /dev/mst/mt*pciconf0 2> /dev/null)
+	if [ -z "${cx_pcidev}" ]; then
+		ilog "ERROR: Np MST device found"
+	else
+		dpu_part_number=$(flint -d $cx_pcidev q full | grep "Part Number:" | awk '{print $NF}')
+		PSID=$(flint -d $cx_pcidev q | grep PSID | awk '{print $NF}')
+	fi
+fi
 
 #
 # Set the Hardware Clock from the System Clock
@@ -637,7 +696,7 @@ fi
 
 UPDATE_ATF_UEFI=${UPDATE_ATF_UEFI:-"yes"}
 UPDATE_DPU_OS=${UPDATE_DPU_OS:-"yes"}
-WITH_NIC_FW_UPDATE=${WITH_NIC_FW_UPDATE:-"no"}
+WITH_NIC_FW_UPDATE=${WITH_NIC_FW_UPDATE:-"yes"}
 NIC_FW_UPDATE_PASSED=0
 DHCP_CLASS_ID=${PXE_DHCP_CLASS_ID:-""}
 DHCP_CLASS_ID_OOB=${DHCP_CLASS_ID_OOB:-"NVIDIA/BF/OOB"}

@@ -27,7 +27,8 @@ DOCA_VERSION=@DOCA_VERSION@
 MLNX_OFED_VERSION=@MLNX_OFED_VERSION@
 BSP_VERSION=@BSP_VERSION@
 BASE_URL=@BASE_URL@
-CTYUNOS_VERSION=@CTYUNOS_VERSION@
+DISTRO_VERSION=@DISTRO_VERSION@
+DISTRO_KERNEL=@DISTRO_KERNEL@
 WDIR=${WDIR:-/tmp}
 
 # Execute command w/ echo and exit if it fail
@@ -40,7 +41,7 @@ ex()
 	fi
 }
 
-# ex yum-config-manager --nogpgcheck --add-repo https://ctyunos.ctyun.cn/ctyun/ctyunos/ctyunos-2/${CTYUNOS_VERSION}/everything/aarch64/
+# ex yum-config-manager --nogpgcheck --add-repo https://ctyunos.ctyun.cn/ctyun/ctyunos/ctyunos-2/${DISTRO_VERSION}/everything/aarch64/
 
 kernel=`/bin/ls -1tr /lib/modules | tail -1`
 
@@ -52,7 +53,7 @@ mkdir -p $WDIR
 cd $WDIR
 
 # Build and install MLNX_OFED drivers
-ex wget --quiet ${BASE_URL}/bluefield/${BSP_VERSION}/extras/mlnx_ofed/${MLNX_OFED_VERSION}/MLNX_OFED_SRC-${MLNX_OFED_VERSION}.tgz
+ex wget --quiet ${BASE_URL}/mlnx_ofed/${MLNX_OFED_VERSION}/MLNX_OFED_SRC-${MLNX_OFED_VERSION}.tgz
 ex tar xzf MLNX_OFED_SRC-${MLNX_OFED_VERSION}.tgz
 ex sed -i.orig -e "s/release.ctl2/release/" MLNX_OFED_SRC-${MLNX_OFED_VERSION}/install.pl
 echo '%dist %{nil}' > /root/.rpmmacros
@@ -77,7 +78,7 @@ ex rpm -ivh --force ${WDIR}/${BSP_VERSION}/extras/RPMS/aarch64/*.rpm
 
 ex yum-config-manager --nogpgcheck --add-repo ${BASE_URL}/doca/${DOCA_VERSION}/openeuler20.03/aarch64/
 
-ex yum install --nogpgcheck -y doca-runtime-user doca-sdk-user doca-tools
+ex yum install --nogpgcheck -y doca-runtime-user doca-devel-user
 ex dnf install --nogpgcheck -y mstflint
 ex dnf install --nogpgcheck -y mlnx-snap
 
@@ -87,7 +88,7 @@ systemctl enable openvswitch
 
 /usr/sbin/update-pciids || true
 
-sed -i -e "s/openeuler_20.03sp1/CTyunOS_${CTYUNOS_VERSION}/" /etc/mlnx-release
+sed -i -e "s/openeuler_20.03sp1/CTyunOS_${DISTRO_VERSION}/" /etc/mlnx-release
 sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/g;s/prod/@IMAGE_TYPE@@CUSTOM_VERSION@/g" /etc/mlnx-release
 
 ex /root/workspace/create_bfb -k $kernel

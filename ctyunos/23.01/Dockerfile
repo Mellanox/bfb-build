@@ -1,10 +1,20 @@
 from --platform=linux/arm64 ctyunos3/ctyunos3:23.01
 ADD qemu-aarch64-static /usr/bin/
 
+ARG BASE_URL
+ARG DOCA_VERSION
+ARG BSP_VERSION
+ARG DISTRO
+ARG DISTRO_VERSION
+ARG DISTRO_KERNEL
+ARG MLNX_FW_UPDATER=mlnx-fw-updater-signed
 WORKDIR /root/workspace
 ADD install.sh .
+ADD install.env ./install.env
 ADD create_bfb .
 ADD bootimages bootimages/
+ADD BF2BMC ./BF2BMC
+ADD BF3BMC ./BF3BMC
 ADD build_ctyunos_bfb .
 
 ENV RUN_FW_UPDATER=no
@@ -31,8 +41,8 @@ RUN dnf install -y --disableexcludes=kubernetes \
 	cryptsetup rasdaemon watchdog kexec-tools jq libnghttp2 wget sudo uriparser \
 	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libmd-1.0.4-2.el8.aarch64.rpm \
 	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libmd-devel-1.0.4-2.el8.aarch64.rpm \
-	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libbsd-devel-0.11.7-2.el8.aarch64.rpm \
-	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libbsd-0.11.7-2.el8.aarch64.rpm \
+	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libbsd-devel-0.12.2-1.el8.aarch64.rpm \
+	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libbsd-0.12.2-1.el8.aarch64.rpm \
 	https://download.fedoraproject.org/pub/epel/7/aarch64/Packages/l/lcov-1.13-1.el7.noarch.rpm \
 	https://download.fedoraproject.org/pub/epel/7/aarch64/Packages/r/re2c-0.14.3-2.el7.aarch64.rpm \
 	https://vault.centos.org/centos/8/BaseOS/aarch64/os/Packages/watchdog-5.15-2.el8.aarch64.rpm \

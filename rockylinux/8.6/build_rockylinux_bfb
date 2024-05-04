@@ -84,7 +84,7 @@ ex rpm -ivh --force ${WDIR}/${BSP_VERSION}/extras/RPMS/aarch64/*.rpm
 
 ex yum-config-manager --nogpgcheck --add-repo ${BASE_URL}/doca/${DOCA_VERSION}/rockylinux8.6/aarch64/
 
-ex yum install --nogpgcheck -y doca-runtime-user doca-sdk-user doca-tools
+ex yum install --nogpgcheck -y doca-runtime-user doca-devel
 
 ex rpm -e --nodeps $(rpm -qa mlxbf-bootimages*)
 ex rpm -ihv --force /root/workspace/bootimages/mlxbf-bootimages*.aarch64.rpm

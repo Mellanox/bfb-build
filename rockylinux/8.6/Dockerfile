@@ -4,6 +4,9 @@ ADD qemu-aarch64-static /usr/bin/
 ARG BASE_URL
 ARG DOCA_VERSION
 ARG BSP_VERSION
+ARG DISTRO
+ARG DISTRO_VERSION
+ARG DISTRO_KERNEL
 ARG MLNX_FW_UPDATER=mlnx-fw-updater-signed
 WORKDIR /root/workspace
 ADD install.sh .
@@ -47,7 +50,7 @@ RUN dnf install -y kernel-$KVER \
 	kernel-modules-extra-$KVER
 
 RUN dnf install --nogpgcheck -y $MLNX_FW_UPDATER
-RUN dnf install --nogpgcheck -y doca-runtime doca-tools doca-sdk
+RUN dnf install --nogpgcheck -y doca-runtime doca-devel
 RUN dnf install --nogpgcheck -y dpacc dpacc-extract dpa-compiler
 
 RUN dnf install --nogpgcheck -y mmc-utils || dnf install --nogpgcheck -y $BASE_URL/bluefield/$BSP_VERSION/extras/mmc-utils/mmc-utils-0.1+git.20230209-1.1.aarch64.rpm || true

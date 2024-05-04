@@ -400,20 +400,41 @@ enable_sfc_hbn()
 	ilog "Enable SFC HBN"
 	ARG_PORT0=""
 	ARG_PORT1=""
+	# initial sfc parameters
 	if ! [ -z "${NUM_VFs_PHYS_PORT0}" ]; then
 		ARG_PORT0="--ecpf0 "${NUM_VFs_PHYS_PORT0}
 	fi
 	if ! [ -z "${NUM_VFs_PHYS_PORT1}" ]; then
 		ARG_PORT1="--ecpf1 "${NUM_VFs_PHYS_PORT1}
 	fi
+	# configurable sf/vf mapping
 	HBN_UPLINKS=${HBN_UPLINKS:-"p0,p1"}
 	HBN_REPS=${HBN_REPS:-"pf0hpf,pf1hpf,pf0vf0-pf0vf13"}
 	HBN_DPU_SFS=${HBN_DPU_SFS:-"pf0dpu1,pf0dpu3"}
+	# generic steering bridge mapping
+	if ! [ -z "${BR_HBN_UPLINKS-x}" ]; then
+		BR_HBN_UPLINKS=${BR_HBN_UPLINKS:-"$HBN_UPLINKS"}
+	fi
+	if ! [ -z "${BR_HBN_REPS-x}" ]; then
+		BR_HBN_REPS=${BR_HBN_REPS:-"$HBN_REPS"}
+	fi
+	if ! [ -z "${BR_HBN_SFS-x}" ]; then
+		BR_HBN_SFS=${BR_HBN_SFS:-"$HBN_DPU_SFS"}
+	fi
+	BR_SFC_UPLINKS=${BR_SFC_UPLINKS:-""}
+	BR_SFC_REPS=${BR_SFC_REPS:-""}
+	BR_SFC_SFS=${BR_SFC_SFS:-""}
+	BR_HBN_SFC_PATCH_PORTS=${BR_HBN_SFC_PATCH_PORTS:-""}
+	LINK_PROPAGATION=${LINK_PROPAGATION:-""}
+	ENABLE_BR_SFC=${ENABLE_BR_SFC:-""}
+	ENABLE_BR_SFC_DEFAULT_FLOWS=${ENABLE_BR_SFC_DEFAULT_FLOWS:-""}
+
+        # configurable sf/vf mapping
 	HUGEPAGE_SIZE=${HUGEPAGE_SIZE:-2048}
 	HUGEPAGE_COUNT=${HUGEPAGE_COUNT:-3072}
 	CLOUD_OPTION=${CLOUD_OPTION:-""}
 	log "INFO: Installing SFC HBN environment"
-	ilog "$(HBN_UPLINKS=${HBN_UPLINKS} HBN_REPS=${HBN_REPS} HBN_DPU_SFS=${HBN_DPU_SFS} HUGEPAGE_SIZE=${HUGEPAGE_SIZE} HUGEPAGE_COUNT=${HUGEPAGE_COUNT} CLOUD_OPTION=${CLOUD_OPTION} chroot /mnt /opt/mellanox/sfc-hbn/install.sh ${ARG_PORT0} ${ARG_PORT1} 2>&1)"
+	ilog "$(BR_HBN_UPLINKS=${BR_HBN_UPLINKS} BR_HBN_REPS=${BR_HBN_REPS} BR_HBN_SFS=${BR_HBN_SFS} BR_SFC_UPLINKS=${BR_SFC_UPLINKS} BR_SFC_REPS=${BR_SFC_REPS} BR_SFC_SFS=${BR_SFC_SFS} BR_HBN_SFC_PATCH_PORTS=${BR_HBN_SFC_PATCH_PORTS} LINK_PROPAGATION=${LINK_PROPAGATION} ENABLE_BR_SFC=${ENABLE_BR_SFC} ENABLE_BR_SFC_DEFAULT_FLOWS=${ENABLE_BR_SFC_DEFAULT_FLOWS} HUGEPAGE_SIZE=${HUGEPAGE_SIZE} HUGEPAGE_COUNT=${HUGEPAGE_COUNT} CLOUD_OPTION=${CLOUD_OPTION} chroot /mnt /opt/mellanox/sfc-hbn/install.sh ${ARG_PORT0} ${ARG_PORT1} 2>&1)"
 	NIC_FW_RESET_REQUIRED=1
 }
 
@@ -423,18 +444,10 @@ create_initramfs()
 	if [ ! -d /mnt/lib/modules/$kver ]; then
 		kver=$(/bin/ls -1 /mnt/lib/modules/ | tail -1)
 	fi
-	cat >> /mnt/etc/initramfs-tools/modules << EOF
-dw_mmc-bluefield
-dw_mmc
-dw_mmc-pltfm
-sdhci-of-dwcmshc
-sdhci_pltfm
-sdhci
-mlxbf-tmfifo
-nvme
-EOF
 
-	chroot /mnt update-initramfs -k ${kver} -u
+	ilog "Updating $distro initramfs"
+	initrd=$(cd /mnt/boot; /bin/ls -1 initrd.img-* | tail -1 | sed -e "s/.old-dkms//")
+	ilog "$(chroot /mnt dracut --force --add-drivers "mlxbf-bootctl sdhci-of-dwcmshc mlxbf-tmfifo dw_mmc-bluefield mlx5_core mlx5_ib mlxfw ib_umad nvme sbsa_gwdt gpio-mlxbf2 gpio-mlxbf3 mlxbf-gige pinctrl-mlxbf3 8021q" --gzip /boot/$initrd ${kver} 2>&1)"
 }
 
 configure_grub()

@@ -121,17 +121,30 @@ ex()
 	fi
 }
 
-/usr/sbin/update-initramfs -u -k $kernel
-
 ex mkdir -p ${WDIR}
 ex cd ${WDIR}
 ex rm -rf initramfs
 
 initramfs=/boot/initrd.img-$kernel
 initramfs=$(realpath $initramfs)
-# ex mkinitramfs -o $WDIR/dump-initramfs-v0 $kernel
-cp $initramfs $WDIR/dump-initramfs-v0
 initramfs=$WDIR/dump-initramfs-v0
+
+ADD_DRIVERS=""
+for mod in mlxbf-bootctl sdhci-of-dwcmshc mlxbf-tmfifo dw_mmc-bluefield mlx5_core mlx5_ib mlxfw ib_umad nvme gpio-mlxbf2 gpio-mlxbf3 mlxbf-gige pinctrl-mlxbf3 8021q
+do
+	if (modinfo -k $kernel $mod 2>/dev/null | grep "filename:" | grep -q builtin); then
+		continue
+	fi
+	if ! (modinfo -k $kernel $mod 2>/dev/null); then
+		continue
+	fi
+	ADD_DRIVERS="$ADD_DRIVERS $mod"
+done
+
+dracut --no-hostonly -m "bash network base systemd systemd-initrd systemd-networkd dracut-systemd shutdown udev-rules" \
+    --install "/etc/udev/rules.d/91-tmfifo_net.rules /etc/udev/rules.d/92-oob_net.rules" \
+    --add-drivers "${ADD_DRIVERS}" \
+    --gzip $initramfs ${kernel}
 
 case "$(file --brief --mime-type "$initramfs")" in
 	"application/x-lzma")
@@ -150,9 +163,9 @@ mkdir -p ${WDIR}/initramfs
 cd initramfs
 $cat_initrd "$initramfs" | sudo cpio -i
 
-copy_bin()
+copy_file()
 {
-	if [ -e $1 ]; then
+	if [[ -e $1 || -h $1 ]]; then
 		bin=$1
 	else
 		bin=$(which $1 2> /dev/null)
@@ -216,43 +229,60 @@ copy_module()
 }
 
 (cd usr/bin; sudo ln -s xz xzcat)
+cp $(readlink -f /usr/bin/which) ./usr/bin/which
 
-for tool in $(dpkg -L mlxbf-scripts | grep bin/) \
-		$(dpkg -L dosfstools | grep -v share) \
-		$(dpkg -L e2fsprogs | grep -v share) \
-		$(dpkg -L fdisk | grep -v share) \
-		$(dpkg -L kmod | grep -v share) \
-		$(dpkg -L pciutils | grep -v share) \
-		$(dpkg -L usbutils | grep -v share) \
-		$(dpkg -L mft) \
-		$(dpkg -L mft-oem) \
-		$(dpkg -L kernel-mft-modules) \
-		$(dpkg -L tar | grep -v share) \
-		xz efibootmgr bash getopt hexdump mstflint lspci perl \
+for tool in xz efibootmgr bash getopt hexdump mstflint lspci \
 		lsblk watchdog shutdown systemctl strings aarch64-linux-gnu-strings \
-		mlxbf-bootctl id dirname curl openssl parted jq $ADDON_TOOLS
+		mlxbf-bootctl id dirname curl openssl parted jq mlnx_bf_configure $ADDON_TOOLS
 do
 	if [ -d $tool ]; then
 		continue
 	fi
 	# Remove tools coming with busybox
 	/bin/rm -f .${tool}
-	copy_bin $tool
+	copy_file $tool
 done
 
-for deb in coreutils nvme-cli mmc-utils iputils-ping uuid-runtime sshpass openssh-client util-linux $ADDON_DEBS
+libperl=$(dpkg -S /usr/lib/aarch64-linux-gnu/perl | cut -d ':' -f 1 | tr -d ',')
+perl_modules=$(dpkg -S /usr/share/perl | cut -d ':' -f 1 | tr -d ',')
+python3=$(dpkg -S /usr/bin/pdb3.* | head -1 | cut -d ':' -f 1 | tr -d ',')
+libpython3_minimal=$(dpkg -S /usr/lib/python3*/os.py | head -1 | cut -d ':' -f 1 | tr -d ',')
+libpython3=$(dpkg -S /usr/lib/aarch64-linux-gnu/libpython3.*.so.1 | head -1 | cut -d ':' -f 1 | tr -d ',')
+python3_distutils=$(dpkg -S /usr/lib/python3.*/distutils | head -1 | cut -d ':' -f 1 | tr -d ',')
+python3_lib2to3=$(dpkg -S /usr/lib/python3.*/lib2to3 | head -1 | cut -d ':' -f 1 | tr -d ',')
+
+for deb in mlxbf-scripts mft mft-oem dosfstools e2fsprogs fdisk kmod pciutils \
+		   usbutils tar coreutils nvme-cli mmc-utils iputils-ping uuid-runtime \
+		   sshpass openssh-client util-linux ipmitool procps debianutils \
+		   iproute2 findutils perl-base $libperl $perl_modules \
+		   $libpython3_minimal $python3_distutils $python3_lib2to3 $python3 \
+		   $libpython3 bsdutils libexpat1 wget $ADDON_DEBS
 do
-	for tool in $(dpkg -L $deb | grep -v share)
+	for pfile in $(dpkg -L $deb)
 	do
-		if [ -d $tool ]; then
+		case "$pfile" in
+			*man*|*doc*)
+				continue
+				;;
+			*share*)
+				case "$deb" in
+					perl*|mft*)
+						;;
+					*)
+						continue
+						;;
+				esac
+				;;
+		esac
+		if [[ -d $pfile && ! -h $pfile ]]; then
 			continue
 		fi
-		/bin/rm -f .${tool}
-		copy_bin $tool
+		/bin/rm -f .${pfile}
+		copy_file $pfile
 	done
 done
 
-for mod in mlxbf_tmfifo dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block sdhci sdhci-of-dwcmshc nvme-rdma nvme-tcp nvme mlx5_ib mlxfw ib_umad ib_ipoib ib_iser mst_pci mst_pciconf $ADDON_KERNEL_MODULES
+for mod in mlxbf_tmfifo dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block sdhci sdhci-of-dwcmshc nvme-rdma nvme-tcp nvme mlx5_ib mlxfw ib_umad ib_ipoib ib_iser mst_pci mst_pciconf bf3_livefish ipmi_devintf ipmb_host ipmi_ssif i2c-mlxbf nls_iso8859-1 $ADDON_KERNEL_MODULES
 do
 	copy_module $mod
 done
@@ -261,6 +291,10 @@ sudo depmod -a -b ./ $kernel
 sudo mkdir -p usr/share/misc/ bin/ var/log/watchdog
 sudo cp /usr/share/misc/pci.ids usr/share/misc/
 sudo cp /etc/watchdog.conf etc
+if ! [ -e usr/bin/python ]; then
+	ln -s python3.10 usr/bin/python
+fi
+
 # Make sure we can load mlx-bootctl
 bootctl_ko=""
 for driver in mlxbf-bootctl mlx-bootctl
@@ -289,22 +323,24 @@ sudo mkdir -p mnt
 
 if [ -d ${SDIR}/BF3BMC/ ]; then
 	/bin/rm -rf BF3BMC
-	if (grep -q prod /etc/mlnx-release); then
-		cp -a ${SDIR}/BF3BMC/pk ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
-	elif (grep -q dev /etc/mlnx-release); then
-		cp -a ${SDIR}/BF3BMC/dk ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
+	if (grep -q prod /etc/mlnx-release) && [ -d ${SDIR}/BF3BMC/pk ]; then
+		cp -a ${SDIR}/BF3BMC/pk ./BF3BMC
+	elif (grep -q dev /etc/mlnx-release) && [ -d ${SDIR}/BF3BMC/dk ]; then
+		cp -a ${SDIR}/BF3BMC/dk ./BF3BMC
+	elif [ -d ${SDIR}/BF3BMC/qp ]; then
+		cp -a ${SDIR}/BF3BMC/qp ./BF3BMC
 	else
-		cp -a ${SDIR}/BF3BMC/qp ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
+		echo "WARNING: BF3 BMC Software was not found"
 	fi
-	[ -d ${SDIR}/BF3BMC/golden_images ] && cp -a ${SDIR}/BF3BMC/golden_images ./BF3BMC
+	[ -d ${SDIR}/BF3BMC/golden_images ] && cp -a ${SDIR}/BF3BMC/golden_images ./BF3BMC || echo "WARNING: BF3 Golden Images for BMC were not found"
 fi
 
 if [ -d ${SDIR}/BF2BMC/ ]; then
 	/bin/rm -rf BF2BMC
 	if (grep -q prod /etc/mlnx-release); then
-		cp -a ${SDIR}/BF2BMC/pk ./BF2BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
+		[ -d ${SDIR}/BF2BMC/pk ] && cp -a ${SDIR}/BF2BMC/pk ./BF2BMC || echo "WARNING: BF2 BMC Software was not found"
 	else
-		cp -a ${SDIR}/BF2BMC/qp/ ./BF2BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
+		[ -d ${SDIR}/BF2BMC/qp ] && cp -a ${SDIR}/BF2BMC/qp ./BF2BMC || echo "WARNING: BF2 BMC Software was not found"
 	fi
 fi
 
@@ -314,17 +350,22 @@ XZ_OPT="--threads=0 -9 --verbose" tar -cJp --exclude='./workspace' --exclude='./
 ex install -m 0755 ${SDIR}/install.sh ./ubuntu/install.sh
 ex cp -a ${SDIR}/install.env ./ubuntu/
 
+mkdir -p scripts
 cat > scripts/initrd-install << EOF
 #!/bin/bash
 
 printf_msg()
 {
-	echo "$@" | tee /dev/kmsg
+	echo "\$@" > /dev/kmsg
 	return 0
 }
 
+modprobe nls_iso8859-1 > /dev/null 2>&1
 modprobe -a sdhci-of-dwcmshc dw_mmc-bluefield > /dev/null 2>&1
 modprobe mlxbf_tmfifo > /dev/null 2>&1
+modprobe -a ipmi_msghandler ipmi_devintf i2c-mlxbf
+modprobe ipmb_host slave_add=0x10
+echo ipmb-host 0x1011 > /sys/bus/i2c/devices/i2c-1/new_device
 modprobe -a mlx5_ib mlxfw ib_umad
 modprobe nvme > /dev/null 2>&1
 insmod /mlx-bootctl.ko > /dev/null 2>&1
@@ -351,9 +392,23 @@ EOF
 
 chmod +x scripts/initrd-install
 sudo rm -f conf/conf.d/ubuntu-core*
-sudo sh -c 'echo "BOOT=initrd-install" > conf/conf.d/initrd_install'
-sudo sh -c 'echo "ROOT=\"LABEL=writable\"" > conf/conf.d/default_root'
 
+cat > usr/lib/systemd/system/install-ubuntu.service << EOF
+[Unit]
+Description=Install ubuntu Linux
+After=initrd-root-fs.target initrd-parse-etc.service
+After=dracut-initqueue.service dracut-mount.service
+
+[Service]
+Type=oneshot
+ExecStart=/scripts/initrd-install
+StandardInput=null
+StandardOutput=syslog
+StandardError=syslog+console
+EOF
+
+mkdir -p etc/systemd/system/initrd.target.wants
+ln -s /usr/lib/systemd/system/install-ubuntu.service etc/systemd/system/initrd.target.wants/install-ubuntu.service
 
 # Make initramfs with new ubuntu
 find . -print0 | sudo cpio --null -o --format=newc | gzip -9 > "$initramfs"

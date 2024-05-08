@@ -246,7 +246,7 @@ do
 	copy_bin $tool
 done
 
-for deb in coreutils nvme-cli mmc-utils iputils-ping uuid-runtime sshpass openssh-client gawk iproute2 wget $ADDON_DEBS
+for deb in coreutils nvme-cli mmc-utils iputils-ping uuid-runtime sshpass openssh-client gawk iproute2 wget net-tools isc-dhcp-client $ADDON_DEBS
 do
 	for tool in $(dpkg -L $deb | grep -v share)
 	do

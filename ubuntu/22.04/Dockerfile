@@ -74,6 +74,27 @@ RUN apt-mark hold mstflint
 RUN dpkg -i /root/workspace/mlxbf-bootimages*.deb
 RUN apt remove -y --purge $(dpkg --list "*openipmi*" | grep openipmi | awk '{print $2}') || true
 RUN apt install -y -f $MLNX_FW_UPDATER
+
+RUN apt install -y -f \
+	linux-bluefield=5.15.0.1042.44 \
+	linux-bluefield-cloud-tools-common=5.15.0-1042.44 \
+	linux-bluefield-headers-5.15.0-1042=5.15.0-1042.44 \
+	linux-bluefield-modules=5.15.0-1042.44+1 \
+	linux-bluefield-modules-5.15.0-1042-bluefield=5.15.0-1042.44+1 \
+	linux-bluefield-modules-bluefield=5.15.0-1042.44+1 \
+	linux-bluefield-modules-headers=5.15.0-1042.44+1 \
+	linux-bluefield-modules-source=5.15.0-1042.44+1 \
+	linux-bluefield-tools-5.15.0-1042=5.15.0-1042.44 \
+	linux-buildinfo-5.15.0-1042-bluefield=5.15.0-1042.44 \
+	linux-headers-5.15.0-1042-bluefield=5.15.0-1042.44 \
+	linux-headers-bluefield=5.15.0.1042.44 \
+	linux-image-5.15.0-1042-bluefield=5.15.0-1042.44 \
+	linux-image-bluefield=5.15.0.1042.44 \
+	linux-modules-5.15.0-1042-bluefield=5.15.0-1042.44 \
+	linux-modules-extra-5.15.0-1042-bluefield=5.15.0-1042.44 \
+	linux-tools-5.15.0-1042-bluefield=5.15.0-1042.44 \
+	linux-tools-bluefield=5.15.0.1042.44
+
 RUN apt install -y -f doca-runtime doca-devel mlx-openipmi || true
 RUN apt --fix-broken install -y || true
 RUN apt install -y mlnx-libsnap mlnx-snap

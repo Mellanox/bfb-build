@@ -135,7 +135,7 @@ chmod 0700 /root/.ssh
 touch /root/.ssh/authorized_keys
 chmod 600 /root/.ssh/authorized_keys
 echo "Building BFB's initramfs with: $kmods"
-dracut --no-hostonly -m "bash network base systemd systemd-initrd dracut-systemd shutdown sshd ssh-client udev-rules" \
+dracut --no-hostonly -m "bash network base systemd systemd-initrd dracut-systemd shutdown ssh-client udev-rules" \
 		--install "/usr/lib/udev/rules.d/91-tmfifo_net.rules /lib/udev/rules.d/92-oob_net.rules" \
 		--force-drivers "$kmods" --gzip $initramfs ${kernel}
 if [ $? -ne 0 ]; then

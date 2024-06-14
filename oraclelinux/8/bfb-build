@@ -45,6 +45,8 @@ DOCA_VERSION="2.7.0"
 BSP_VERSION="4.7.1-13167"
 BF_VERSION=${BSP_VERSION%-*}
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
+RELTARGET="24.04"
+BUILDVER=${BUILDVER:-"16"}
 
 WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
 BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
@@ -89,7 +91,7 @@ if [ $build_rpms -eq 1 ]; then
 		-e "s/@CUSTOM_VERSION@/$CUSTOM_VERSION/" \
 		-e "s/@BF_VERSION@/${BF_VERSION}/g" \
 		-e "s/@BSP_VERSION@/${BSP_VERSION}/g" \
-		-e "s/@BUILDVER@/${BUILDNUM}/g" \
+		-e "s/@BUILDVER@/${BUILDVER}/g" \
 		Dockerfile.build > $WDIR/Dockerfile
 
 	docker build -t bfb_build_${DISTRO}${DISTRO_VERSION} -f Dockerfile .
@@ -114,7 +116,8 @@ sed -e "s/@DISTRO_VERSION@/${DISTRO_VERSION}/g" \
 	-e "s/@DOCA_VERSION@/${DOCA_VERSION}/g" \
 	-e "s/@BF_VERSION@/${BF_VERSION}/g" \
 	-e "s|@BASE_URL@|${BASE_URL}|g" \
-	-e "s/@BUILDVER@/${BUILDNUM}/g" \
+	-e "s/@BUILDVER@/${BUILDVER}/g" \
+	-e "s/@RELTARGET@/${RELTARGET}/g" \
 	Dockerfile.run > $WDIR/Dockerfile
 
 docker build -t ${docker_image} \

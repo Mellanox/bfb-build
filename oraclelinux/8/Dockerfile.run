@@ -119,7 +119,7 @@ RUN dnf install -y bf-release \
 		spdk \
 		virtio-net-controller
 
-RUN echo BlueField_OS_@BF_VERSION@_OL_@DISTRO_VERSION@-@BUILDVER@.@IMAGE_TYPE@@CUSTOM_VERSION@ > /etc/mlnx-release
+RUN echo bf-bundle-@DOCA_VERSION@-@BUILDVER@_@RELTARGET@_oracle-@DISTRO_VERSION@_@IMAGE_TYPE@@CUSTOM_VERSION@ > /etc/mlnx-release
 
 RUN rpm -ihv uek/kernel-[0-9]*rpm uek/kernel-devel-[0-9]*rpm
 RUN rpm -Uhv uek/kernel-headers-[0-9]*rpm

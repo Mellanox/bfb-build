@@ -207,6 +207,14 @@ copy_module()
 		return
 	fi
 
+	if (modinfo -k $kernel $1 2>/dev/null | grep "filename:" | grep -q builtin); then
+		return
+	fi
+
+	if ! (modinfo -k $kernel $1 2>/dev/null); then
+		return
+	fi
+
 	for mod in `modinfo -F depends -k $kernel $1 | tr -s ',' ' '`
 	do
 		copy_module $mod
@@ -242,7 +250,7 @@ do
 	copy_bin $tool
 done
 
-for deb in $ADDON_DEBS
+for deb in wget $ADDON_DEBS
 do
 	for tool in `dpkg -L $deb | grep -v share`
 	do
@@ -354,9 +362,31 @@ printf "VenHw(F019E406-8C9C-11E5-8797-001ACA00BFC4)/Image" > "$boot_path"
 printf "Linux from rshim" > "$boot_desc"
 vmlinuz=$WDIR/vmlinuz
 if [ -e $SDIR/vmlinuz ]; then
-	sudo cat $SDIR/vmlinuz > "$vmlinuz"
+	case "$(file --brief --mime-type $SDIR/vmlinuz)" in
+		application/x-dosexec|application/octet-stream)
+			CAT=cat
+			;;
+		application/gzip)
+			CAT=zcat
+			;;
+		*)
+			CAT=cat
+			;;
+	esac
+	sudo $CAT $SDIR/vmlinuz > "$vmlinuz"
 else
-	sudo cat /boot/vmlinuz-$kernel > "$vmlinuz"
+	case "$(file --brief --mime-type /boot/vmlinuz-$kernel)" in
+		application/x-dosexec|application/octet-stream)
+			CAT=cat
+			;;
+		application/gzip)
+			CAT=zcat
+			;;
+		*)
+			CAT=cat
+			;;
+	esac
+	sudo $CAT /boot/vmlinuz-$kernel > "$vmlinuz"
 fi
 
 mkdir -p /workspace

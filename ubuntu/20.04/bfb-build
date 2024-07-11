@@ -21,7 +21,7 @@ DISTRO="ubuntu"
 DISTRO_VERSION="20.04"
 DISTRO_BASE_URL="http://cloud-images.ubuntu.com/releases/focal/release/${DISTRO}-${DISTRO_VERSION}-server-cloudimg-arm64-root.tar.xz"
 DOCA_VERSION="1.5.3"
-BSP_VERSION="3.9.7-13006"
+BSP_VERSION="3.9.8-13147"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-""}
 
@@ -30,10 +30,9 @@ BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
 
 mkdir -p $WDIR
 
+echo "Downloading bootimages..."
 mkdir -p $WDIR/bootimages
-wget -P $WDIR/bootimages -r --no-verbose --no-directories -l1 --no-parent -A 'mlxbf-bootimages*.deb' ${BASE_URL}/bluefield/${BSP_VERSION}/bootimages/${IMAGE_TYPE}/
-wget -P $WDIR -r --no-verbose --no-directories -l1 --no-parent -A 'doca-dpu-repo-ubuntu2004-local_*_arm64.deb' ${BASE_URL}/doca/${DOCA_VERSION}/${DISTRO}${DISTRO_VERSION}/aarch64/
-mv $WDIR/doca-dpu-repo-ubuntu2004-local_*_arm64.deb $WDIR/doca-repo.deb
+wget -q -P $WDIR/bootimages -r --no-verbose --no-directories -l1 --no-parent -A 'mlxbf-bootimages*.deb' ${BASE_URL}/bluefield/${BSP_VERSION}/bootimages/${IMAGE_TYPE}/
 
 cp	Dockerfile \
 	create_bfb \
@@ -43,7 +42,8 @@ cp	Dockerfile \
 
 cd $WDIR
 
-wget $DISTRO_BASE_URL
+echo "Downloading ${DISTRO_BASE_URL}..."
+wget -q  $DISTRO_BASE_URL
 docker_image=bfb_runtime_${DISTRO,,}${DISTRO_VERSION,,}
 
 docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION} 2> /dev/null

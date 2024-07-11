@@ -48,10 +48,15 @@ fw_update()
 
 	if [[ -x /mnt/${FW_UPDATER} && -d /mnt/${FW_DIR} ]]; then
 		log "INFO: Updating NIC firmware..."
-		chroot /mnt ${FW_UPDATER} \
+		chroot /mnt ${FW_UPDATER} --log /tmp/mlnx_fw_update.log -v \
 			--force-fw-update \
 			--fw-dir ${FW_DIR}
-		if [ $? -eq 0 ]; then
+		rc=$?
+		sync
+		if [ -e /tmp/mlnx_fw_update.log ]; then
+			cat /tmp/mlnx_fw_update.log
+		fi
+		if [ $rc -eq 0 ]; then
 			log "INFO: NIC firmware update done"
 		else
 			log "INFO: NIC firmware update failed"
@@ -77,7 +82,15 @@ fw_reset()
 		sleep 1
 	done
 
-	msg=`chroot /mnt mlxfwreset -d /dev/mst/mt*_pciconf0 -y -l 3 --sync 1 r 2>&1`
+	log "INFO: Running NIC Firmware reset"
+	if [ "X$mode" == "Xmanufacturing" ]; then
+		log "INFO: Rebooting..."
+	fi
+	# Wait for these messages to be pulled by the rshim service
+	# as mlxfwreset will restart the DPU
+	sleep 3
+
+	msg=$(chroot /mnt mlxfwreset -d /dev/mst/mt*_pciconf0 -y -l 3 --sync 1 r 2>&1)
 	if [ $? -ne 0 ]; then
 		log "INFO: NIC Firmware reset failed"
 		log "INFO: $msg"
@@ -304,6 +317,7 @@ fi
 sync
 
 # Refresh partition table
+sleep 1
 blockdev --rereadpt ${device} > /dev/null 2>&1
 fi # manufacturing mode
 
@@ -312,11 +326,13 @@ bind_partitions()
 	mount --bind /proc /mnt/proc
 	mount --bind /dev /mnt/dev
 	mount --bind /sys /mnt/sys
+	mount -t efivarfs none /mnt/sys/firmware/efi/efivars
 }
 
 unmount_partitions()
 {
 	umount /mnt/sys/fs/fuse/connections > /dev/null 2>&1 || true
+	umount /mnt/sys/firmware/efi/efivars 2>&1 || true
 	umount /mnt/sys > /dev/null 2>&1
 	umount /mnt/dev > /dev/null 2>&1
 	umount /mnt/proc > /dev/null 2>&1
@@ -345,6 +361,7 @@ install_os_image()
 	mkfs.fat $BOOT_PARTITION -n "EFI$OS_IMAGE" > /dev/null 2>&1
 	mkfs.ext4 -F $ROOT_PARTITION -L "OS$OS_IMAGE" > /dev/null 2>&1
 	sync
+	sleep 1
 	blockdev --rereadpt ${device} > /dev/null 2>&1
 
 	mkdir -p /mnt
@@ -379,8 +396,9 @@ EOF
 		umount /tmp/common > /dev/null 2>&1
 	fi
 
-	if (grep -qE "MemTotal:\s+16" /proc/meminfo > /dev/null 2>&1); then
-		sed -i -r -e "s/(net.netfilter.nf_conntrack_max).*/\1 = 500000/" /mnt/usr/lib/sysctl.d/90-bluefield.conf
+	memtotal=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+	if [ $memtotal -gt 16000000 ]; then
+		sed -i -r -e "s/(net.netfilter.nf_conntrack_max).*/\1 = 1000000/" /mnt/usr/lib/sysctl.d/90-bluefield.conf
 	fi
 
 	bind_partitions
@@ -550,9 +568,14 @@ EOF
 		sed -i -r -e "s/(password_pbkdf2 admin).*/\1 ${grub_admin_PASSWORD}/" /mnt/etc/grub.d/40_custom
 	fi
 
-	if (lspci -n -d 15b3: | grep -wq 'a2dc'); then
+	if (grep -q MLNXBF33 /sys/firmware/acpi/tables/SSDT*); then
 		# BlueField-3
 		sed -i -e "s/0x01000000/0x13010000/g" /mnt/etc/default/grub
+	fi
+
+	if (lspci -vv | grep -wq SimX); then
+		# Remove earlycon from grub parameters on SimX
+		sed -i -r -e 's/earlycon=[^ ]* //g' /mnt/etc/default/grub
 	fi
 
 	chroot /mnt env PATH=$CHROOT_PATH /usr/sbin/grub-install ${device} > /dev/null 2>&1
@@ -568,6 +591,15 @@ EOF
 
 	unmount_partitions
 }
+
+if [ ! -d /sys/firmware/efi/efivars ]; then
+	mount -t efivarfs none /sys/firmware/efi/efivars
+fi
+
+echo "Remove old boot entries"
+bfbootmgr --cleanall
+/bin/rm -f /sys/firmware/efi/efivars/Boot* > /dev/null 2>&1
+/bin/rm -f /sys/firmware/efi/efivars/dump-* > /dev/null 2>&1
 
 if function_exists bfb_pre_install; then
 	log "INFO: Running bfb_pre_install from bf.cfg"
@@ -594,6 +626,7 @@ else
 	fi
 fi
 
+sleep 1
 blockdev --rereadpt ${device} > /dev/null 2>&1
 
 sync
@@ -607,17 +640,7 @@ if [ "X$ENROLL_KEYS" = "Xyes" ]; then
 	bfrec --capsule /lib/firmware/mellanox/boot/capsule/EnrollKeysCap
 fi
 
-bfbootmgr --cleanall > /dev/null 2>&1
-
 # Make it the boot partition
-mounted_efivarfs=0
-if [ ! -d /sys/firmware/efi/efivars ]; then
-	mount -t efivarfs none /sys/firmware/efi/efivars
-	mounted_efivarfs=1
-fi
-
-/bin/rm -f /sys/firmware/efi/efivars/Boot* > /dev/null 2>&1
-
 if efibootmgr | grep ${UBUNTU_CODENAME}; then
 	efibootmgr -b "$(efibootmgr | grep ${UBUNTU_CODENAME} | cut -c 5-8)" -B > /dev/null 2>&1
 fi
@@ -662,9 +685,7 @@ if ! (efibootmgr | grep ${UBUNTU_CODENAME}); then
 	fi
 fi
 
-if [ $mounted_efivarfs -eq 1 ]; then
-	umount /sys/firmware/efi/efivars > /dev/null 2>&1
-fi
+umount /sys/firmware/efi/efivars
 
 if [ -n "$BFCFG" ]; then
 	$BFCFG
@@ -684,13 +705,6 @@ if [ "$WITH_NIC_FW_UPDATE" == "yes" ]; then
 fi
 
 if [ $NIC_FW_RESET_REQUIRED -eq 1 ]; then
-	log "INFO: Running NIC Firmware reset"
-	if [ "X$mode" == "Xmanufacturing" ]; then
-		log "INFO: Rebooting..."
-	fi
-	# Wait for these messages to be pulled by the rshim service
-	# as mlxfwreset will restart the DPU
-	sleep 3
 	# Reset NIC FW
 	mount -t ext4 /dev/mmcblk0p2 /mnt
 	bind_partitions

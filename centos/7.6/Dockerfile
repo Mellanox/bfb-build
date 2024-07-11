@@ -14,7 +14,10 @@ ENV RUN_FW_UPDATER=no
 
 RUN rpm -Uhv parted-3.2-39.el7.aarch64.rpm
 
-RUN sed -i 's|baseurl=http://mirror.centos.org/altarch|baseurl=https://mirror1.hs-esslingen.de/pub/Mirrors/centos-altarch|g' /etc/yum.repos.d/CentOS-*
+RUN sed -i 's|baseurl=http://mirror.centos.org/altarch|baseurl=https://mirror1.hs-esslingen.de/Mirrors/centos-altarch|g' /etc/yum.repos.d/CentOS-*
+
+RUN yum install -y --enablerepo=updates yum-plugin-ovl
+
 RUN yum install -y \
 		--enablerepo=updates \
 		NetworkManager \
@@ -24,17 +27,20 @@ RUN yum install -y \
 		device-mapper-persistent-data lvm2 acpid perf popt-devel bc edac-utils lm_sensors lm_sensors-sensord re2c ninja-build \
 		cryptsetup rasdaemon pciutils-devel watchdog python3-sphinx python36-six kexec-tools jq python3-pip libnghttp2 wget sudo
 
+RUN yum install -y \
+	$BASE_URL/doca/$DOCA_VERSION/centos7.6/aarch64/openssl11*rpm
+
 # Set python2.7 as a default
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.8 1
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python2.7 10
 
 RUN echo -e "[kubernetes] \n\
-name=Kubernetes \n\
-baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-aarch64 \n\
+name=Kubernetes  \n\
+baseurl=https://pkgs.k8s.io/core:/stable:/v1.25/rpm/ \n\
 enabled=1 \n\
 gpgcheck=1 \n\
-gpgkey=https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg \n\
-exclude=kubelet kubeadm kubectl kubernetes-cni" > /etc/yum.repos.d/kubernetes.repo
+gpgkey=https://pkgs.k8s.io/core:/stable:/v1.25/rpm/repodata/repomd.xml.key \n\
+exclude=kubelet kubeadm kubectl" > /etc/yum.repos.d/kubernetes.repo
 
 RUN echo -e "[docker-ce-stable] \n\
 name=Docker CE Stable - $basearch \n\
@@ -44,7 +50,7 @@ gpgcheck=1 \n\
 gpgkey=https://download.docker.com/linux/centos/gpg" > /etc/yum.repos.d/docker-ce.repo
 
 
-RUN yum install -y --disableexcludes=kubernetes --enablerepo=extras containerd.io kubelet-1.25.3-0.aarch64 cri-tools-1.25.0-0.aarch64 kubernetes-cni-1.1.1-0.aarch64
+RUN yum install -y --disableexcludes=kubernetes --enablerepo=extras containerd.io kubelet-1.25.16-150500.1.1.aarch64 cri-tools-1.26.0-150500.1.1.aarch64 kubernetes-cni-1.2.0-150500.2.1.aarch64
 
 RUN yum-config-manager --nogpgcheck --add-repo https://download.fedoraproject.org/pub/epel/7/aarch64/; \
      yum install -y epel-release; \
@@ -58,4 +64,4 @@ RUN rpm -ihv --force bootimages/mlxbf-bootimages-*.aarch64.rpm || true
 
 RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
 
-CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1074.2.g0c050d4-bluefield"]
+CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1086.37.g4093817-bluefield"]

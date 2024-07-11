@@ -143,7 +143,7 @@ if ! ( rpm -q parted-3.2 > /dev/null 2>&1 ); then
 	rpm -Uhv /tmp/parted-3.2-39.el7.aarch64.rpm || true
 fi
 
-ex dracut --no-hostonly -m "bash network base shutdown" --force-drivers "${bootctl_module} mlxbf_tmfifo dw_mmc_bluefield mmc_block virtio_console mlx5_core mlx5_ib ib_umad nvme nvme-tcp nvme-rdma nvme-fc nvme-fabrics nvme-core" --filesystems "vfat" --gzip $initramfs ${kernel}
+ex dracut --no-hostonly -m "bash network base shutdown" --force-drivers "${bootctl_module} mlxbf_tmfifo dw_mmc_bluefield mmc_block virtio_console mlx5_core mlx5_ib ib_umad nvme nvme-tcp nvme-rdma nvme-fc nvme-fabrics nvme-core" --filesystems "xfs vfat" --gzip $initramfs ${kernel}
 
 rm -f /etc/udev/rules.d/91-tmfifo_net.rules /etc/udev/rules.d/92-oob_net.rules
 
@@ -158,6 +158,7 @@ GRUB_CMDLINE_LINUX="crashkernel=auto console=hvc0 console=ttyAMA0 earlycon=pl011
 GRUB_DISABLE_RECOVERY="true"
 GRUB_TIMEOUT_STYLE=countdown
 GRUB_DISABLE_OS_PROBER=false
+GRUB_DISABLE_LINUX_UUID=false
 EOF
 
 
@@ -216,7 +217,7 @@ copy_rpm()
 	package=$1
 
 	if ! (rpm -q $package); then
-		yum install -y $package
+		yum install -y $package || return
 	fi
 
 	case $package in
@@ -240,7 +241,7 @@ copy_rpm()
 			done
 			;;
 		*)
-			for f in `rpm -ql $package 2> /dev/null | grep -vE 'share|build-id'`
+			for f in `rpm -ql $package | grep -vE 'share|build-id'`
 			do
 				if [ -d $f ]; then
 					continue
@@ -252,7 +253,7 @@ copy_rpm()
 }
 
 # Copy the content of RPM packages
-for package in mlxbf-bfscripts util-linux dosfstools e2fsprogs kmod pciutils usbutils chkconfig mft mft-oem kernel-mft tar xfsprogs coreutils parted which curl $ADDON_RPMS
+for package in mlxbf-bfscripts util-linux dosfstools e2fsprogs kmod pciutils usbutils chkconfig mft mft-oem kernel-mft kmod-kernel-mft-mlnx tar xfsprogs coreutils parted which curl $ADDON_RPMS
 do
 	copy_rpm $package || true
 done

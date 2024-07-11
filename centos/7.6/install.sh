@@ -31,10 +31,9 @@ fspath=$(readlink -f `dirname $0`)
 rshimlog=`which bfrshlog 2> /dev/null`
 log()
 {
+	echo "$*"
 	if [ -n "$rshimlog" ]; then
 		$rshimlog "$*"
-	else
-		echo "$*"
 	fi
 }
 
@@ -45,10 +44,15 @@ fw_update()
 
 	if [[ -x /mnt/${FW_UPDATER} && -d /mnt/${FW_DIR} ]]; then
 		log "INFO: Updating NIC firmware..."
-		chroot /mnt ${FW_UPDATER} \
+		chroot /mnt ${FW_UPDATER} --log /tmp/mlnx_fw_update.log -v \
 			--force-fw-update \
 			--fw-dir ${FW_DIR}
-		if [ $? -eq 0 ]; then
+		rc=$?
+		sync
+		if [ -e /tmp/mlnx_fw_update.log ]; then
+			cat /tmp/mlnx_fw_update.log
+		fi
+		if [ $rc -eq 0 ]; then
 			log "INFO: NIC firmware update done"
 		else
 			log "INFO: NIC firmware update failed"
@@ -74,7 +78,15 @@ fw_reset()
 		sleep 1
 	done
 
-	msg=`chroot /mnt mlxfwreset -d /dev/mst/mt*_pciconf0 -y -l 3 --sync 1 r 2>&1`
+	log "INFO: Running NIC Firmware reset"
+	if [ "X$mode" == "Xmanufacturing" ]; then
+		log "INFO: Rebooting..."
+	fi
+	# Wait for these messages to be pulled by the rshim service
+	# as mlxfwreset will restart the DPU
+	sleep 3
+
+	msg=$(chroot /mnt mlxfwreset -d /dev/mst/mt*_pciconf0 -y -l 3 --sync 1 r 2>&1)
 	if [ $? -ne 0 ]; then
 		log "INFO: NIC Firmware reset failed"
 		log "INFO: $msg"
@@ -185,8 +197,8 @@ elif [[ "${PART_SCHEME}" == "SCHEME_B" ]]; then
 	parted --script $device -- \
 		mklabel gpt \
 		mkpart primary 1MiB 201MiB set 1 esp on \
-		mkpart primary 201MiB 6000MiB \
-		mkpart primary 6000MiB 12489MiB \
+		mkpart primary 201MiB 8000MiB \
+		mkpart primary 8000MiB 12489MiB \
 		mkpart primary 12489MiB 100%
 fi
 
@@ -194,6 +206,7 @@ sync
 
 partprobe "$device" > /dev/null 2>&1
 
+sleep 1
 blockdev --rereadpt "$device" > /dev/null 2>&1
 
 if function_exists bfb_pre_install; then
@@ -259,8 +272,9 @@ elif [[ "${PART_SCHEME}" == "SCHEME_B" ]]; then
 EOF
 fi
 
-if (grep -qE "MemTotal:\s+16" /proc/meminfo > /dev/null 2>&1); then
-	sed -i -r -e "s/(net.netfilter.nf_conntrack_max).*/\1 = 500000/" /mnt/usr/lib/sysctl.d/90-bluefield.conf
+memtotal=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+if [ $memtotal -gt 16000000 ]; then
+	sed -i -r -e "s/(net.netfilter.nf_conntrack_max).*/\1 = 1000000/" /mnt/usr/lib/sysctl.d/90-bluefield.conf
 fi
 
 cat > /mnt/etc/udev/rules.d/50-dev-root.rules << EOF
@@ -300,16 +314,26 @@ bind_partitions
 # Then, set boot arguments: Read current 'console' and 'earlycon'
 # parameters, and append the root filesystem parameters.
 bootarg="$(cat /proc/cmdline | sed 's/initrd=initramfs//;s/console=.*//')"
-sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"crashkernel=auto $bootarg console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 modprobe.blacklist=mlx5_core,mlx5_ib\"@" /mnt/etc/default/grub
-if (lspci -n -d 15b3: | grep -wq 'a2dc'); then
+sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"crashkernel=auto $bootarg console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 modprobe.blacklist=mlx5_core,mlx5_ib iommu.passthrough=1\"@" /mnt/etc/default/grub
+
+if (grep -q MLNXBF33 /sys/firmware/acpi/tables/SSDT*); then
     # BlueField-3
     sed -i -e "s/0x01000000/0x13010000/g" /mnt/etc/default/grub
 fi
 
+if (lspci -vv | grep -wq SimX); then
+	# Remove earlycon from grub parameters on SimX
+	sed -i -r -e 's/earlycon=[^ ]* //g' /mnt/etc/default/grub
+fi
+
 chroot /mnt grub2-mkconfig -o /boot/efi/EFI/centos/grub.cfg
 
-kdir=$(/bin/ls -1d /mnt/lib/modules/4.18* /mnt/lib/modules/4.19* /mnt/lib/modules/4.20* /mnt/lib/modules/5.4* 2> /dev/null)
-kver=""
+kver=$(uname -r)
+if [ -d /mnt/lib/modules/$kver ]; then
+    kdir=/mnt/lib/modules/$kver
+else
+    kdir=$(/bin/ls -1d /mnt/lib/modules/4.18* /mnt/lib/modules/4.19* /mnt/lib/modules/4.20* /mnt/lib/modules/5.* 2> /dev/null)
+fi
 if [ -n "$kdir" ]; then
     kver=${kdir##*/}
     DRACUT_CMD=`chroot /mnt /bin/ls -1 /sbin/dracut /usr/bin/dracut 2> /dev/null | head -n 1 | tr -d '\n'`
@@ -319,12 +343,9 @@ else
     kver=$(/bin/ls -1 /mnt/lib/modules/ | head -1)
 fi
 
-
 echo centos | chroot /mnt passwd root --stdin
 
-if [ `wc -l /mnt/etc/hostname | cut -d ' ' -f 1` -eq 0 ]; then
-	echo "localhost" > /mnt/etc/hostname
-fi
+/bin/rm -f /mnt/etc/hostname
 
 cat > /mnt/etc/resolv.conf << EOF
 nameserver 192.168.100.1
@@ -422,6 +443,7 @@ echo > /mnt/var/log/secure
 echo > /mnt/var/log/firewalld
 echo > /mnt/var/log/audit/audit.log
 /bin/rm -f /mnt/var/log/yum.log
+/bin/rm -f /mnt/root/anaconda-ks.cfg
 /bin/rm -rf /mnt/tmp/*
 
 if function_exists bfb_modify_os; then
@@ -455,11 +477,15 @@ if [ "X$ENROLL_KEYS" = "Xyes" ]; then
 	bfrec --capsule /lib/firmware/mellanox/boot/capsule/EnrollKeysCap
 fi
 
+if [ ! -d /sys/firmware/efi/efivars ]; then
+	mount -t efivarfs none /sys/firmware/efi/efivars
+fi
+
 # Clean up actual boot entries.
 bfbootmgr --cleanall > /dev/null 2>&1
 
-mount -t efivarfs none /sys/firmware/efi/efivars
 /bin/rm -f /sys/firmware/efi/efivars/Boot* > /dev/null 2>&1
+/bin/rm -f /sys/firmware/efi/efivars/dump-* > /dev/null 2>&1
 efibootmgr -c -d /dev/mmcblk0 -p 1 -l "\EFI\centos\grubaa64.efi" -L $distro
 umount /sys/firmware/efi/efivars
 
@@ -507,13 +533,6 @@ log "INFO: Installation finished"
 
 if [ "$WITH_NIC_FW_UPDATE" == "yes" ]; then
 	if [ $NIC_FW_UPDATE_DONE -eq 1 ]; then
-		log "INFO: Running NIC Firmware reset"
-		if [ "X$mode" == "Xmanufacturing" ]; then
-			log "INFO: Rebooting..."
-		fi
-		# Wait for these messages to be pulled by the rshim service
-		# as mlxfwreset will restart the DPU
-		sleep 3
 		# Reset NIC FW
 		if [[ "${PART_SCHEME}" == "SCHEME_A" ]]; then
 			mount /dev/mmcblk0p3 /mnt

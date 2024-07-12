@@ -1,20 +1,18 @@
 #  docker build -t bfb_runtime_ubuntu22.04 -f Dockerfile .
 FROM scratch
-ARG MLXBF_BOOTIMAGES=mlxbf-bootimages
-ARG MLNX_FW_UPDATER=mlnx-fw-updater
-Add jammy-server-cloudimg-arm64-root.tar.xz /
-Add doca-repo.deb /tmp/
+ADD jammy-server-cloudimg-arm64-root.tar.xz /
 ADD qemu-aarch64-static /usr/bin/
 RUN mkdir -p /opt/mellanox/doca/services/
-Add telemetry-agent /opt/mellanox/doca/services/telemetry
-add blueman /opt/mellanox/doca/services/blueman
-Add infrastructure /opt/mellanox/doca/services/infrastructure
+ADD telemetry-agent /opt/mellanox/doca/services/telemetry
+ADD blueman /opt/mellanox/doca/services/blueman
+ADD infrastructure /opt/mellanox/doca/services/infrastructure
 
 ARG BASE_URL
 ARG DOCA_VERSION
 ARG BSP_VERSION
 ARG DISTRO
 ARG DISTRO_VERSION
+ARG MLNX_FW_UPDATER=mlnx-fw-updater-signed
 WORKDIR /root/workspace
 ADD install.sh .
 ADD create_bfb .
@@ -28,17 +26,21 @@ ENV RUN_FW_UPDATER=no
 # Avoid running flash-kernel post install
 RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
 
+RUN add-apt-repository -y ppa:canonical-kernel-bluefield/release
 RUN apt update
 RUN apt upgrade -y
 RUN apt remove --purge -y snapd plymouth
 RUN apt autoremove -y
-RUN apt install -y grub-efi-arm64-signed grub-efi-arm64-bin shim-signed watchdog binutils sbsigntool rasdaemon net-tools nfs-common iptables-persistent rsync tcpdump nvme-cli iputils-arping iputils-ping iputils-tracepath bridge-utils iperf3 bc lm-sensors ifenslave acpid network-manager kexec-tools i2c-tools dc lldpad unzip ipmitool sysstat mmc-utils libhugetlbfs-bin uuid ntp libgdbm-dev jq libev4
+RUN apt install -y grub-efi-arm64-signed grub-efi-arm64-bin shim-signed watchdog binutils sbsigntool rasdaemon net-tools nfs-common iptables-persistent rsync tcpdump nvme-cli iputils-arping iputils-ping iputils-tracepath bridge-utils iperf3 bc lm-sensors ifenslave acpid network-manager kexec-tools i2c-tools dc lldpad unzip ipmitool sysstat mmc-utils libhugetlbfs-bin uuid uuid-runtime ntp libgdbm-dev jq libev4 sshpass dracut dracut-network perl-modules wget
 RUN apt install -y docker.io; systemctl disable docker.service || true; systemctl disable docker.socket || true
 RUN apt install -y qemu-user-static qemu-utils qemu-user
 RUN apt install -y python3-pip
 RUN apt install -y build-essential
-RUN apt install -y libpam-pwquality; echo "minlen = 8" >> /etc/security/pwquality.conf; echo "minclass = 3" >> /etc/security/pwquality.conf
-RUN apt install -y python2.7 python3.10 python3-pyinotify
+RUN apt install -y libpam-pwquality; \
+	sed -i -r -e "s/# minlen =.*/minlen = 12/" /etc/security/pwquality.conf; \
+	sed -i -e '/use_authtok/ipassword\trequired\t\t\tpam_pwhistory.so  remember=3' /etc/pam.d/common-password; \
+	sed -i -r -e "s/# silent/silent/;s/# deny.*/deny = 10/;s/# unlock_time.*/unlock_time = 600/" /etc/security/faillock.conf
+RUN apt install -y python3.10 python3-pyinotify
 
 # Grub password
 RUN echo 'set superusers="admin"' >> /etc/grub.d/40_custom; \
@@ -46,41 +48,52 @@ RUN echo 'set superusers="admin"' >> /etc/grub.d/40_custom; \
 	sed -i -e "s@'gnulinux-simple-\$boot_device_id'@'gnulinux-simple-\$boot_device_id' --unrestricted@" \
 	       -e "s@'gnulinux-\$version-\$type-\$boot_device_id'@'gnulinux-\$version-\$type-\$boot_device_id' --users ''@" /etc/grub.d/10_linux
 
-# Set python2.7 as a default
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python2.7 10
 
-RUN wget -qO - $BASE_URL/doca/$DOCA_VERSION/ubuntu22.04/aarch64/GPG-KEY-Mellanox.pub | sudo apt-key add -
+RUN mkdir -p -m 755 /etc/apt/keyrings/
+RUN curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+RUN echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
 
-RUN echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.25/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
-RUN curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.25/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+RUN wget -qO - $BASE_URL/doca/GPG-KEY-Mellanox.pub | sudo apt-key add -
+
 RUN apt update
 # Install Libvirt+QEMU+KVM
 RUN apt install -y bridge-utils cpu-checker libvirt-clients libvirt-daemon qemu qemu-kvm
-RUN dpkg -i /tmp/doca-repo.deb
-RUN apt update
 RUN apt upgrade -y
-RUN apt install -y containerd=1.7.2-0ubuntu1~22.04.1 runc
-RUN apt install -y kubelet cri-tools kubernetes-cni
-RUN apt-mark hold kubelet cri-tools kubernetes-cni
-RUN dpkg -i /var/doca-dpu-repo-ubuntu2204-local/*mstflint*.deb || true
+RUN apt install -y containerd=1.7.12-0ubuntu2~22.04.1 runc
+RUN apt install -y kubelet=1.29.3-1.1 kubernetes-cni=1.3.0-1.1 cri-tools=1.29.0-1.1 kubeadm=1.29.3-1.1
+RUN rm -f /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf
+RUN apt-mark hold kubelet cri-tools kubernetes-cni kubeadm
+RUN echo "deb [trusted=yes] ${BASE_URL}/doca/${DOCA_VERSION}/${DISTRO}${DISTRO_VERSION}/arm64-dpu/ /" | sudo tee /etc/apt/sources.list.d/doca.base.list
+RUN apt update
+RUN apt install -y mstflint
 RUN apt-mark hold mstflint
-RUN apt install -y -f $MLNX_FW_UPDATER
+RUN dpkg -i /root/workspace/mlxbf-bootimages*.deb
 RUN apt remove -y --purge $(dpkg --list "*openipmi*" | grep openipmi | awk '{print $2}') || true
-RUN apt install -y -f doca-runtime doca-tools doca-sdk || true
-RUN apt install -y libgdbm-dev; dpkg -i /var/doca-dpu-repo-ubuntu2204-local/mlx-*openipmi*.deb || true
+RUN apt install -y -f $MLNX_FW_UPDATER
+
+RUN apt install -y -f \
+	linux-bluefield=5.15.0.1045.47 \
+	linux-bluefield-cloud-tools-common=5.15.0-1045.47 \
+	linux-bluefield-headers-5.15.0-1045=5.15.0-1045.47 \
+	linux-bluefield-tools-5.15.0-1045=5.15.0-1045.47 \
+	linux-buildinfo-5.15.0-1045-bluefield=5.15.0-1045.47 \
+	linux-headers-5.15.0-1045-bluefield=5.15.0-1045.47 \
+	linux-headers-bluefield=5.15.0.1045.47 \
+	linux-image-5.15.0-1045-bluefield=5.15.0-1045.47 \
+	linux-image-bluefield=5.15.0.1045.47 \
+	linux-modules-5.15.0-1045-bluefield=5.15.0-1045.47 \
+	linux-modules-extra-5.15.0-1045-bluefield=5.15.0-1045.47 \
+	linux-tools-5.15.0-1045-bluefield=5.15.0-1045.47 \
+	linux-tools-bluefield=5.15.0.1045.47
+
+RUN apt install -y -f doca-runtime doca-sdk doca-tools mlx-openipmi || true
 RUN apt --fix-broken install -y || true
-RUN dpkg -i /var/doca-dpu-repo-ubuntu2204-local/mlnx-snap_*arm64.deb || true
-RUN dpkg -i /var/doca-dpu-repo-ubuntu2204-local/bf-release_*arm64.deb || true
-RUN apt remove --purge -y doca-dpu-repo-ubuntu2204-local || true
+RUN apt install -y mlnx-libsnap mlnx-snap
 RUN apt update || true
 RUN /usr/sbin/dpkg-reconfigure bf-release || true
-RUN apt clean
-RUN rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /etc/kubelet.d
-RUN mkdir -p /workspace
 RUN sed -i -r -e "s/^(MACAddressPolicy.*)/# \1/" /usr/lib/systemd/network/99-default.link
-RUN dpkg -i --force-overwrite /root/workspace/mlxbf-bootimages*.deb
 
 # Manage system services
 RUN systemctl disable mlx-regex.service || true
@@ -102,7 +115,6 @@ RUN systemctl disable docker.service || true
 RUN systemctl disable docker.socket || true
 RUN systemctl disable kubelet.service || true
 RUN systemctl disable containerd.service || true
-RUN systemctl disable mosquitto.service || true
 RUN systemctl disable ModemManager.service || true
 
 RUN /usr/sbin/update-pciids || true
@@ -110,6 +122,7 @@ RUN /usr/sbin/update-pciids || true
 RUN /bin/rm -f /var/lib/dbus/machine-id /etc/machine-id; touch /var/lib/dbus/machine-id /etc/machine-id
 
 RUN /bin/rm -f /etc/ssh/sshd_config.d/60-cloudimg-settings.conf || true
+RUN /bin/rm -f /etc/default/grub.d/50-cloudimg-settings.cfg || true
 
 # openibd to support MLNX_OFED drivers coming with Canonical's deb
 RUN sed -i -e "s/FORCE_MODE=.*/FORCE_MODE=yes/" /etc/infiniband/openib.conf

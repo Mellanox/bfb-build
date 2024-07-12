@@ -492,18 +492,10 @@ EOF
 	if [ ! -d /mnt/lib/modules/$kver ]; then
 		kver=$(/bin/ls -1 /mnt/lib/modules/ | tail -1)
 	fi
-	cat >> /mnt/etc/initramfs-tools/modules << EOF
-dw_mmc-bluefield
-dw_mmc
-dw_mmc-pltfm
-sdhci-of-dwcmshc
-sdhci_pltfm
-sdhci
-mlxbf-tmfifo
-nvme
-EOF
 
-	chroot /mnt update-initramfs -k ${kver} -u
+	ilog "Updating $distro initramfs"
+	initrd=$(cd /mnt/boot; /bin/ls -1 initrd.img-* | tail -1 | sed -e "s/.old-dkms//")
+	ilog "$(chroot /mnt dracut --force --add-drivers "mlxbf-bootctl sdhci-of-dwcmshc mlxbf-tmfifo dw_mmc-bluefield mlx5_core mlx5_ib mlxfw ib_umad nvme sbsa_gwdt gpio-mlxbf2 gpio-mlxbf3 mlxbf-gige pinctrl-mlxbf3 8021q" --gzip /boot/$initrd ${kver} 2>&1)"
 
 	cat > /mnt/etc/resolv.conf << EOF
 nameserver 127.0.0.53
@@ -666,7 +658,7 @@ EOF
 		sed -i -r -e "s/(password_pbkdf2 admin).*/\1 ${grub_admin_PASSWORD}/" /mnt/etc/grub.d/40_custom
 	fi
 
-	if (hexdump -C /sys/firmware/acpi/tables/SSDT* | grep -q MLNXBF33); then
+	if (grep -q MLNXBF33 /sys/firmware/acpi/tables/SSDT*); then
 		# BlueField-3
 		sed -i -e "s/0x01000000/0x13010000/g" /mnt/etc/default/grub
 	fi

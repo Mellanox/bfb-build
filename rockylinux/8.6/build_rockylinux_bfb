@@ -23,9 +23,9 @@
 #
 ###############################################################################
 
-DOCA_VERSION=1.5.1
-BF_VERSION=3.9.3
-MLNX_OFED_VERSION=5.8-1.2.1.1
+DOCA_VERSION=1.5.3
+BF_VERSION=3.9.8
+MLNX_OFED_VERSION=5.8-5.1.1.1
 WDIR=${WDIR:-/tmp}
 
 # Execute command w/ echo and exit if it fail
@@ -85,7 +85,7 @@ ex yum-config-manager --nogpgcheck --add-repo https://linux.mellanox.com/public/
 
 ex yum install --nogpgcheck -y doca-runtime-user doca-sdk-user doca-tools
 
-ex rpm -ihv --force /root/workspace/mlxbf-bootimages-3.9.3-12383.aarch64.rpm
+ex rpm -ihv --force /root/workspace/mlxbf-bootimages-*.rpm
 
 /usr/sbin/update-pciids || true
 

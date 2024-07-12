@@ -88,7 +88,7 @@ done
 
 bootctl_module="mlxbf-bootctl"
 
-modinfo -n -k $kernel "mlx-bootctl" 2> /dev/null && bootctl_module="mlx-bootctl"
+modinfo -n -k $kernel "mlx-bootctl" > /dev/null 2>&1 && bootctl_module="mlx-bootctl"
 
 SCRIPTS_DIR=`dirname $0`
 
@@ -122,7 +122,7 @@ cd ${WDIR}
 
 initramfs=$WDIR/dump-initramfs-v0
 
-dracut --no-hostonly -m "bash network base shutdown" --add-drivers "${bootctl_module} mlxbf_tmfifo dw_mmc_bluefield mmc_block virtio_console" --filesystems "xfs vfat" --gzip $initramfs ${kernel}
+dracut --no-hostonly -m "bash network base shutdown" --add-drivers "${bootctl_module} mlxbf_tmfifo dw_mmc_bluefield mmc_block virtio_console mlx5_core mlx5_ib mlxfw ib_umad nvme gpio-mlxbf2 gpio-mlxbf3 mlxbf-gige pinctrl-mlxbf3 8021q vitesse" --filesystems "xfs vfat" --gzip $initramfs ${kernel}
 
 rm -f /etc/udev/rules.d/91-tmfifo_net.rules /etc/udev/rules.d/92-oob_net.rules
 
@@ -137,6 +137,7 @@ GRUB_CMDLINE_LINUX="crashkernel=auto console=hvc0 console=ttyAMA0 earlycon=pl011
 GRUB_DISABLE_RECOVERY="true"
 GRUB_TIMEOUT_STYLE=countdown
 GRUB_DISABLE_OS_PROBER=false
+GRUB_DISABLE_LINUX_UUID=false
 EOF
 
 case "$(file --brief --mime-type "$initramfs")" in
@@ -194,7 +195,7 @@ copy_rpm()
     package=$1
 
     if ! (rpm -q $package); then
-        yum install -y $package > /dev/null 2>&1 || return
+        yum install -y $package || return
     fi
 
     case $package in
@@ -308,9 +309,9 @@ boot_args=$(mktemp)
 boot_args2=$(mktemp)
 boot_path=$(mktemp)
 boot_desc=$(mktemp)
-printf "console=ttyAMA1 console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 earlycon=pl011,0x01800000 initrd=initramfs" > \
+printf "console=ttyAMA1 console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 earlycon=pl011,0x01800000 initrd=initramfs quiet" > \
     "$boot_args"
-printf "console=hvc0 console=ttyAMA0 earlycon=pl011,0x13010000 initrd=initramfs" > \
+printf "console=ttyAMA1 console=hvc0 console=ttyAMA0 earlycon=pl011,0x13010000 initrd=initramfs quiet" > \
 	"$boot_args2"
 
 printf "VenHw(F019E406-8C9C-11E5-8797-001ACA00BFC4)/Image" > "$boot_path"

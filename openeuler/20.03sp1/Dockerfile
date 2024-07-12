@@ -30,13 +30,30 @@ RUN dnf install -y --nobest --disableexcludes=kubernetes \
 	grubby grub2-efi-aa64 efibootmgr \
 	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libmd-1.1.0-1.el8.aarch64.rpm \
 	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libmd-devel-1.1.0-1.el8.aarch64.rpm \
-	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libbsd-devel-0.11.7-2.el8.aarch64.rpm \
-	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libbsd-0.11.7-2.el8.aarch64.rpm \
+	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libbsd-devel-0.12.2-1.el8.aarch64.rpm \
+	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libbsd-0.12.2-1.el8.aarch64.rpm \
 	https://download.fedoraproject.org/pub/epel/7/aarch64/Packages/l/lcov-1.13-1.el7.noarch.rpm \
 	https://download.fedoraproject.org/pub/epel/7/aarch64/Packages/r/re2c-0.14.3-2.el7.aarch64.rpm \
 	https://vault.centos.org/centos/8/BaseOS/aarch64/os/Packages/watchdog-5.15-2.el8.aarch64.rpm
 
 RUN dnf install -y --nobest rpm-build rpm-sign automake meson cmake gcc-c++
+
+RUN echo -e "[kubernetes] \n\
+name=Kubernetes  \n\
+baseurl=https://pkgs.k8s.io/core:/stable:/v1.25/rpm/ \n\
+enabled=1 \n\
+gpgcheck=1 \n\
+gpgkey=https://pkgs.k8s.io/core:/stable:/v1.25/rpm/repodata/repomd.xml.key \n\
+exclude=kubelet kubeadm kubectl" > /etc/yum.repos.d/kubernetes.repo
+
+RUN echo -e "[docker-ce-stable] \n\
+name=Docker CE Stable - \$basearch \n\
+baseurl=https://download.docker.com/linux/centos/8/\$basearch/stable \n\
+enabled=1 \n\
+gpgcheck=1 \n\
+gpgkey=https://download.docker.com/linux/centos/gpg" > /etc/yum.repos.d/docker-ce.repo
+
+RUN dnf install -y --disableexcludes=kubernetes containerd.io kubelet-1.25.16-150500.1.1.aarch64 cri-tools-1.26.0-150500.1.1.aarch64 kubernetes-cni-1.2.0-150500.2.1.aarch64
 
 RUN echo -e "[doca] \n\
 name=Nvidia DOCA repository \n\

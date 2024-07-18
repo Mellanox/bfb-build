@@ -63,7 +63,7 @@ RUN apt update
 # Install Libvirt+QEMU+KVM
 RUN apt install -y bridge-utils cpu-checker libvirt-clients libvirt-daemon qemu qemu-kvm
 RUN apt upgrade -y
-RUN apt install -y containerd=1.7.2-0ubuntu1~22.04.1 runc
+RUN apt install -y containerd runc
 RUN apt install -y kubelet=1.29.3-1.1 kubernetes-cni=1.3.0-1.1 cri-tools=1.29.0-1.1 kubeadm=1.29.3-1.1
 RUN rm -f /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf
 RUN apt-mark hold kubelet cri-tools kubernetes-cni kubeadm

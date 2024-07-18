@@ -154,5 +154,3 @@ RUN mkdir -p /boot/efi/EFI/ubuntu/; \
 	/boot/efi/EFI/BOOT/
 
 RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" -e "s/prod/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
-
-CMD ["bash", "-x", "/root/workspace/build_ubuntu_bfb"]

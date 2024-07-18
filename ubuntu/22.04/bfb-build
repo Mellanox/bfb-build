@@ -57,6 +57,7 @@ INCLUDE_BF2BMC=${INCLUDE_BF2BMC:-"yes"}
 INCLUDE_BF3BMC=${INCLUDE_BF3BMC:-"yes"}
 INCLUDE_DOCA_SERVICES=${INCLUDE_DOCA_SERVICES:-"yes"}
 BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
+LEAVE_CONTAINER=${LEAVE_CONTAINER:-"no"}
 
 WDIR=/tmp/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}.$$
 echo "Downloading mlxbf-bootimages..."
@@ -119,7 +120,6 @@ sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/g;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/g" \
 
 docker build -t ${docker_image} \
 	--progress=plain \
-	--no-cache \
 	--build-arg BASE_URL=$BASE_URL \
 	--build-arg DOCA_VERSION=$DOCA_VERSION \
 	--build-arg BSP_VERSION=$BSP_VERSION \
@@ -127,14 +127,28 @@ docker build -t ${docker_image} \
 	--build-arg DISTRO_VERSION=$DISTRO_VERSION \
 	-f Dockerfile .
 
-docker run -t --rm --privileged -e container=docker \
+DOCKER_RUN_PARAMS="--privileged -e container=docker \
 	-v $PWD:/workspace \
 	--name BlueField_OS_${DISTRO}_${DISTRO_VERSION} \
 	--mount type=bind,source=/dev,target=/dev \
 	--mount type=bind,source=/sys,target=/sys \
-	--mount type=bind,source=/proc,target=/proc \
-	${docker_image}
+	--mount type=bind,source=/proc,target=/proc"
+
+if [ "X${LEAVE_CONTAINER}" == "Xyes" ]; then
+	DOCKER_RUN_PARAMS="-d -it ${DOCKER_RUN_PARAMS}"
+	docker_id=$(docker run ${DOCKER_RUN_PARAMS} \
+		${docker_image} /bin/bash)
+	docker exec -it ${docker_id} /bin/bash -x /root/workspace/build_ubuntu_bfb
+else
+	DOCKER_RUN_PARAMS="-t --rm ${DOCKER_RUN_PARAMS}"
+	docker run ${DOCKER_RUN_PARAMS} \
+		${docker_image} /bin/bash -x /root/workspace/build_ubuntu_bfb
+fi
 
 readlink -f *.bfb
 
 echo "Default user/password is: ubuntu/ubuntu"
+
+if [ "X${LEAVE_CONTAINER}" == "Xyes" ]; then
+	echo "Container name: BlueField_OS_${DISTRO}_${DISTRO_VERSION} id: ${docker_id}"
+fi

@@ -37,6 +37,13 @@ IMAGE_TYPE=dev ./bfb-build <distro> <version>
 
 The BFB is created under `/tmp/<distro>/<version>.<pid>` directory.
 
+Set environment variable LEAVE_CONTAINER=yes to leave the docker
+container used to build BFB for development/compilation and
+customization:
+
+````
+LEAVE_CONTAINER=yes IMAGE_TYPE=prod ./bfb-build <distro> <version>
+````
 
 # 1. Contents
 

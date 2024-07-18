@@ -332,7 +332,9 @@ if [ -d ${SDIR}/BF3BMC/ ]; then
 	else
 		echo "WARNING: BF3 BMC Software was not found"
 	fi
-	[ -d ${SDIR}/BF3BMC/golden_images ] && cp -a ${SDIR}/BF3BMC/golden_images ./BF3BMC || echo "WARNING: BF3 Golden Images for BMC were not found"
+	if [ ! -d ./BF3BMC/golden_images ]; then
+		[ -d ${SDIR}/BF3BMC/golden_images ] && cp -a ${SDIR}/BF3BMC/golden_images ./BF3BMC || echo "WARNING: BF3 Golden Images for BMC were not found"
+	fi
 fi
 
 if [ -d ${SDIR}/BF2BMC/ ]; then

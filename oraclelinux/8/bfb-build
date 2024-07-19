@@ -50,6 +50,7 @@ BUILDVER=${BUILDVER:-"16"}
 
 WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
 BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
+LEAVE_CONTAINER=${LEAVE_CONTAINER:-"no"}
 
 mkdir -p $WDIR
 
@@ -121,19 +122,34 @@ sed -e "s/@DISTRO_VERSION@/${DISTRO_VERSION}/g" \
 	Dockerfile.run > $WDIR/Dockerfile
 
 docker build -t ${docker_image} \
+	--progress=plain \
 	--build-arg BASE_URL=$BASE_URL \
 	--build-arg DOCA_VERSION=$DOCA_VERSION \
 	--build-arg BSP_VERSION=$BSP_VERSION \
 	-f Dockerfile .
 
-docker run -t --rm --privileged -e container=docker \
+DOCKER_RUN_PARAMS="--privileged -e container=docker \
 	-v $PWD:/workspace \
 	--name BlueField_OS_${DISTRO}_${DISTRO_VERSION} \
 	--mount type=bind,source=/dev,target=/dev \
 	--mount type=bind,source=/sys,target=/sys \
-	--mount type=bind,source=/proc,target=/proc \
-	${docker_image}
+	--mount type=bind,source=/proc,target=/proc"
+
+if [ "X${LEAVE_CONTAINER}" == "Xyes" ]; then
+	DOCKER_RUN_PARAMS="-d -it ${DOCKER_RUN_PARAMS}"
+	docker_id=$(docker run ${DOCKER_RUN_PARAMS} \
+		${docker_image} /bin/bash)
+	docker exec -it ${docker_id} /bin/bash -x /root/workspace/run_create_bfb
+else
+	DOCKER_RUN_PARAMS="-t --rm ${DOCKER_RUN_PARAMS}"
+	docker run ${DOCKER_RUN_PARAMS} \
+		${docker_image} /bin/bash -x /root/workspace/run_create_bfb
+fi
 
 readlink -f *.bfb
 
 echo "Default root password is: oracle"
+
+if [ "X${LEAVE_CONTAINER}" == "Xyes" ]; then
+	echo "Container name: BlueField_OS_${DISTRO}_${DISTRO_VERSION} id: ${docker_id}"
+fi

@@ -1,0 +1,140 @@
+#!/bin/bash -e
+###############################################################################
+#
+# Copyright 2022 NVIDIA Corporation
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+###############################################################################
+
+cd ${0%*/*}
+
+if [ ! -e Dockerfile ]; then
+	echo "ERROR: Dockerfile is missing."
+	exit 1
+fi
+
+if ! (which wget > /dev/null 2>&1); then
+	echo "wget is required to build BFB"
+	exit 1
+fi
+
+if ! (which docker > /dev/null 2>&1); then
+	echo "docker is required to build BFB"
+	exit 1
+fi
+
+DISTRO="debian"
+DISTRO_VERSION="12"
+DISTRO_KERNEL=${DISTRO_KERNEL:-"-6.10"}
+ARCH=${ARCH:-"arm64-dpu"}
+DOCA_VERSION="2.5.2"
+BSP_VERSION="4.5.2-13183"
+MLNX_OFED_VERSION="23.10-3.2.1.1"
+IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
+CUSTOM_VERSION=${CUSTOM_VERSION:-""}
+BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
+LEAVE_CONTAINER=${LEAVE_CONTAINER:-"no"}
+
+WDIR=/tmp/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}.$$
+
+mkdir -p $WDIR
+echo "Downloading mlxbf-bootimages..."
+case "$IMAGE_TYPE" in
+	prod)
+		bootimages="mlxbf-bootimages-signed_${BSP_VERSION}_arm64.deb"
+		;;
+	dev)
+		bootimages="mlxbf-bootimages-devsigned_${BSP_VERSION}_arm64.deb"
+		;;
+	unsigned)
+		bootimages="mlxbf-bootimages_${BSP_VERSION}_arm64.deb"
+		;;
+esac
+
+wget -q -P $WDIR ${BASE_URL}/doca/${DOCA_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/${ARCH}/$bootimages
+mv $WDIR/mlxbf-bootimages*arm64.deb $WDIR/mlxbf-bootimages.deb
+
+cp -a \
+	Dockerfile \
+	create_bfb \
+	install.sh \
+	../../common/tools/qemu-aarch64-static \
+	$WDIR
+
+cd $WDIR
+
+cat > debian.sources << 'EOF'
+Types: deb
+# http://snapshot.debian.org/archive/debian/20230725T000000Z
+URIs: http://deb.debian.org/debian
+Suites: bookworm bookworm-updates
+Components: main
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+
+Types: deb
+# http://snapshot.debian.org/archive/debian-security/20230725T000000Z
+URIs: http://deb.debian.org/debian-security
+Suites: bookworm-security
+Components: main
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+EOF
+
+docker_image=bfb_runtime_${DISTRO,,}${DISTRO_VERSION,,}${DISTRO_KERNEL}
+
+docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION}${DISTRO_KERNEL} 2> /dev/null
+
+sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/g;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/g" \
+    -e "s,@BASE_URL@,$BASE_URL,g" \
+    -e "s/@DOCA_VERSION@/$DOCA_VERSION/g" Dockerfile
+
+docker build -t ${docker_image} \
+	--progress=plain \
+	--build-arg BASE_URL=$BASE_URL \
+	--build-arg DOCA_VERSION=$DOCA_VERSION \
+	--build-arg BSP_VERSION=$BSP_VERSION \
+	--build-arg DISTRO=$DISTRO \
+	--build-arg DISTRO_VERSION=$DISTRO_VERSION \
+	--build-arg DISTRO_KERNEL=$DISTRO_KERNEL \
+	-f Dockerfile .
+
+DOCKER_RUN_PARAMS="--privileged -e container=docker \
+	-v $PWD:/workspace \
+	--name BlueField_OS_${DISTRO}_${DISTRO_VERSION}${DISTRO_KERNEL} \
+	--mount type=bind,source=/dev,target=/dev \
+	--mount type=bind,source=/sys,target=/sys \
+	--mount type=bind,source=/proc,target=/proc"
+
+if [ "X${LEAVE_CONTAINER}" == "Xyes" ]; then
+	DOCKER_RUN_PARAMS="-d -it ${DOCKER_RUN_PARAMS}"
+	docker_id=$(docker run ${DOCKER_RUN_PARAMS} \
+		${docker_image} /bin/bash)
+	docker exec -it ${docker_id} bash -x /root/workspace/create_bfb -k 6.1.0-11-arm64
+else
+	DOCKER_RUN_PARAMS="-t --rm ${DOCKER_RUN_PARAMS}"
+	docker run ${DOCKER_RUN_PARAMS} \
+		${docker_image} /bin/bash -x /root/workspace/create_bfb -k 6.1.0-11-arm64
+fi
+
+readlink -f *.bfb
+
+echo "Default root password is: debian"
+
+if [ "X${LEAVE_CONTAINER}" == "Xyes" ]; then
+	echo "Container name: BlueField_OS_${DISTRO}_${DISTRO_VERSION}${DISTRO_KERNEL} id: ${docker_id}"
+fi

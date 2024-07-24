@@ -62,7 +62,7 @@ fi
 
 default_device=/dev/mmcblk0
 if [ -b /dev/nvme0n1 ]; then
-	default_device="/dev/$(cd /sys/block; /bin/ls -1d nvme* | sort -n | tail -1)"
+	default_device="/dev/$(cd /sys/block; /bin/ls -1d nvme* | sort -V | tail -1)"
 fi
 device=${device:-"$default_device"}
 root_device=${device/\/dev\/}p2

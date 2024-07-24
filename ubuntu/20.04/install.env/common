@@ -275,8 +275,8 @@ prepare_target_partitions()
 	if [ "$SHRED_DRIVES" == "yes" ]; then
 		if [ -x /usr/bin/shred ]; then
 			if [ -b /dev/nvme0n1 ]; then
-				log "Shredding /dev/$(cd /sys/block; /bin/ls -1d nvme* | sort -n | tail -1)"
-				shred -n 1 -v "/dev/$(cd /sys/block; /bin/ls -1d nvme* | sort -n | tail -1)" &
+				log "Shredding /dev/$(cd /sys/block; /bin/ls -1d nvme* | sort -V | tail -1)"
+				shred -n 1 -v "/dev/$(cd /sys/block; /bin/ls -1d nvme* | sort -V | tail -1)" &
 			fi
 			if [ -b /dev/mmcblk0 ]; then
 				log "Shredding /dev/mmcblk0"

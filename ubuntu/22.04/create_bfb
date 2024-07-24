@@ -256,7 +256,7 @@ for deb in mlxbf-scripts mft mft-oem dosfstools e2fsprogs fdisk kmod pciutils \
 		   sshpass openssh-client util-linux ipmitool procps debianutils \
 		   iproute2 findutils perl-base $libperl $perl_modules \
 		   $libpython3_minimal $python3_distutils $python3_lib2to3 $python3 \
-		   $libpython3 bsdutils libexpat1 wget $ADDON_DEBS
+		   $libpython3 bsdutils libexpat1 wget net-tools isc-dhcp-client $ADDON_DEBS
 do
 	for pfile in $(dpkg -L $deb)
 	do

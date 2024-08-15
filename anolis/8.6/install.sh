@@ -28,6 +28,10 @@ PATH="/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:/opt/mellanox
 distro="Anolis"
 BDIR=$(dirname $0)
 
+sleep 2m
+/sbin/modprobe nvme
+/sbin/modprobe mlx5_core
+
 #
 # Check PXE installation
 #
@@ -58,10 +62,6 @@ if [ -e ${BDIR}/install.env/bmc ]; then
 else
 	ilog "WARNING: BMC installation environment is missing"
 fi
-
-sleep 2m
-/sbin/modprobe nvme
-/sbin/modprobe mlx5_core
 
 # Create partitions.
 default_device=/dev/mmcblk0

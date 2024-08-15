@@ -29,51 +29,7 @@ LANG=C
 SDIR="/root/workspace"
 BFB="${BFB:-/lib/firmware/mellanox/boot/default.bfb}"
 CAPSULE="${CAPSULE:-/lib/firmware/mellanox/boot/capsule/boot_update2.cap}"
-verbose=0
-kdir=$(/bin/ls -1d /lib/modules/4.18* /lib/modules/4.19* /lib/modules/4.20* /lib/modules/5.* 2> /dev/null | head -1)
-if [ -n "$kdir" ]; then
-    kernel=${kdir##*/}
-else
-    kernel=$(/bin/ls -1 /lib/modules/ | head -1)
-fi
-
-usage() {
-cat << EOF
-Usage: $(basename $0) [ OPTIONS ]
-OPTIONS:
--k, -kernel,    --kernel <kernel version>  Kernel version for the SmartNIC. Default: $kernel
--v, -verbose,   --verbose                       Run script in verbose mode. Will print out each step of execution.
--h, -help,      --help                          Display help
-
-
-EOF
-}
-
-options=$(getopt -l "kernel:,help,verbose" -o "k:hv" -a -- "$@")
-
-eval set -- "$options"
-
-while true
-do
-        case $1 in
-                -h|--help)
-                    usage
-                    exit 0
-                    ;;
-                -k|--kernel)
-                    shift
-                    kernel=$1
-                    ;;
-                -v|--verbose)
-                    verbose=1
-                    set -xv
-                    ;;
-                --)
-                    shift
-                    break;;
-        esac
-        shift
-done
+kernel=$(/bin/ls -1 /lib/modules/ | head -1)
 
 SCRIPTS_DIR=$(dirname $0)
 
@@ -128,7 +84,7 @@ GRUB_DEFAULT=saved
 GRUB_DISABLE_SUBMENU=true
 GRUB_TERMINAL=console
 GRUB_SERIAL_COMMAND="serial --unit=1"
-GRUB_CMDLINE_LINUX="crashkernel=auto console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 modprobe.blacklist=mlx5_core,mlx5_ib net.ifnames=0 biosdevname=0"
+GRUB_CMDLINE_LINUX="crashkernel=1024M console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 modprobe.blacklist=mlx5_core,mlx5_ib net.ifnames=0 biosdevname=0"
 GRUB_DISABLE_RECOVERY="true"
 GRUB_TIMEOUT_STYLE=countdown
 GRUB_DISABLE_OS_PROBER=false
@@ -226,7 +182,7 @@ copy_rpm()
 }
 
 # Copy the content of RPM packages
-for package in mlxbf-bfscripts kmod util-linux dosfstools e2fsprogs pciutils usbutils chkconfig mft mft-oem kernel-mft tar xfsprogs coreutils-single parted which curl openssl gawk passwd net-tools wget nvme-cli mmc-utils iputils sshpass openssh-clients findutils mokutil $ADDON_RPMS
+for package in mlxbf-bfscripts kmod util-linux dosfstools e2fsprogs pciutils usbutils chkconfig mft mft-oem kernel-mft tar xfsprogs coreutils-single parted which curl openssl gawk passwd net-tools wget nvme-cli mmc-utils iputils sshpass openssh-clients findutils mokutil dhcp-client $ADDON_RPMS
 do
     copy_rpm $package || true
 done
@@ -234,7 +190,7 @@ done
 # Copy tools
 for tool in xz efibootmgr bash getopt hexdump mstflint lspci perl \
         lsblk shutdown systemctl strings \
-        mlxbf-bootctl id grep jq $ADDON_TOOLS
+        mlxbf-bootctl id grep jq hostnamectl ipcalc $ADDON_TOOLS
 do
     if [ -d $tool ]; then
         continue
@@ -250,30 +206,40 @@ mkdir -p ./lib/firmware/mellanox/boot/
 cp /lib/firmware/mellanox/boot/default.bfb ./lib/firmware/mellanox/boot/default.bfb
 cp -a /lib/firmware/mellanox/boot/capsule ./lib/firmware/mellanox/boot/
 cp $CAPSULE ./lib/firmware/mellanox/boot/capsule/
+
+mkdir -p ./lib/udev/rules.d
+cp /lib/udev/rules.d/82-net-setup-link.rules ./lib/udev/rules.d/82-net-setup-link.rules
+mkdir -p ./etc/infiniband
+cp /etc/infiniband/vf-net-link-name.sh ./etc/infiniband/vf-net-link-name.sh
+
 mkdir -p mnt
 
 if [ -d ${SDIR}/BF3BMC/ ]; then
 	/bin/rm -rf BF3BMC
-	if (grep -q prod /etc/mlnx-release) && [ -d ${SDIR}/BF3BMC/pk ]; then
-		cp -a ${SDIR}/BF3BMC/pk ./BF3BMC
-	elif (grep -q dev /etc/mlnx-release) && [ -d ${SDIR}/BF3BMC/dk ]; then
-		cp -a ${SDIR}/BF3BMC/dk ./BF3BMC
-	elif [ -d ${SDIR}/BF3BMC/qp ]; then
-		cp -a ${SDIR}/BF3BMC/qp ./BF3BMC
+	if (grep -q prod /etc/mlnx-release); then
+		cp -a ${SDIR}/BF3BMC/pk ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
+	elif (grep -q dev /etc/mlnx-release); then
+		cp -a ${SDIR}/BF3BMC/dk ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
 	else
-		echo "WARNING: BF3 BMC Software was not found"
+		cp -a ${SDIR}/BF3BMC/qp ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
 	fi
-	[ -d ${SDIR}/BF3BMC/golden_images ] && cp -a ${SDIR}/BF3BMC/golden_images ./BF3BMC || echo "WARNING: BF3 Golden Images for BMC were not found"
+	[ -d ${SDIR}/BF3BMC/golden_images ] && cp -a ${SDIR}/BF3BMC/golden_images ./BF3BMC
 fi
 
 if [ -d ${SDIR}/BF2BMC/ ]; then
 	/bin/rm -rf BF2BMC
 	if (grep -q prod /etc/mlnx-release); then
-		[ -d ${SDIR}/BF2BMC/pk ] && cp -a ${SDIR}/BF2BMC/pk ./BF2BMC || echo "WARNING: BF2 BMC Software was not found"
+		cp -a ${SDIR}/BF2BMC/pk ./BF2BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
 	else
-		[ -d ${SDIR}/BF2BMC/qp ] && cp -a ${SDIR}/BF2BMC/qp ./BF2BMC || echo "WARNING: BF2 BMC Software was not found"
+		cp -a ${SDIR}/BF2BMC/qp/ ./BF2BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
 	fi
 fi
+
+# Remove hostname that includes docker container's id
+/bin/rm -f ./etc/hostname
+echo localhost > /etc/hostname
+
+touch ./etc/fstab
 
 mkdir -p anolis
 # Tar the image
@@ -303,6 +269,7 @@ if [ \$? -eq 0 ]; then
         echo "Installation finished. Rebooting..." | tee /dev/kmsg
         echo "===================================" | tee /dev/kmsg
         echo
+        sleep 3
         reboot -f
 else
         echo "========================" | tee /dev/kmsg
@@ -315,7 +282,7 @@ chmod +x scripts/initrd-install
 
 cat > usr/lib/systemd/system/install-anolis.service << EOF
 [Unit]
-Description=Install anolis Linux 
+Description=Install anolis Linux
 After=initrd-root-fs.target initrd-parse-etc.service
 After=dracut-initqueue.service dracut-mount.service
 

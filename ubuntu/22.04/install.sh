@@ -29,6 +29,30 @@ CHROOT_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 distro="Ubuntu"
 BDIR=$(dirname $0)
 
+load_module()
+{
+	local mod=$1
+
+	modprobe $mod
+}
+
+# Check NIC mode
+is_nic_mode=0
+cx_pcidev=$(lspci -nD 2> /dev/null | grep 15b3:a2d[26c] | awk '{print $1}' | head -1)
+str=`mlxconfig -d $cx_pcidev -e q INTERNAL_CPU_OFFLOAD_ENGINE 2>/dev/null | grep INTERNAL_CPU_OFFLOAD_ENGINE | awk '{print $(NF-1)}'`
+if [ ."$str" = ."DISABLED(1)" ]; then
+    is_nic_mode=1
+fi
+
+if [ $is_nic_mode -eq 0 ]; then
+    load_module mlx5_core
+    load_module mlx5_ib
+    load_module mlxfw
+    load_module ib_umad
+    load_module nvme
+fi
+
+
 #
 # Check PXE installation
 #
@@ -234,13 +258,13 @@ mount_target_partition()
 configure_target_os()
 {
 	cat > /mnt/etc/fstab << EOF
-$(lsblk -o UUID -P $ROOT_PARTITION) / auto defaults 0 1
-$(lsblk -o UUID -P $BOOT_PARTITION) /boot/efi vfat umask=0077 0 2
+$(get_part_id $ROOT_PARTITION) / auto defaults 0 1
+$(get_part_id $BOOT_PARTITION) /boot/efi vfat umask=0077 0 2
 EOF
 
 	if [ "X$DUAL_BOOT" == "Xyes" ]; then
 		cat >> /mnt/etc/fstab << EOF
-$(lsblk -o UUID -P $COMMON_PARTITION) /common auto defaults 0 2
+$(get_part_id $COMMON_PARTITION) /common auto defaults 0 2
 EOF
 		mkdir -p /mnt/common
 		mkdir -p /tmp/common
@@ -391,8 +415,8 @@ update_efi_bootmgr()
 configure_services()
 {
 	ilog "$(chroot /mnt /bin/systemctl enable serial-getty@ttyAMA0.service > /dev/null 2>&1)"
-	chroot "$(/mnt /bin/systemctl enable serial-getty@ttyAMA1.service > /dev/null 2>&1)"
-	chroot "$(/mnt /bin/systemctl enable serial-getty@hvc0.service > /dev/null 2>&1)"
+	ilog "$(chroot /mnt /bin/systemctl enable serial-getty@ttyAMA1.service > /dev/null 2>&1)"
+	ilog "$(chroot /mnt /bin/systemctl enable serial-getty@hvc0.service > /dev/null 2>&1)"
 }
 
 enable_sfc_hbn()
@@ -457,7 +481,7 @@ configure_grub()
 		sed -i -r -e "s/(password_pbkdf2 admin).*/\1 ${grub_admin_PASSWORD}/" /mnt/etc/grub.d/40_custom
 	fi
 
-	if (hexdump -C /sys/firmware/acpi/tables/SSDT* | grep -q MLNXBF33); then
+	if (grep -q MLNXBF33 /sys/firmware/acpi/tables/SSDT*); then
 		# BlueField-3
 		sed -i -e "s/0x01000000/0x13010000/g" /mnt/etc/default/grub
 	fi

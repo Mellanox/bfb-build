@@ -1,87 +1,34 @@
 #!/bin/bash
 
-# Copyright (c) 2020, Mellanox Technologies
-# All rights reserved.
+###############################################################################
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
+# Copyright 2023 NVIDIA Corporation
 #
-# 1. Redistributions of source code must retain the above copyright notice, this
-#    list of conditions and the following disclaimer.
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-#    this list of conditions and the following disclaimer in the documentation
-#    and/or other materials provided with the distribution.
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
-# ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
 #
-# The views and conclusions contained in the software and documentation are those
-# of the authors and should not be interpreted as representing official policies,
-# either expressed or implied, of the FreeBSD Project.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+###############################################################################
 
 set -e
 
 SDIR="/root/workspace"
 BFB="${BFB:-/lib/firmware/mellanox/boot/default.bfb}"
 CAPSULE="${CAPSULE:-/lib/firmware/mellanox/boot/capsule/boot_update2.cap}"
-verbose=0
-kdir=$(/bin/ls -1d /lib/modules/4.20* /lib/modules/5.* 2> /dev/null | head -1)
-if [ -n "$kdir" ]; then
-	kernel=${kdir##*/}
-else
-	kernel=$(/bin/ls -1 /lib/modules/ | head -1)
-fi
-
-usage() {
-cat << EOF
-Usage: $(basename $0) [ OPTIONS ]
-OPTIONS:
--i, -install_bfb,    --install_bfb <BFB>        Installation BFB to be used as a basis for the target BFB. Default: $BFB
--k, -kernel,         --kernel <kernel version>  Kernel version for the SmartNIC. Default: $kernel
--v, -verbose,   --verbose                       Run script in verbose mode. Will print out each step of execution.
--h, -help,      --help                          Display help
-
-EOF
-}
-
-
-options=$(getopt -l "install_bfb:,kernel:,help,verbose" -o "i:k:hv" -a -- "$@")
-
-eval set -- "$options"
-
-while true
-do
-	case $1 in
-		-h|--help)
-			usage
-			exit 0
-			;;
-		-i|--install_bfb)
-			shift
-			BFB=$1
-			;;
-		-k|--kernel)
-			shift
-			kernel=$1
-			;;
-		-v|--verbose)
-			verbose=1
-			set -xv
-			;;
-		--)
-			shift
-			break;;
-	esac
-	shift
-done
+kernel=$(/bin/ls -1 /lib/modules/ | head -1)
 
 SCRIPTS_DIR=$(dirname $0)
 
@@ -130,7 +77,15 @@ initramfs=$(realpath $initramfs)
 initramfs=$WDIR/dump-initramfs-v0
 
 ADD_DRIVERS=""
-for mod in mlxbf-bootctl sdhci-of-dwcmshc mlxbf-tmfifo dw_mmc-bluefield mlx5_core mlx5_ib mlxfw ib_umad nvme gpio-mlxbf2 gpio-mlxbf3 mlxbf-gige pinctrl-mlxbf3 8021q
+for mod in mlxbf-bootctl dw_mmc dw_mmc-pltfm mmc_block dw_mmc-bluefield \
+	sdhci sdhci-of-dwcmshc mlxbf-tmfifo \
+	mlx5_core mlx5_ib mlxfw ib_umad nvme \
+	nvme-rdma nvme-tcp ib_ipoib ib_iser \
+	mst_pci mst_pciconf bf3_livefish \
+	gpio-mlxbf2 gpio-mlxbf3 mlxbf-gige \
+	pinctrl-mlxbf3 8021q \
+	ipmi_devintf ipmb_host ipmi_ssif i2c-mlxbf \
+	nls_iso8859-1 $ADDON_KERNEL_MODULES
 do
 	if (modinfo -k $kernel $mod 2>/dev/null | grep "filename:" | grep -q builtin); then
 		continue
@@ -197,37 +152,6 @@ copy_file()
 	done
 }
 
-module_exist()
-{
-	mod=$(find ./lib/modules/$kernel -name "${1}.ko*" 2> /dev/null)
-	test -n "$mod"
-	return $?
-}
-
-copy_module()
-{
-	if module_exist $1; then
-		return
-	fi
-
-	if (modinfo -k $kernel $1 2>/dev/null | grep "filename:" | grep -q builtin); then
-		return
-	fi
-
-	if ! (modinfo -k $kernel $1 2>/dev/null); then
-		return
-	fi
-
-	for mod in $(modinfo -F depends -k $kernel $1 | tr -s ',' ' ')
-	do
-		copy_module $mod
-	done
-
-	mod_ko=$(modinfo -F filename -k $kernel $1)
-	mkdir -p ./$(dirname ${mod_ko})
-	sudo cp ${mod_ko} ./${mod_ko}
-}
-
 (cd usr/bin; sudo ln -s xz xzcat)
 cp $(readlink -f /usr/bin/which) ./usr/bin/which
 
@@ -250,12 +174,15 @@ libpython3_minimal=$(dpkg -S /usr/lib/python3*/os.py | head -1 | cut -d ':' -f 1
 libpython3=$(dpkg -S /usr/lib/aarch64-linux-gnu/libpython3.*.so.1 | head -1 | cut -d ':' -f 1 | tr -d ',')
 python3_distutils=$(dpkg -S /usr/lib/python3.*/distutils | head -1 | cut -d ':' -f 1 | tr -d ',')
 python3_lib2to3=$(dpkg -S /usr/lib/python3.*/lib2to3 | head -1 | cut -d ':' -f 1 | tr -d ',')
+python_bin=$(readlink -f /usr/bin/python)
+python_deb=$(dpkg -S $python_bin | head -1 | cut -d ':' -f 1 | tr -d ',')
+python_ver=$(python -V | cut -d ' ' -f 2 | cut -d '.' -f1,2)
 
 for deb in mlxbf-scripts mft mft-oem dosfstools e2fsprogs fdisk kmod pciutils \
 		   usbutils tar coreutils nvme-cli mmc-utils iputils-ping uuid-runtime \
 		   sshpass openssh-client util-linux ipmitool procps debianutils \
 		   iproute2 findutils perl-base $libperl $perl_modules \
-		   $libpython3_minimal $python3_distutils $python3_lib2to3 $python3 \
+		   $libpython3_minimal $python3_distutils $python3_lib2to3 $python3 $python_deb \
 		   $libpython3 bsdutils libexpat1 wget net-tools isc-dhcp-client $ADDON_DEBS
 do
 	for pfile in $(dpkg -L $deb)
@@ -282,17 +209,14 @@ do
 	done
 done
 
-for mod in mlxbf_tmfifo dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block sdhci sdhci-of-dwcmshc nvme-rdma nvme-tcp nvme mlx5_ib mlxfw ib_umad ib_ipoib ib_iser mst_pci mst_pciconf bf3_livefish ipmi_devintf ipmb_host ipmi_ssif i2c-mlxbf nls_iso8859-1 $ADDON_KERNEL_MODULES
-do
-	copy_module $mod
-done
-sudo depmod -a -b ./ $kernel
-
 sudo mkdir -p usr/share/misc/ bin/ var/log/watchdog
 sudo cp /usr/share/misc/pci.ids usr/share/misc/
 sudo cp /etc/watchdog.conf etc
 if ! [ -e usr/bin/python ]; then
-	ln -s python3.10 usr/bin/python
+	ln -s python${python_ver} usr/bin/python
+fi
+if ! [ -e usr/bin/python3 ]; then
+	ln -s python${python_ver} usr/bin/python3
 fi
 
 # Make sure we can load mlx-bootctl
@@ -323,28 +247,38 @@ sudo mkdir -p mnt
 
 if [ -d ${SDIR}/BF3BMC/ ]; then
 	/bin/rm -rf BF3BMC
-	if (grep -q prod /etc/mlnx-release) && [ -d ${SDIR}/BF3BMC/pk ]; then
-		cp -a ${SDIR}/BF3BMC/pk ./BF3BMC
-	elif (grep -q dev /etc/mlnx-release) && [ -d ${SDIR}/BF3BMC/dk ]; then
-		cp -a ${SDIR}/BF3BMC/dk ./BF3BMC
-	elif [ -d ${SDIR}/BF3BMC/qp ]; then
-		cp -a ${SDIR}/BF3BMC/qp ./BF3BMC
+	if (grep -q prod /etc/mlnx-release); then
+		cp -a ${SDIR}/BF3BMC/pk ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
+	elif (grep -q dev /etc/mlnx-release); then
+		cp -a ${SDIR}/BF3BMC/dk ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
 	else
-		echo "WARNING: BF3 BMC Software was not found"
+		cp -a ${SDIR}/BF3BMC/qp ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
 	fi
-	if [ ! -d ./BF3BMC/golden_images ]; then
-		[ -d ${SDIR}/BF3BMC/golden_images ] && cp -a ${SDIR}/BF3BMC/golden_images ./BF3BMC || echo "WARNING: BF3 Golden Images for BMC were not found"
-	fi
+	[ -d ${SDIR}/BF3BMC/golden_images ] && cp -a ${SDIR}/BF3BMC/golden_images ./BF3BMC
 fi
 
 if [ -d ${SDIR}/BF2BMC/ ]; then
 	/bin/rm -rf BF2BMC
 	if (grep -q prod /etc/mlnx-release); then
-		[ -d ${SDIR}/BF2BMC/pk ] && cp -a ${SDIR}/BF2BMC/pk ./BF2BMC || echo "WARNING: BF2 BMC Software was not found"
+		cp -a ${SDIR}/BF2BMC/pk ./BF2BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
 	else
-		[ -d ${SDIR}/BF2BMC/qp ] && cp -a ${SDIR}/BF2BMC/qp ./BF2BMC || echo "WARNING: BF2 BMC Software was not found"
+		cp -a ${SDIR}/BF2BMC/qp/ ./BF2BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
 	fi
 fi
+
+# Remove hostname that includes docker container's id
+/bin/rm -f ./etc/hostname
+echo localhost > /etc/hostname
+
+touch ./etc/fstab
+
+# Prevent the modules from loading automatically by blacklisting them
+cat > ./etc/modprobe.d/blacklist-mlx5.conf << EOF
+blacklist mlx5_core
+blacklist mlx5_ib
+blacklist mlxfw
+blacklist ib_umad
+EOF
 
 ex mkdir -p ubuntu
 # Tar the image
@@ -368,8 +302,6 @@ modprobe mlxbf_tmfifo > /dev/null 2>&1
 modprobe -a ipmi_msghandler ipmi_devintf i2c-mlxbf
 modprobe ipmb_host slave_add=0x10
 echo ipmb-host 0x1011 > /sys/bus/i2c/devices/i2c-1/new_device
-modprobe -a mlx5_ib mlxfw ib_umad
-modprobe nvme > /dev/null 2>&1
 insmod /mlx-bootctl.ko > /dev/null 2>&1
 insmod /sbsa_gwdt.ko > /dev/null 2>&1
 /usr/sbin/watchdog > /dev/null 2>&1
@@ -384,6 +316,7 @@ if [ \$? -eq 0 ]; then
 	printf_msg "Installation finished. Rebooting..."
 	printf_msg "==================================="
 	printf_msg
+	sleep 3
 	reboot -f
 else
 	printf_msg "========================"

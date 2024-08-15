@@ -1,12 +1,6 @@
-FROM debian:12
+FROM --platform=linux/arm64 debian:12
 ADD qemu-aarch64-static /usr/bin/
 
-ARG BASE_URL
-ARG DOCA_VERSION
-ARG BSP_VERSION
-ARG DISTRO
-ARG DISTRO_VERSION
-ARG DISTRO_KERNEL
 ARG MLXBF_BOOTIMAGES=mlxbf-bootimages
 ARG MLNX_FW_UPDATER=mlnx-fw-updater-signed
 WORKDIR /root/workspace
@@ -16,165 +10,135 @@ ADD create_bfb .
 ADD mlxbf-bootimages.deb .
 ADD BF2BMC ./BF2BMC
 ADD BF3BMC ./BF3BMC
-ADD debian.sources /etc/apt/sources.list.d/debian.sources
+ADD 10-mlx-console-messages.conf /etc/sysctl.d/
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV FLASH_KERNEL_SKIP=yes
-ENV RUN_FW_UPDATER=no
+ENV DEBIAN_FRONTEND="noninteractive" FLASH_KERNEL_SKIP="yes" RUN_FW_UPDATER="no"
 
-# Avoid running flash-kernel post install
-RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
+ADD repos/ /etc/apt/sources.list.d/
+ADD apt-preferences /etc/apt/preferences.d/99doca
+ADD --chown=0:0 --chmod=644 https://download.docker.com/linux/debian/gpg /etc/apt/keyrings/docker.asc
+ADD --chown=0:0 --chmod=644 https://prod-cdn.packages.k8s.io/repositories/isv:/kubernetes:/core:/stable:/v1.29/deb/Release.key /etc/apt/keyrings/kubernetes.asc
 
-# Install Docker
-RUN apt-get update -y -q
-RUN apt-get install -y -q \
-    apt-transport-https \
-    ca-certificates \
-    curl \
-    sudo \
-    gnupg-agent \
-    software-properties-common \
-    apt-utils
-RUN install -m 0755 -d /etc/apt/keyrings
-RUN curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-RUN chmod a+r /etc/apt/keyrings/docker.asc
-RUN echo \
-    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
-    $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-    sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-RUN curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-RUN echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
-RUN curl -fsSL https://linux.mellanox.com/public/repo/doca/GPG-KEY-Mellanox.pub | gpg --dearmor > /etc/apt/trusted.gpg.d/GPG-KEY-Mellanox.pub
-RUN apt update -y -q
-RUN apt install -y docker-ce docker-ce-cli containerd.io kubelet=1.29.3-1.1 kubernetes-cni=1.3.0-1.1 cri-tools=1.29.0-1.1 kubeadm=1.29.3-1.1
-RUN rm -f /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf
+RUN apt-get clean -y && \
+    apt-get update -o "Acquire::https::Verify-Peer=false" -y && \
+    apt-get install -o "Acquire::https::Verify-Peer=false" -y ca-certificates locales && \
+    sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen && \
+    dpkg-reconfigure locales && \
+    apt-get clean -y && \
+    apt-get update -y && \
+    apt-get upgrade -y && \
+    apt-get install -y \
+        acpid \
+        bash-completion \
+        bc \
+        bridge-utils \
+        bsdextrautils \
+        build-essential \
+        conntrack \
+        containerd.io \
+        cri-tools \
+        curl \
+        dc \
+        dmidecode \
+        dnsmasq \
+        docker-ce \
+        docker-ce-cli \
+        dosfstools \
+        dracut \
+        dracut-network \
+        ebtables \
+        edac-utils \
+        ethtool \
+        fdisk \
+        file \
+        gawk \
+        grub-efi \
+        i2c-tools \
+        ifenslave \
+        iperf3 \
+        ipmitool \
+        iptables-persistent \
+        iputils-arping \
+        iputils-ping \
+        iputils-tracepath \
+        irqbalance \
+        isc-dhcp-client \
+        jq \
+        kexec-tools \
+        kubeadm \
+        kubelet \
+        kubernetes-cni \
+        less \
+        libev4 \
+        libgdbm-dev \
+        libhugetlbfs-bin \
+        libiscsi7 \
+        lldpad \
+        lm-sensors \
+        mmc-utils \
+        mstflint \
+        net-tools \
+        network-manager \
+        nfs-common \
+        nftables \
+        ntpsec \
+        nvme-cli \
+        parted \
+        pciutils \
+        pkexec \
+        python3-pip \
+        rasdaemon \
+        rsync \
+        rsyslog \
+        software-properties-common \
+        ssh \
+        sshpass \
+        sudo \
+        sysstat \
+        tcpdump \
+        unzip \
+        usbutils \
+        uuid \
+        uuid-runtime \
+        vim \
+        watchdog \
+        wget \
+        xxd \
+        zstd \
+#DOCA Packages
+        doca-runtime \
+        doca-devel \
+        strongswan \
+        ${MLNX_FW_UPDATER} \
+    && \
+    apt-get clean -y && \
+    rm -rf /var/lib/apt/lists/* /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf && \
+    truncate -s0 /etc/machine-id && \
+    sed -i -r -e "s/^(MACAddressPolicy.*)/# \1/" /usr/lib/systemd/network/99-default.link && \
+    update-pciids && \
+    wget -qO - https://linux.mellanox.com/public/repo/doca/GPG-KEY-Mellanox.pub | apt-key add -
 
-RUN apt install -y grub-efi
+# Manage system services
+RUN systemctl enable NetworkManager.service || true
+RUN systemctl enable NetworkManager-wait-online.service || true
+RUN systemctl enable networking.service || true
+RUN systemctl enable mlnx_snap.service || true
+RUN systemctl enable acpid.service || true
+RUN systemctl enable mlx-openipmi.service || true
+RUN systemctl enable mlx_ipmid.service || true
+RUN systemctl enable set_emu_param.service || true
+RUN systemctl enable mst || true
+RUN systemctl disable mlx-regex.service || true
+RUN systemctl disable openvswitch-ipsec || true
+RUN systemctl disable srp_daemon.service || true
+RUN systemctl disable ibacm.service || true
+RUN systemctl disable opensmd.service || true
+RUN systemctl disable unattended-upgrades.service || true
+RUN systemctl disable apt-daily-upgrade.timer || true
+RUN systemctl disable docker.service || true
+RUN systemctl disable docker.socket || true
+RUN systemctl disable kubelet.service || true
+RUN systemctl disable containerd.service || true
+RUN systemctl disable ModemManager.service || true
 
-RUN echo "deb [trusted=yes] ${BASE_URL}/doca/${DOCA_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/arm64-dpu/ /" | sudo tee /etc/apt/sources.list.d/doca.base.list
-
-RUN apt-get update -y -q
-
-RUN apt-get install --no-install-recommends -y -q \
-						  libgrpc-dev=1.39.0-2 \
-						  python3-protobuf=3.17.3 \
-						  python3-grpcio=1.50.0
-
-RUN apt-get install --no-install-recommends -y -q \
-                          linux-image-6.1.0-11-arm64 \
-                          watchdog \
-                          binutils \
-                          sbsigntool \
-                          rasdaemon \
-                          net-tools \
-                          iproute2 \
-                          ethtool \
-                          nfs-common \
-                          lsb-release \
-                          logrotate \
-                          bsdmainutils \
-                          liblz4-tool \
-                          libiscsi7 \
-                          efivar \
-                          vim \
-                          python3.11 \
-                          python3-twisted \
-                          python3-netifaces \
-                          systemd \
-                          rsyslog \
-                          wget \
-                          irqbalance \
-                          ifupdown \
-                          locales \
-                          libjs-jquery \
-                          libjs-underscore \
-                          libvirt-clients \
-                          libvirt-daemon \
-                          hwdata \
-                          less \
-                          nvi \
-                          isc-dhcp-client \
-                          iptables-persistent \
-                          zstd \
-                          efibootmgr \
-                          bsdextrautils \
-                          parted \
-                          fdisk \
-                          pkexec \
-                          policykit-1 \
-                          grep \
-                          gawk \
-                          sed \
-                          openssh-server \
-                          sshpass \
-                          findutils \
-                          util-linux-extra \
-                          usbutils \
-                          dosfstools \
-                          file \
-                          rsync \
-                          tcpdump \
-                          nvme-cli \
-                          iputils-arping \
-                          iputils-ping \
-                          iputils-tracepath \
-                          bridge-utils \
-                          iperf3 \
-                          bc \
-                          initramfs-tools \
-                          lm-sensors \
-                          ifenslave \
-                          acpid \
-                          network-manager \
-                          kexec-tools \
-                          i2c-tools \
-                          dc \
-                          lldpad \
-                          unzip \
-                          ipmitool \
-                          sysstat \
-                          mmc-utils \
-                          libhugetlbfs-bin \
-                          uuid \
-                          uuid-runtime \
-                          ntp \
-                          libgdbm-dev \
-                          jq \
-                          xxd \
-                          libev4 \
-                          python3-pip \
-                          build-essential
-
-RUN apt-get install --no-install-recommends -y -q \
-                          mstflint \
-                          $MLXBF_BOOTIMAGES \
-                          $MLNX_FW_UPDATER \
-                          doca-openvswitch-common \
-                          doca-libopenvswitch \
-                          doca-openvswitch-ipsec \
-                          doca-openvswitch-switch \
-                          python3-doca-openvswitch \
-                          strongswan-swanctl=5.9.10-1.bf \
-                          doca-runtime \
-                          doca-devel \
-                          mlx-openipmi \
-                          mlnx-snap \
-                          '*mlx*-modules' \
-                          'dpa*' \
-                          flexio \
-                          bluefield-edac-modules \
-                          bf-release && \
-                        apt-mark hold mstflint strongswan-swanctl kubelet cri-tools kubernetes-cni kubeadm && \
-                        apt-get clean -y -q && \
-                        dpkg-reconfigure bf-release && \
-                        rm -rf /var/lib/apt/lists/* && \
-                        systemctl disable mlx-regex openvswitch-ipsec srp_daemon ibacm opensmd apt-daily-upgrade docker.service docker.socket kubelet.service containerd.service && \
-                        systemctl enable NetworkManager NetworkManager-wait-online networking mlnx_snap acpid mlx-openipmi mlx_ipmid set_emu_param && \
-                        truncate -s0 /etc/machine-id && \
-                        sed -i -r -e "s/^(MACAddressPolicy.*)/# \1/" /usr/lib/systemd/network/99-default.link
-
-RUN /usr/sbin/update-pciids || true
-
-RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" -e "s/prod/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
-
-CMD ["/root/workspace/create_bfb", "-k", "6.1.0-11-arm64"]
+RUN sed -i "s/_unsigned|_prod|_dev//" /etc/mlnx-release; sed -i "s/$/_@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release

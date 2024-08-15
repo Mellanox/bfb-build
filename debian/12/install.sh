@@ -142,8 +142,8 @@ mount_target_partition()
 configure_target_os()
 {
 	cat > /mnt/etc/fstab << EOF
-$(lsblk -o UUID -P ${device}p2) / ${ROOTFS} defaults 0 1
-$(lsblk -o UUID -P ${device}p1) /boot/efi vfat umask=0077 0 2
+$(get_part_id ${device}p2) / ${ROOTFS} defaults 0 1
+$(get_part_id ${device}p1) /boot/efi vfat umask=0077 0 2
 EOF
 
 	memtotal=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
@@ -162,6 +162,8 @@ EOF
 
 	echo "PasswordAuthentication yes" >> /mnt/etc/ssh/sshd_config
 	echo "PermitRootLogin yes" >> /mnt/etc/ssh/sshd_config
+	touch /mnt/etc/modules-load.d/i2c.conf
+	echo "i2c-dev" >> /mnt/etc/modules-load.d/i2c.conf
 
 	cat > /mnt/etc/resolv.conf << EOF
 nameserver 127.0.0.53
@@ -209,11 +211,11 @@ EOF
 configure_grub()
 {
 	ilog "Configure grub:"
-	if (hexdump -C /sys/firmware/acpi/tables/SSDT* | grep -q MLNXBF33); then
+	if (grep -q MLNXBF33 /sys/firmware/acpi/tables/SSDT*); then
 	    # BlueField-3
 	    sed -i -e "s/0x01000000/0x13010000/g" /mnt/etc/default/grub
 	fi
-	
+
 	if (lspci -vv | grep -wq SimX); then
 		# Remove earlycon from grub parameters on SimX
 		sed -i -r -e 's/earlycon=[^ ]* //g' /mnt/etc/default/grub
@@ -232,36 +234,14 @@ configure_grub()
 
 create_initramfs()
 {
-	ilog "Build initramfs:"
-	vmlinuz=$(cd /mnt/boot; /bin/ls -1 vmlinuz-* | tail -1)
-	initrd=$(cd /mnt/boot; /bin/ls -1 initrd.img-* | tail -1 | sed -e "s/.old-dkms//")
-	ln -snf $vmlinuz /mnt/boot/vmlinuz
-	ln -snf $initrd /mnt/boot/initrd.img
-
-	cat << EOF > /mnt/etc/initramfs-tools/modules
-efivarfs
-vfat
-fat
-msdos
-nls_cp850
-nls_cp437
-nls_ascii
-nsl_utf8
-mlxbf-tmfifo
-virtio_console
-sbsa_gwdt
-mlxbf-bootctl
-sdhci-of-dwcmshc
-nvme-rdma
-nvme-tcp
-nvme
-EOF
-
 	kver=$(uname -r)
 	if [ ! -d /mnt/lib/modules/$kver ]; then
-		kver=$(/bin/ls -1 /mnt/lib/modules/ |grep bf | head -1)
+		kver=$(/bin/ls -1 /mnt/lib/modules/ | tail -1)
 	fi
-	ilog "$(chroot /mnt update-initramfs -k ${kver} -u)"
+
+	ilog "Updating $distro initramfs"
+	initrd=$(cd /mnt/boot; /bin/ls -1 initrd.img-* | tail -1 | sed -e "s/.old-dkms//")
+	ilog "$(chroot /mnt dracut --force --force-drivers 'mlxbf-bootctl sdhci-of-dwcmshc mlxbf-tmfifo sbsa_gwdt gpio-mlxbf2 gpio-mlxbf3 mlxbf-gige pinctrl-mlxbf3' --add-drivers 'mlx5_core mlx5_ib mlxfw ib_umad nvme 8021q' --gzip /boot/$initrd ${kver} 2>&1)"
 }
 
 set_root_password()

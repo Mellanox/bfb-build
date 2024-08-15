@@ -1,87 +1,34 @@
 #!/bin/bash
 
-# Copyright (c) 2020, Mellanox Technologies
-# All rights reserved.
+###############################################################################
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
+# Copyright 2023 NVIDIA Corporation
 #
-# 1. Redistributions of source code must retain the above copyright notice, this
-#    list of conditions and the following disclaimer.
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-#    this list of conditions and the following disclaimer in the documentation
-#    and/or other materials provided with the distribution.
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
-# ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-# ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
 #
-# The views and conclusions contained in the software and documentation are those
-# of the authors and should not be interpreted as representing official policies,
-# either expressed or implied, of the FreeBSD Project.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+###############################################################################
 
 set -e
 
 SDIR="/root/workspace"
 BFB="${BFB:-/lib/firmware/mellanox/boot/default.bfb}"
 CAPSULE="${CAPSULE:-/lib/firmware/mellanox/boot/capsule/boot_update2.cap}"
-verbose=0
-kdir=$(/bin/ls -1d /lib/modules/4.20* /lib/modules/5.* 2> /dev/null | head -1)
-if [ -n "$kdir" ]; then
-	kernel=${kdir##*/}
-else
-	kernel=$(/bin/ls -1 /lib/modules/ | head -1)
-fi
-
-usage() {
-cat << EOF
-Usage: $(basename $0) [ OPTIONS ]
-OPTIONS:
--i, -install_bfb,    --install_bfb <BFB>        Installation BFB to be used as a basis for the target BFB. Default: $BFB
--k, -kernel,         --kernel <kernel version>  Kernel version for the SmartNIC. Default: $kernel
--v, -verbose,   --verbose                       Run script in verbose mode. Will print out each step of execution.
--h, -help,      --help                          Display help
-
-EOF
-}
-
-
-options=$(getopt -l "install_bfb:,kernel:,help,verbose" -o "i:k:hv" -a -- "$@")
-
-eval set -- "$options"
-
-while true
-do
-	case $1 in
-		-h|--help)
-			usage
-			exit 0
-			;;
-		-i|--install_bfb)
-			shift
-			BFB=$1
-			;;
-		-k|--kernel)
-			shift
-			kernel=$1
-			;;
-		-v|--verbose)
-			verbose=1
-			set -xv
-			;;
-		--)
-			shift
-			break;;
-	esac
-	shift
-done
+kernel=$(/bin/ls -1 /lib/modules/ | head -1)
 
 SCRIPTS_DIR=$(dirname $0)
 
@@ -121,22 +68,31 @@ ex()
 	fi
 }
 
-/usr/sbin/update-initramfs -u -k $kernel
-
 ex mkdir -p ${WDIR}
 ex cd ${WDIR}
 ex rm -rf initramfs
 
-# Note: /boot/initrd.img should be different from the one used in the BFB
-# The one in the BFB should include CX drivers to enable use of all the network
-# interfaces for the installation. /boot/initrd.img should not include CX
-# drivers and ib_umad as it will prevent /sbin/mlnx_bf_configure from running
-# upon boot
 initramfs=/boot/initrd.img-$kernel
 initramfs=$(realpath $initramfs)
-# ex mkinitramfs -o $WDIR/dump-initramfs-v0 $kernel
-cp $initramfs $WDIR/dump-initramfs-v0
 initramfs=$WDIR/dump-initramfs-v0
+
+ADD_DRIVERS=""
+for mod in mlxbf-bootctl sdhci-of-dwcmshc mlxbf-tmfifo mlx5_core mlx5_ib mlxfw ib_umad nvme gpio-mlxbf2 gpio-mlxbf3 mlxbf-gige pinctrl-mlxbf3 8021q virtio_console
+do
+	if (modinfo -k $kernel $mod 2>/dev/null | grep "filename:" | grep -q builtin); then
+		continue
+	fi
+	if ! (modinfo -k $kernel $mod 2>/dev/null); then
+		continue
+	fi
+	ADD_DRIVERS="$ADD_DRIVERS $mod"
+done
+
+dracut --no-hostonly -m "bash network base systemd systemd-initrd systemd-networkd dracut-systemd shutdown udev-rules" \
+    --install "/etc/udev/rules.d/91-tmfifo_net.rules /etc/udev/rules.d/92-oob_net.rules" \
+    --add-drivers "${ADD_DRIVERS}" \
+	--filesystems "vfat ext4" \
+    --gzip $initramfs ${kernel}
 
 case "$(file --brief --mime-type "$initramfs")" in
 	"application/x-lzma")
@@ -155,9 +111,9 @@ mkdir -p ${WDIR}/initramfs
 cd initramfs
 $cat_initrd "$initramfs" | sudo cpio -i
 
-copy_bin()
+copy_file()
 {
-	if [ -e $1 ]; then
+	if [[ -e $1 || -h $1 ]]; then
 		bin=$1
 	else
 		bin=$(which $1 2> /dev/null)
@@ -220,55 +176,80 @@ copy_module()
 	sudo cp ${mod_ko} ./${mod_ko}
 }
 
-/bin/rm -f ./usr/bin/dmesg ./sbin/ip ./usr/sbin/ip ./usr/bin/mount ./bin/mount
+(cd usr/bin; sudo ln -s xz xzcat)
 cp $(readlink -f /usr/bin/which) ./usr/bin/which
+touch ./etc/fstab
 
-for tool in $(dpkg -L mlxbf-scripts | grep bin/) \
-		$(dpkg -L dosfstools | grep -v share) \
-		$(dpkg -L e2fsprogs | grep -v share) \
-		$(dpkg -L fdisk | grep -v share) \
-		$(dpkg -L kmod | grep -v share) \
-		$(dpkg -L pciutils | grep -v share) \
-		$(dpkg -L usbutils | grep -v share) \
-		$(dpkg -L mft) \
-		$(dpkg -L mft-oem) \
-		$(dpkg -L kernel-mft-modules) \
-		$(dpkg -L tar | grep -v share) \
-		xz efibootmgr bash getopt hexdump mstflint lspci perl grep sed hwclock find mount \
+for tool in xz efibootmgr bash getopt hexdump mstflint lspci \
 		lsblk watchdog shutdown systemctl strings aarch64-linux-gnu-strings \
-		mlxbf-bootctl id dirname curl openssl parted jq dmesg $ADDON_TOOLS
+		mlxbf-bootctl id dirname curl openssl parted jq mlnx_bf_configure hwclock $ADDON_TOOLS
 do
 	if [ -d $tool ]; then
 		continue
 	fi
 	# Remove tools coming with busybox
 	/bin/rm -f .${tool}
-	copy_bin $tool
+	copy_file $tool
 done
 
-for deb in coreutils nvme-cli mmc-utils iputils-ping uuid-runtime sshpass openssh-client gawk iproute2 wget net-tools isc-dhcp-client $ADDON_DEBS
+libperl=$(dpkg -S /usr/lib/aarch64-linux-gnu/perl | cut -d ':' -f 1 | tr -d ',')
+perl_modules=$(dpkg -S /usr/share/perl | cut -d ':' -f 1 | tr -d ',')
+python3=$(dpkg -S /usr/bin/pdb3.* | head -1 | cut -d ':' -f 1 | tr -d ',')
+libpython3_minimal=$(dpkg -S /usr/lib/python3*/os.py | head -1 | cut -d ':' -f 1 | tr -d ',')
+libpython3=$(dpkg -S /usr/lib/aarch64-linux-gnu/libpython3.*.so.1 | head -1 | cut -d ':' -f 1 | tr -d ',')
+python3_distutils=$(dpkg -S /usr/lib/python3.*/distutils | head -1 | cut -d ':' -f 1 | tr -d ',')
+python3_lib2to3=$(dpkg -S /usr/lib/python3.*/lib2to3 | head -1 | cut -d ':' -f 1 | tr -d ',')
+python_bin=$(readlink -f /usr/bin/python)
+python_deb=$(dpkg -S $python_bin | head -1 | cut -d ':' -f 1 | tr -d ',')
+python_ver=$(python -V | cut -d ' ' -f 2 | cut -d '.' -f1,2)
+
+for deb in mlxbf-scripts mft mft-oem dosfstools e2fsprogs fdisk kmod pciutils \
+		   usbutils tar coreutils nvme-cli mmc-utils iputils-ping uuid-runtime \
+		   sshpass openssh-client util-linux ipmitool procps debianutils \
+		   iproute2 findutils perl-base $libperl $perl_modules \
+		   $libpython3_minimal $python3_distutils $python3_lib2to3 $python3 $python_deb \
+		   $libpython3 bsdutils libexpat1 wget net-tools isc-dhcp-client $ADDON_DEBS
 do
-	for tool in $(dpkg -L $deb | grep -v share)
+	for pfile in $(dpkg -L $deb)
 	do
-		if [ -d $tool ]; then
+		case "$pfile" in
+			*man*|*doc*)
+				continue
+				;;
+			*share*)
+				case "$deb" in
+					perl*|mft*)
+						;;
+					*)
+						continue
+						;;
+				esac
+				;;
+		esac
+		if [[ -d $pfile && ! -h $pfile ]]; then
 			continue
 		fi
-		/bin/rm -f .${tool}
-		copy_bin $tool
+		/bin/rm -f .${pfile}
+		copy_file $pfile
 	done
 done
 
-for mod in mlxbf_tmfifo dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block sdhci sdhci-of-dwcmshc nvme-rdma nvme-tcp nvme mlx5_ib mlxfw ib_umad ib_ipoib ib_iser mst_pci mst_pciconf efivarfs vfat fat msdos nls_cp850 nls_cp437 nls_ascii mlxbf-tmfifo virtio_console sbsa_gwdt mlxbf-bootctl gpio-mlxbf2 gpio-mlxbf3 mlxbf-gige pinctrl-mlxbf3 8021q $ADDON_KERNEL_MODULES
+for mod in mlxbf_tmfifo dw_mmc dw_mmc-pltfm mmc_block sdhci sdhci-of-dwcmshc nvme-rdma nvme-tcp nvme mlx5_ib mlxfw ib_umad ib_ipoib ib_iser mst_pci mst_pciconf bf3_livefish ipmi_devintf ipmb_host ipmi_ssif i2c-mlxbf nls_ascii nls_iso8859-1 nls_cp437 virtio_console $ADDON_KERNEL_MODULES
 do
 	copy_module $mod
 done
-
 sudo depmod -a -b ./ $kernel
 
 sudo mkdir -p usr/share/misc/ bin/ var/log/watchdog
-sudo ln -sfn gawk usr/bin/awk
 sudo cp /usr/share/misc/pci.ids usr/share/misc/
 sudo cp /etc/watchdog.conf etc
+if ! [ -e usr/bin/python ]; then
+	ln -s python${python_ver} usr/bin/python
+fi
+if ! [ -e usr/bin/python3 ]; then
+	ln -s python${python_ver} usr/bin/python3
+fi
+
 # Make sure we can load mlx-bootctl
 bootctl_ko=""
 for driver in mlxbf-bootctl mlx-bootctl
@@ -287,38 +268,38 @@ sudo cp /lib/modules/$kernel/kernel/drivers/watchdog/sbsa_gwdt.ko .
 sudo mkdir -p ./lib/firmware/mellanox/boot/
 sudo cp /lib/firmware/mellanox/boot/default.bfb ./lib/firmware/mellanox/boot/default.bfb
 sudo cp -a /lib/firmware/mellanox/boot/capsule ./lib/firmware/mellanox/boot/
-sudo mkdir -p mnt dev sys proc
 
 sudo mkdir -p ./lib/udev/rules.d
 sudo cp /lib/udev/rules.d/82-net-setup-link.rules ./lib/udev/rules.d/82-net-setup-link.rules
 sudo mkdir -p ./etc/infiniband
 sudo cp /etc/infiniband/vf-net-link-name.sh ./etc/infiniband/vf-net-link-name.sh
 
-# CVE-2021-4034 workaround
-chmod 0755 /usr/bin/pkexec
+sudo mkdir -p mnt
 
 if [ -d ${SDIR}/BF3BMC/ ]; then
 	/bin/rm -rf BF3BMC
-	if (grep -q prod /etc/mlnx-release) && [ -d ${SDIR}/BF3BMC/pk ]; then
-		cp -a ${SDIR}/BF3BMC/pk ./BF3BMC
-	elif (grep -q dev /etc/mlnx-release) && [ -d ${SDIR}/BF3BMC/dk ]; then
-		cp -a ${SDIR}/BF3BMC/dk ./BF3BMC
-	elif [ -d ${SDIR}/BF3BMC/qp ]; then
-		cp -a ${SDIR}/BF3BMC/qp ./BF3BMC
+	if (grep -q prod /etc/mlnx-release); then
+		cp -a ${SDIR}/BF3BMC/pk ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
+	elif (grep -q dev /etc/mlnx-release); then
+		cp -a ${SDIR}/BF3BMC/dk ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
 	else
-		echo "WARNING: BF3 BMC Software was not found"
+		cp -a ${SDIR}/BF3BMC/qp ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
 	fi
-	[ -d ${SDIR}/BF3BMC/golden_images ] && cp -a ${SDIR}/BF3BMC/golden_images ./BF3BMC || echo "WARNING: BF3 Golden Images for BMC were not found"
+	[ -d ${SDIR}/BF3BMC/golden_images ] && cp -a ${SDIR}/BF3BMC/golden_images ./BF3BMC
 fi
 
 if [ -d ${SDIR}/BF2BMC/ ]; then
 	/bin/rm -rf BF2BMC
 	if (grep -q prod /etc/mlnx-release); then
-		[ -d ${SDIR}/BF2BMC/pk ] && cp -a ${SDIR}/BF2BMC/pk ./BF2BMC || echo "WARNING: BF2 BMC Software was not found"
+		cp -a ${SDIR}/BF2BMC/pk ./BF2BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
 	else
-		[ -d ${SDIR}/BF2BMC/qp ] && cp -a ${SDIR}/BF2BMC/qp ./BF2BMC || echo "WARNING: BF2 BMC Software was not found"
+		cp -a ${SDIR}/BF2BMC/qp/ ./BF2BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
 	fi
 fi
+
+# Remove hostname that includes docker container's id
+/bin/rm -f ./etc/hostname
+echo localhost > /etc/hostname
 
 ex mkdir -p debian
 # Tar the image
@@ -326,24 +307,30 @@ XZ_OPT="--threads=0 -9 --verbose" tar -cJp --exclude='./workspace' --exclude='./
 ex install -m 0755 ${SDIR}/install.sh ./debian/install.sh
 ex cp -a ${SDIR}/install.env ./debian/
 
+mkdir -p scripts
 cat > scripts/initrd-install << EOF
 #!/bin/bash
 
 printf_msg()
 {
-	echo "$@" | tee /dev/kmsg
+	echo "\$@" > /dev/kmsg
 	return 0
 }
 
-modprobe -a sdhci sdhci_pltfm sdhci_of_dwcmshc > /dev/kmsg 2>&1
+modprobe nls_iso8859-1 > /dev/null 2>&1
+modprobe -a sdhci-of-dwcmshc > /dev/null 2>&1
 modprobe mlxbf_tmfifo > /dev/null 2>&1
+modprobe -a ipmi_msghandler ipmi_devintf i2c-mlxbf
+modprobe ipmb_host slave_add=0x10
+echo ipmb-host 0x1011 > /sys/bus/i2c/devices/i2c-1/new_device
 modprobe -a mlx5_ib mlxfw ib_umad
 modprobe nvme > /dev/null 2>&1
-
+insmod /mlx-bootctl.ko > /dev/null 2>&1
+insmod /sbsa_gwdt.ko > /dev/null 2>&1
 /usr/sbin/watchdog > /dev/null 2>&1
 
 printf_msg "================================="
-printf_msg "Installing debian. Please wait..."
+printf_msg "Installing Debian Please wait..."
 printf_msg "================================="
 
 /bin/bash /debian/install.sh
@@ -352,6 +339,7 @@ if [ \$? -eq 0 ]; then
 	printf_msg "Installation finished. Rebooting..."
 	printf_msg "==================================="
 	printf_msg
+	sleep 3
 	reboot -f
 else
 	printf_msg "========================"
@@ -361,13 +349,26 @@ fi
 EOF
 
 chmod +x scripts/initrd-install
-sudo rm -f conf/conf.d/debian-core*
-sudo sh -c 'echo "BOOT=initrd-install" > conf/conf.d/initrd_install'
-sudo sh -c 'echo "ROOT=\"LABEL=writable\"" > conf/conf.d/default_root'
 
+cat > usr/lib/systemd/system/install-debian.service << EOF
+[Unit]
+Description=Install Debian Linux
+After=initrd-root-fs.target initrd-parse-etc.service
+After=dracut-initqueue.service dracut-mount.service
+
+[Service]
+Type=oneshot
+ExecStart=/scripts/initrd-install
+StandardInput=null
+StandardOutput=journal
+StandardError=journal+console
+EOF
+
+mkdir -p etc/systemd/system/initrd.target.wants
+ln -s /usr/lib/systemd/system/install-debian.service etc/systemd/system/initrd.target.wants/install-debian.service
 
 # Make initramfs with new debian
-find . -print0 | sudo cpio --null -o --format=newc | gzip -9 > "$initramfs"
+find . -print0 | sudo cpio --null -o --format=newc | zstd -9 > "$initramfs"
 
 # Make bfb
 cd ..
@@ -388,18 +389,33 @@ printf "console=hvc0 console=ttyAMA0 earlycon=pl011,0x13010000 initrd=initramfs"
 printf "VenHw(F019E406-8C9C-11E5-8797-001ACA00BFC4)/Image" > "$boot_path"
 printf "Linux from rshim" > "$boot_desc"
 vmlinuz=$WDIR/vmlinuz
-case "$(file --brief --mime-type /boot/vmlinuz-$kernel)" in
-	application/x-dosexec|application/octet-stream)
-		CAT=cat
-		;;
-	application/gzip)
-		CAT=zcat
-		;;
-	*)
-		CAT=cat
-		;;
-esac
-sudo $CAT /boot/vmlinuz-$kernel > "$vmlinuz"
+if [ -e $SDIR/vmlinuz ]; then
+	case "$(file --brief --mime-type $SDIR/vmlinuz)" in
+		application/x-dosexec|application/octet-stream)
+			CAT=cat
+			;;
+		application/gzip)
+			CAT=zcat
+			;;
+		*)
+			CAT=cat
+			;;
+	esac
+	sudo $CAT $SDIR/vmlinuz > "$vmlinuz"
+else
+	case "$(file --brief --mime-type /boot/vmlinuz-$kernel)" in
+		application/x-dosexec|application/octet-stream)
+			CAT=cat
+			;;
+		application/gzip)
+			CAT=zcat
+			;;
+		*)
+			CAT=cat
+			;;
+	esac
+	sudo $CAT /boot/vmlinuz-$kernel > "$vmlinuz"
+fi
 
 mkdir -p /workspace
 

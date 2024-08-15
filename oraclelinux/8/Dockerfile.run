@@ -23,12 +23,12 @@ gpgcheck=1 \n\
 enabled=1' > /etc/yum.repos.d/oracle-epel-ol8.repo
 
 #Kublet
-RUN echo -e '[kubernetes-1.28] \n\
+RUN echo -e '[kubernetes-1.29] \n\
 name=Kubernetes \n\
-baseurl=https://pkgs.k8s.io/core:/stable:/v1.28/rpm/ \n\
+baseurl=https://pkgs.k8s.io/core:/stable:/v1.29/rpm/ \n\
 gpgcheck=1 \n\
 enabled=1 \n\
-gpgkey=https://pkgs.k8s.io/core:/stable:/v1.28/rpm/repodata/repomd.xml.key \n' > /etc/yum.repos.d/kubernetes.repo
+gpgkey=https://pkgs.k8s.io/core:/stable:/v1.29/rpm/repodata/repomd.xml.key \n' > /etc/yum.repos.d/kubernetes.repo
 
 ADD docker-ce.repo /etc/yum.repos.d/docker-ce.repo
 # RUN yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
@@ -41,11 +41,11 @@ RUN dnf install --disableexcludes=kubernetes -y \
 	grub2-efi-aa64-modules grub2-common grub2-tools-extra shim-aa64 \
 	efibootmgr tcpdump nvme-cli rsync binutils sg3_utils libnl3 libmnl perl \
 	lsof libreswan yum-utils device-mapper-persistent-data lvm2 acpid perf \
-	popt-devel bc lm_sensors cryptsetup rasdaemon pciutils-devel watchdog \
+	popt-devel bc lm_sensors cryptsetup rasdaemon pciutils pciutils-devel watchdog \
 	kexec-tools jq python3-pip libnghttp2 wget annobin kernel-rpm-macros \
-	iproute-tc NetworkManager NetworkManager-initscripts-updown usbutils nfs-utils python3-six chkconfig \
-	dosfstools e2fsprogs openssh-server ipmitool \
-	containerd.io kubelet-1.28.8 cri-tools-1.28.0 kubernetes-cni-1.2.0 kubeadm-1.28.8 \
+	iproute-tc NetworkManager NetworkManager-initscripts-updown initscripts usbutils nfs-utils python3-six chkconfig \
+	dosfstools e2fsprogs openssh openssh-server ipmitool \
+	containerd.io kubelet-1.29.7 cri-tools-1.29.0 kubernetes-cni-1.3.0 kubeadm-1.29.7 \
 	systemd-timesyncd chrony sshpass libunwind \
 	gawk util-linux kmod dracut-tools \
 	tar xfsprogs coreutils parted which curl \
@@ -80,20 +80,24 @@ enabled=1' > /etc/yum.repos.d/oracle-doca-ol8.repo
 
 RUN dnf install -y rdma-core rdma-core-devel libibverbs-utils.aarch64 mstflint infiniband-diags infiniband-diags-compat libibumad librdmacm-utils python3-pyverbs
 
-RUN dnf install -y bf-release \
-		doca-cx-apps \
-		doca-cx-libs \
-		doca-cx-libs-devel \
-		doca-cx-libs-trace \
-		doca-cx-prime-devel \
-		doca-cx-prime-dev-tools \
-		doca-cx-prime-runtime \
-		doca-cx-prime-runtime-tools \
-		doca-cx-samples \
+RUN dnf install -y \
+		bf-release \
+		doca-caps \
 		doca-openvswitch \
 		doca-openvswitch-devel \
+		doca-openvswitch-ipsec \
 		doca-openvswitch-selinux-policy \
 		doca-openvswitch-test \
+		doca-samples \
+		doca-sdk-argp \
+		doca-sdk-argp-devel \
+		doca-sdk-common \
+		doca-sdk-common-devel \
+		doca-sdk-dpdk-bridge \
+		doca-sdk-dpdk-bridge-devel \
+		doca-sdk-flow \
+		doca-sdk-flow-devel \
+		doca-sdk-flow-trace \
 		dpacc \
 		dpacc-extract \
 		dpaeumgmt \
@@ -110,12 +114,16 @@ RUN dnf install -y bf-release \
 		mlnx-dpdk \
 		mlnx-dpdk-devel \
 		mlnx-fw-updater-signed \
+		mlnx-libsnap \
+		mlnx-snap \
 		mlnx-tools \
 		mlxbf-bfscripts \
 		mlxbf-bootctl \
 		mlx-OpenIPMI \
+		network-scripts-doca-openvswitch \
 		optee-client \
 		optee-client-devel \
+		python3-doca-openvswitch \
 		spdk \
 		virtio-net-controller
 

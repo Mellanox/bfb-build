@@ -133,6 +133,11 @@ $(lsblk -o NAME,LABEL,UUID,PARTUUID)
 $(dmesg -x)
 EOF
 	sync
+	for pw in $(grep "PASSWORD=" $LOG | cut -d '=' -f 2- | sed 's/["'\'']//'g)
+	do
+		sed -i -e "s,$pw,xxxxxx,g" $LOG
+	done
+	sync
 
 	if [ "$UPDATE_DPU_OS" != "yes" ]; then
 		return
@@ -203,7 +208,7 @@ fw_update()
 			log "INFO: NIC firmware update failed"
 		else
 			NIC_FW_UPDATE_PASSED=1
-			log "INFO: NIC firmware update done"
+			log "INFO: NIC firmware update done: $(provided_nic_fw)"
 		fi
 		NIC_FW_UPDATE_DONE=1
 	else
@@ -257,8 +262,8 @@ hwclock -w
 boot_fifo_path="/sys/bus/platform/devices/MLNXBF04:00/bootfifo"
 if [ -e "${boot_fifo_path}" ]; then
 	cfg_file=$(mktemp)
-	# Get 16KB assuming it's big enough to hold the config file.
-	dd if=${boot_fifo_path} of=${cfg_file} bs=4096 count=4 > /dev/null 2>&1
+	# Get 128KB assuming it's big enough to hold the config file.
+	dd if=${boot_fifo_path} of=${cfg_file} bs=4096 count=32 > /dev/null 2>&1
 
 	#
 	# Check the .xz signature {0xFD, '7', 'z', 'X', 'Z', 0x00} and extract the
@@ -357,6 +362,9 @@ DEFAULT_BMC_PASSWORD="0penBmc"
 TMP_BMC_PASSWORD="Nvidia_12345!"
 RESET_BMC_PASSWORD=0
 BMC_PASSWORD=${BMC_PASSWORD:-""}
+NEW_BMC_PASSWORD=${NEW_BMC_PASSWORD:-""}
+UEFI_PASSWORD=${UEFI_PASSWORD:-""}
+NEW_UEFI_PASSWORD=${NEW_UEFI_PASSWORD:-""}
 OOB_IP=${OOB_IP:-"192.168.240.2"}
 OOB_NETPREFIX=${OOB_NETPREFIX:-"29"}
 BMC_IP_TIMEOUT=${BMC_IP_TIMEOUT:-600}
@@ -366,6 +374,7 @@ UPDATE_DPU_OS=${UPDATE_DPU_OS:-"yes"}
 UPDATE_BMC_FW=${UPDATE_BMC_FW:-"yes"}
 BMC_REBOOT=${BMC_REBOOT:-"no"}
 UPDATE_CEC_FW=${UPDATE_CEC_FW:-"yes"}
+CEC_MIN_RESET_VERSION="00.02.0180.0000"
 UPDATE_DPU_GOLDEN_IMAGE=${UPDATE_DPU_GOLDEN_IMAGE:-"yes"}
 UPDATE_NIC_FW_GOLDEN_IMAGE=${UPDATE_NIC_FW_GOLDEN_IMAGE:-"yes"}
 WITH_NIC_FW_UPDATE=${WITH_NIC_FW_UPDATE:-"yes"}
@@ -432,6 +441,20 @@ prepare_target_partitions()
 	mount ${device}p1 /mnt/boot/efi
 }
 
+get_part_id()
+{
+	local part_id=$1
+	if [ -n "$(lsblk -o UUID ${part_id} 2> /dev/null | tail -1)" ]; then
+		echo $(lsblk -o UUID -P ${part_id})
+	elif [ -n "$(blkid -o value -s UUID ${part_id} 2> /dev/null)" ]; then
+		echo "UUID=$(blkid -o value -s UUID ${part_id})"
+	elif [ -n "$(lsblk -o PARTUUID ${part_id} 2> /dev/null | tail -1)" ]; then
+		echo "PARTUUID=$(lsblk -o PARTUUID ${part_id} | tail -1)"
+	else
+		echo "${part_id}"
+	fi
+}
+
 configure_target_os()
 {
 cat >> $LOG << EOF
@@ -442,16 +465,13 @@ $(lsblk -o NAME,LABEL,UUID,PARTUUID)
 
 EOF
 
-	PARTUUID_p1=$(lsblk -o PARTUUID ${device}p1 | tail -1)
-	PARTUUID_p2=$(lsblk -o PARTUUID ${device}p2 | tail -1)
-
 	cat > /mnt/etc/fstab << EOF
 #
 # /etc/fstab
 #
 #
-PARTUUID=${PARTUUID_p2}  /           ${ROOTFS}     defaults                   0 1
-PARTUUID=${PARTUUID_p1}  /boot/efi   vfat    umask=0077,shortname=winnt 0 2
+$(get_part_id ${device}p2)  /           ${ROOTFS}     defaults                   0 1
+$(get_part_id ${device}p1)  /boot/efi   vfat    umask=0077,shortname=winnt 0 2
 EOF
 
 	/bin/rm -f /mnt/etc/hostname
@@ -656,7 +676,7 @@ EOF
 		bootarg="$bootarg $redfish_osarg"
 	fi
 	sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"crashkernel=auto $bootarg console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 net.ifnames=0 biosdevname=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
-	if (hexdump -C /sys/firmware/acpi/tables/SSDT* | grep -q MLNXBF33); then
+	if (grep -q MLNXBF33 /sys/firmware/acpi/tables/SSDT*); then
 		# BlueField-3
 		sed -i -e "s/0x01000000/0x13010000/g" /mnt/etc/default/grub
 	fi
@@ -748,7 +768,7 @@ install_dpu_os()
 
 skip_bmc()
 {
-	rlog "WARN Skipping BMC components upgrade."
+	log "WARN Skipping BMC components upgrade."
 	RC=$((RC+1))
 	UPDATE_BMC_FW="no"
 	UPDATE_CEC_FW="no"
@@ -825,6 +845,43 @@ get_bmc_token()
 	return 0
 }
 
+change_uefi_password()
+{
+	UEFI_CREDENTIALS="'{\"Attributes\":{\"CurrentUefiPassword\":\"$UEFI_PASSWORD\",\"UefiPassword\":\"${NEW_UEFI_PASSWORD}\"}}'"
+	cmd=$(echo curl -sSk -u $BMC_USER:"$BMC_PASSWORD" -H \"Content-Type: application/json\" -X PATCH https://${BMC_IP}/redfish/v1/Systems/Bluefield/Bios/Settings -d $UEFI_CREDENTIALS)
+	output=$(eval $cmd)
+	status=$(echo $output | jq '."@Message.ExtendedInfo"[0].Message')
+	if [ "$status" != "\"The request completed successfully."\" ]; then
+		rlog "ERR Failed to change UEFI password."
+		ilog "Failed to change UEFI password. Output: $output"
+		return 1
+	fi
+
+	ilog "UEFI password is set for the update. The new password will be activated on the second DPU reboot."
+
+	return 0
+}
+
+change_bmc_password()
+{
+	current_password="$1"
+	new_password="$2"
+
+	NEW_BMC_CREDENTIALS="'{\"Password\":\"${new_password}\"}'"
+	cmd=$(echo curl -sSk -u $BMC_USER:$current_password  -H \"Content-Type: application/json\" -X PATCH https://${BMC_IP}/redfish/v1/AccountService/Accounts/$BMC_USER -d $NEW_BMC_CREDENTIALS)
+	output=$(eval $cmd)
+	status=$(echo $output | jq '."@Message.ExtendedInfo"[0].Message')
+	if [ "$status" != "\"The request completed successfully."\" ]; then
+		rlog "ERR Failed to change BMC $BMC_USER password."
+		ilog "Failed to change the password. Output: $output"
+		return 1
+	fi
+
+	ilog "BMC password updated successfully."
+
+	return 0
+}
+
 get_bmc_public_key()
 {
 		get_bmc_token
@@ -847,6 +904,10 @@ bmc_get_task_id()
 wait_bmc_task_complete()
 {
 	bmc_get_task_id
+	if [ -z "${task_id}" ]; then
+		ilog "No active BMC task"
+		return
+	fi
 	output=$(mktemp)
 	#Check upgrade progress (%).
 	get_bmc_token
@@ -877,6 +938,7 @@ wait_bmc_task_complete()
 
 update_bmc_fw()
 {
+	wait_bmc_task_complete
 	log "Updating BMC firmware"
 	#Set upload image from local BFB storage (or tempfs).
 	image=$(/bin/ls -1 ${BMC_PATH}/*bmc* 2> /dev/null)
@@ -924,12 +986,13 @@ update_bmc_fw()
 
 	wait_bmc_task_complete
 	if [ "$BMC_REBOOT" != "yes" ]; then
-		log "INFO: BMC firmware was updated. BMC restart is required."
+		log "INFO: BMC firmware was updated to: ${BMC_IMAGE_VERSION}. BMC restart is required."
 	fi
 }
 
 update_cec_fw()
 {
+	wait_bmc_task_complete
 	log "Updating CEC firmware"
 	#Set upload image from local BFB storage (or tempfs).
 	image=$(/bin/ls -1 ${CEC_PATH}/cec*)
@@ -970,7 +1033,17 @@ update_cec_fw()
 	curl -sSk -H "X-Auth-Token: $BMC_TOKEN" -H "Content-Type: application/octet-stream" -X POST -T ${image} https://${BMC_IP}${uri}
 
 	wait_bmc_task_complete
-	log "INFO: CEC firmware was updated. Host power cycle is required"
+	if [[ $(echo -e ${CEC_MIN_RESET_VERSION}\n${CEC_INSTALLED_VERSION} | sort -V | head -n1) == "${CEC_MIN_RESET_VERSION}" ]]; then
+		output=$(curl -sSk -u $BMC_USER:"$BMC_PASSWORD" -H "Content-Type: application/json" -X POST -d '{"ResetType": "GracefulRestart"}' https://${BMC_IP}/redfish/v1/Chassis/Bluefield_ERoT/Actions/Chassis.Reset)
+		status=$(echo $output | jq '."@Message.ExtendedInfo"[0].Message')
+		if [ "$status" != "\"The request completed successfully."\" ]; then
+			rlog "ERR Failed to reset CEC"
+			ilog "Failed to reset CEC. Output: $output"
+			log "INFO: CEC firmware was updated to ${CEC_IMAGE_VERSION}. Host power cycle is required"
+		fi
+	else
+		log "INFO: CEC firmware was updated to ${CEC_IMAGE_VERSION}. Host power cycle is required"
+	fi
 }
 
 bmc_reboot()
@@ -1043,33 +1116,42 @@ bmc_components_update()
 		pre_bmc_components_update
 	fi
 
-	if [[ "$UPDATE_BMC_FW" == "yes" || "$UPDATE_CEC_FW" == "yes" || "$UPDATE_DPU_GOLDEN_IMAGE" == "yes" || "$UPDATE_NIC_FW_GOLDEN_IMAGE" == "yes" ]]; then
-		ilog "INFO: Running BMC components update flow"
+	if [[ ! -z "$UEFI_PASSWORD" && ! -z "$NEW_UEFI_PASSWORD" ]]; then
+		if [[ -z "$BMC_USER" || -z "$BMC_PASSWORD" ]]; then
+			ilog "BMC_USER and/or BMC_PASSWORD are not defined. Skipping UEFI password change."
+		else
+			change_uefi_password
+		fi
+	fi
+
+	if [[ "$UPDATE_BMC_FW" == "yes" || "$UPDATE_CEC_FW" == "yes" || "$UPDATE_DPU_GOLDEN_IMAGE" == "yes" || "$UPDATE_NIC_FW_GOLDEN_IMAGE" == "yes" || ! -z "$NEW_BMC_PASSWORD" ]]; then
 		if [[ -z "$BMC_USER" || -z "$BMC_PASSWORD" ]]; then
 			ilog "BMC_USER and/or BMC_PASSWORD are not defined. Skipping BMC components upgrade."
 			skip_bmc
 			return
 		else
+			ilog "INFO: Running BMC components update flow"
 			create_vlan
 			# get_bmc_public_key
 			if [ "$BMC_LINK_UP" == "yes" ]; then
-				if [ "$BMC_PASSWORD" == "$DEFAULT_BMC_PASSWORD" ]; then
+				if [ ! -z "$NEW_BMC_PASSWORD" ]; then
+					if change_bmc_password "$BMC_PASSWORD" "$NEW_BMC_PASSWORD"; then
+						BMC_PASSWORD="$NEW_BMC_PASSWORD"
+					else
+						skip_bmc
+						return
+					fi
+				elif [ "$BMC_PASSWORD" == "$DEFAULT_BMC_PASSWORD" ]; then
 					ilog "BMC password has the default value. Changing to the temporary password."
-					BMC_PASSWORD="$TMP_BMC_PASSWORD"
-					BMC_CREDENTIALS="'{\"username\":\"$BMC_USER\", \"password\":\"${BMC_PASSWORD}\"}'"
-					TMP_BMC_CREDENTIALS="'{\"Password\":\"${BMC_PASSWORD}\"}'"
-					cmd=$(echo curl -k -u $BMC_USER:$DEFAULT_BMC_PASSWORD  -H \"Content-Type: application/json\" -X PATCH https://${BMC_IP}/redfish/v1/AccountService/Accounts/$BMC_USER -d $TMP_BMC_CREDENTIALS)
-					output=$(eval $cmd)
-					status=$(echo $output | jq '."@Message.ExtendedInfo"[0].Message')
-					if [ "$status" != "\"The request completed successfully."\" ]; then
-						rlog "ERR Failed to change BMC $BMC_USER password."
-						ilog "Failed to change the password. Output: $output"
+					if change_bmc_password "$BMC_PASSWORD" "$TMP_BMC_PASSWORD"; then
+						BMC_PASSWORD="$TMP_BMC_PASSWORD"
+					else
 						skip_bmc
 						return
 					fi
 					RESET_BMC_PASSWORD=1
-
 				fi
+				BMC_CREDENTIALS="'{\"username\":\"$BMC_USER\", \"password\":\"${BMC_PASSWORD}\"}'"
 			else
 				skip_bmc
 				return

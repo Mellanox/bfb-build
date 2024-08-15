@@ -41,12 +41,12 @@ fi
 
 DISTRO="oraclelinux"
 DISTRO_VERSION="8"
-DOCA_VERSION="2.7.0"
-BSP_VERSION="4.7.1-13167"
+DOCA_VERSION="2.8.0"
+BSP_VERSION="4.8.0-13249"
 BF_VERSION=${BSP_VERSION%-*}
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
-RELTARGET="24.04"
-BUILDVER=${BUILDVER:-"16"}
+RELTARGET="24.07"
+BUILDVER=${BUILDVER:-"64"}
 
 WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
 BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
@@ -123,6 +123,7 @@ sed -e "s/@DISTRO_VERSION@/${DISTRO_VERSION}/g" \
 
 docker build -t ${docker_image} \
 	--progress=plain \
+	--no-cache \
 	--build-arg BASE_URL=$BASE_URL \
 	--build-arg DOCA_VERSION=$DOCA_VERSION \
 	--build-arg BSP_VERSION=$BSP_VERSION \

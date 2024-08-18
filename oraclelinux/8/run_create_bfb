@@ -23,10 +23,11 @@ do
 		/bin/rm -f /workspace/BF3BMC/bmc/*
 		/bin/rm -f /workspace/BF3BMC/cec/*
 		/bin/rm -f /workspace/BF3BMC/golden_images/dpu/*
-		wget -P /workspace/BF3BMC/bmc -q --no-check-certificate ${BMC_URL}/bmc/24.04-6/bf3-bmc-24.04-6_opn.fwpkg
-		wget -P /workspace/BF3BMC/cec -q --no-check-certificate ${BMC_URL}/cec/00.02.0182.0000/cec1736-ecfw-00.02.0182.0000-n02-rel-prod.fwpkg
-		wget -P /workspace/BF3BMC/golden_images/dpu -q --no-check-certificate ${BMC_URL}/golden_images/dpu/4.7.0-13127/BlueField-GA-4.7.0.13127_preboot-install.bfb
-		wget -P /workspace/BF3BMC/golden_images/fw -q --no-check-certificate -r --no-directories -l1 --no-parent -A 'fw*bfb' ${BMC_URL}/golden_images/nic-fw/32_41_1300/
+		echo "Downloading BlueField-3 BMC software..."
+		wget -P /workspace/BF3BMC/bmc -r --no-directories -l1 --no-parent -A 'bf3-bmc*fwpkg' ${BMC_URL}/bmc/${BF3_BMC_VERSION}/
+		wget -P /workspace/BF3BMC/cec -r --no-directories -l1 --no-parent -A 'cec*fwpkg' ${BMC_URL}/cec/${BF3_CEC_VERSION}/
+		wget -P /workspace/BF3BMC/golden_images/dpu -r --no-verbose --no-directories -l1 --no-parent -A 'BlueField*.bfb' ${BMC_URL}/golden_images/dpu/${BSP_VERSION}/
+		wget -P /workspace/BF3BMC/golden_images/fw -r --no-verbose --no-directories -l1 --no-parent -A 'fw*.bfb' ${BMC_URL}/golden_images/nic-fw/${BF3_NIC_FW_VERSION}/
 		;;
 	*)
 		type=unsigned

@@ -45,6 +45,9 @@ DOCA_VERSION="2.8.0"
 BSP_VERSION="4.8.0-13249"
 BF_VERSION=${BSP_VERSION%-*}
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
+BF3_BMC_VERSION="24.07-14"
+BF3_CEC_VERSION="00.02.0182.0000"
+BF3_NIC_FW_VERSION="32_42_1000"
 RELTARGET="24.07"
 BUILDVER=${BUILDVER:-"64"}
 
@@ -53,6 +56,14 @@ BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
 LEAVE_CONTAINER=${LEAVE_CONTAINER:-"no"}
 
 mkdir -p $WDIR
+
+# Add select env variables that will be passed into container during run phase
+cat > ${WDIR}/envfile << EOF
+BSP_VERSION=${BSP_VERSION}
+BF3_BMC_VERSION=${BF3_BMC_VERSION}
+BF3_CEC_VERSION=${BF3_CEC_VERSION}
+BF3_NIC_FW_VERSION=${BF3_NIC_FW_VERSION}
+EOF
 
 mkdir -p $WDIR/bootimages
 wget -P $WDIR/bootimages -r --no-verbose --no-directories -l1 --no-parent -A 'mlxbf-bootimages*.aarch64.rpm' ${BASE_URL}/bluefield/${BSP_VERSION}/bootimages/${IMAGE_TYPE}/
@@ -134,7 +145,8 @@ DOCKER_RUN_PARAMS="--privileged -e container=docker \
 	--name BlueField_OS_${DISTRO}_${DISTRO_VERSION} \
 	--mount type=bind,source=/dev,target=/dev \
 	--mount type=bind,source=/sys,target=/sys \
-	--mount type=bind,source=/proc,target=/proc"
+	--mount type=bind,source=/proc,target=/proc \
+	--env-file envfile"
 
 if [ "X${LEAVE_CONTAINER}" == "Xyes" ]; then
 	DOCKER_RUN_PARAMS="-d -it ${DOCKER_RUN_PARAMS}"

@@ -1,6 +1,0 @@
-#!/bin/bash
-
-
-kernel=`/bin/ls -1tr /lib/modules | tail -1`
-
-/root/workspace/create_bfb -k $kernel

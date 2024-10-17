@@ -1,6 +1,0 @@
-[Experimental]
-name=AnolisOS-$releasever - BaseOS
-baseurl=http://mirrors.openanolis.cn/anolis/8.6/Experimental/$basearch/os
-enabled=1
-gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-ANOLIS
-gpgcheck=1

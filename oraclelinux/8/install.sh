@@ -849,6 +849,7 @@ change_uefi_password()
 {
 	UEFI_CREDENTIALS="'{\"Attributes\":{\"CurrentUefiPassword\":\"$UEFI_PASSWORD\",\"UefiPassword\":\"${NEW_UEFI_PASSWORD}\"}}'"
 	cmd=$(echo curl -sSk -u $BMC_USER:"$BMC_PASSWORD" -H \"Content-Type: application/json\" -X PATCH https://${BMC_IP}/redfish/v1/Systems/Bluefield/Bios/Settings -d $UEFI_CREDENTIALS)
+	ilog "Command: $cmd"
 	output=$(eval $cmd)
 	status=$(echo $output | jq '."@Message.ExtendedInfo"[0].Message')
 	if [ "$status" != "\"The request completed successfully."\" ]; then
@@ -1120,6 +1121,7 @@ bmc_components_update()
 		if [[ -z "$BMC_USER" || -z "$BMC_PASSWORD" ]]; then
 			ilog "BMC_USER and/or BMC_PASSWORD are not defined. Skipping UEFI password change."
 		else
+			create_vlan
 			change_uefi_password
 		fi
 	fi

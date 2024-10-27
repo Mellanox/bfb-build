@@ -21,7 +21,9 @@ ADD BF3BMC ./BF3BMC
 ADD 10-mlx-console-messages.conf /etc/sysctl.d/
 ADD repos/ /etc/apt/sources.list.d/
 ADD apt-preferences /etc/apt/preferences.d/99doca
-ADD --chown=0:0 --chmod=644 https://prod-cdn.packages.k8s.io/repositories/isv:/kubernetes:/core:/stable:/v1.29/deb/Release.key /etc/apt/keyrings/kubernetes.asc
+ADD --chown=0:0 https://prod-cdn.packages.k8s.io/repositories/isv:/kubernetes:/core:/stable:/v1.29/deb/Release.key /etc/apt/keyrings/kubernetes.asc
+
+RUN chmod 644 /etc/apt/keyrings/kubernetes.asc
 
 RUN apt update
 RUN dpkg -i /root/workspace/mlxbf-bootimages*.deb
@@ -45,6 +47,11 @@ RUN apt install -y -f \
 	linux-modules-extra-5.15.0-1050-bluefield=5.15.0-1050.52 \
 	linux-tools-5.15.0-1050-bluefield=5.15.0-1050.52 \
 	linux-tools-bluefield=5.15.0.1050.52
+
+RUN rm /var/lib/dpkg/info/libc-bin.* && \
+    apt-get -y clean && \
+    apt-get -y update && \
+    apt-get install -y libc-bin
 
 RUN apt-get clean -y && \
     apt-get update -o "Acquire::https::Verify-Peer=false" -y && \

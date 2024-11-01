@@ -13,6 +13,7 @@ cx_dev_id=$(lspci -nD -s ${cx_pcidev} 2> /dev/null | awk -F ':' '{print strtonum
 pciids=$(lspci -nD 2> /dev/null | grep 15b3:a2d[26c] | awk '{print $1}')
 dpu_part_number=$(mstflint -d $cx_pcidev q full | grep "Part Number:" | awk '{print $NF}')
 PSID=$(mstflint -d $cx_pcidev q | grep PSID | awk '{print $NF}')
+BD_PSIDS=${BD_PSIDS:-"BD_0000000004 BD_0000000005"}
 
 rlog()
 {
@@ -36,6 +37,14 @@ log()
 	rlog "$*"
 }
 
+fail()
+{
+	log "$@"
+	log "Installation failed"
+	sleep 3
+	reboot -f
+}
+
 bind_partitions()
 {
 	mount --bind /proc /mnt/proc
@@ -52,6 +61,23 @@ unmount_partition()
 		ilog "$(umount $1)"
 		sync
 	fi
+}
+
+wait_for_device()
+{
+	if [ -b $1 ]; then
+		return
+	fi
+
+	log "Waiting for $1 to be ready\n"
+
+	SECONDS=0
+	while [ ! -b $1 ]; do
+		if [ $SECONDS -gt $DEVICE_TIMEOUT ]; then
+			fail "Failed to access target device: $1"
+		fi
+		sleep 1
+	done
 }
 
 unmount_partitions()
@@ -77,7 +103,7 @@ unmount_partitions()
 
 	UNMOUNT_RETRIES=${UNMOUNT_RETRIES:-"3"}
 	unmount_retry=1
-	while grep -qw '/mnt' /proc/mounts
+	while grep -qwE '/mnt|/loop' /proc/mounts
 	do
 		if [ $unmount_retry -gt $UNMOUNT_RETRIES ]; then
 			break
@@ -116,7 +142,7 @@ create_initramfs()
 	    kver=${kdir##*/}
 	    DRACUT_CMD=$(chroot /mnt /bin/ls -1 /sbin/dracut /usr/bin/dracut 2> /dev/null | head -n 1 | tr -d '\n')
 	    ilog "$(chroot /mnt grub2-set-default 0)"
-	    ilog "$(chroot /mnt $DRACUT_CMD --kver ${kver} --force --add-drivers 'sdhci-of-dwcmshc dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block mlxbf_tmfifo virtio_console nvme' /boot/initramfs-${kver}.img 2>&1)"
+	    ilog "$(chroot /mnt env SYSTEMCTL=systemctl $DRACUT_CMD --kver ${kver} --force --add-drivers 'sdhci-of-dwcmshc dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block mlxbf_tmfifo virtio_console nvme' /boot/initramfs-${kver}.img 2>&1)"
 	else
 	    kver=$(/bin/ls -1 /mnt/lib/modules/ | head -1)
 	fi
@@ -215,6 +241,34 @@ if [ -n "$BFCFG" ]; then
 		mv /etc/bf.cfg /etc/bf.cfg.orig
 	fi
 
+if (echo "${BD_PSIDS}" | grep -qw "${PSID}"); then
+	if [ "$distro" == "debian" ]; then
+		cat > /etc/bf.cfg << EOF
+BOOT0=DISK
+BOOT0_DESC='velinux1'
+BOOT0_DEVPATH='\\EFI\\velinux\\grubaa64.efi'
+BOOT1=DISK
+BOOT1_DESC='debian0'
+BOOT1_DEVPATH='\\EFI\\debian\\grubaa64.efi'
+BOOT2=NET-NIC_P0-IPV6
+BOOT3=NET-NIC_P1-IPV6
+BOOT4=NET-NIC_P0-IPV4
+BOOT5=NET-NIC_P1-IPV4
+BOOT6=UEFI_SHELL
+BOOT6_ARGS='ATTR=INACTIVE'
+PXE_DHCP_CLASS_ID=$DHCP_CLASS_ID
+EOF
+	else
+		cat > /etc/bf.cfg << EOF
+BOOT0=NET-NIC_P0-IPV6
+BOOT1=NET-NIC_P1-IPV6
+BOOT2=NET-NIC_P0-IPV4
+BOOT3=NET-NIC_P1-IPV4
+BOOT4=UEFI_SHELL
+PXE_DHCP_CLASS_ID=$DHCP_CLASS_ID
+EOF
+	fi
+else
 	cat > /etc/bf.cfg << EOF
 BOOT0=DISK
 BOOT1=NET-NIC_P0-IPV4
@@ -228,6 +282,7 @@ BOOT8=NET-NIC_P1-IPV4-HTTP
 BOOT9=NET-OOB-IPV4-HTTP
 PXE_DHCP_CLASS_ID=$DHCP_CLASS_ID
 EOF
+fi
 
 	$BFCFG
 	rc=$?
@@ -275,6 +330,29 @@ EOF
 
 	if [ $efivars_mount -eq 1 ]; then
 		umount /sys/firmware/efi/efivars
+	fi
+}
+
+erase_partitions()
+{
+	if [ "X$ERASE_EMMC" == "Xyes" ]; then
+		if [ -b /dev/mmcblk0 ]; then
+			log "INFO: Erasing eMMC drive: /dev/mmcblk0"
+			wipefs -a /dev/mmcblk0
+		fi
+	fi
+
+	if [ "X$ERASE_SSD" == "Xyes" ]; then
+		if [[ $device == *"nvme"* ]]; then
+			log "INFO: Erasing NVME drive: $device"
+			nvme format -s1 $device -f
+		else
+			nvme_device="$(cd /sys/block; /bin/ls -1d nvme* | sort -V | tail -1)"
+			if [ ! -z "$nvme_device" ]; then
+				log "INFO: Erasing NVME drive: /dev/$nvme_device"
+				nvme format -s1 /dev/$nvme_device -f
+			fi
+		fi
 	fi
 }
 
@@ -376,7 +454,69 @@ EOF
 SUBSYSTEM=="block", KERNEL=="$root_device", SYMLINK+="root"
 EOF
 
-	configure_snap
+	if [[ "${PART_SCHEME}" == "SCHEME_B" ]]; then
+		sed -r -i -e "s@(^LOG_DIR=).*@\1/home/snap/log@" /mnt/usr/bin/rotate_nvme_snap_logs.sh
+		sed -i -e "s@^\$outchannel@# \$outchannel@" /mnt/etc/rsyslog.d/nvme_snap_logs.conf
+		sed -i -e "s@^## \$outchannel@\$outchannel@" /mnt/etc/rsyslog.d/nvme_snap_logs.conf
+	fi
+
+	if [ -e /mnt/usr/sbin/mlnx_snap_check_emulation.sh ]; then
+		sed -r -i -e "s@(NVME_SF_ECPF_DEV=).*@\1${cx_pcidev}@" /mnt/usr/sbin/mlnx_snap_check_emulation.sh
+	fi
+
+	ilog "PSID: $PSID"
+	case "${PSID}" in
+		MT_0000000634)
+		sed -r -i -e 's@(EXTRA_ARGS=).*@\1"--mem-size 1200"@' /mnt/etc/default/mlnx_snap
+		;;
+	esac
+
+	# Update HW-dependant files
+	if [ -e /mnt/etc/debian_version ]; then
+		if (lspci -n -d 15b3: | grep -wq 'a2d2'); then
+			# BlueField-1
+			ln -snf snap_rpc_init_bf1.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
+			# OOB interface does not exist on BlueField-1
+			sed -i -e '/oob_net0/,+1d' /mnt/var/lib/cloud/seed/nocloud-net/network-config
+			/bin/rm -f /mnt/etc/network/interfaces.d/*oob_net0
+			packages_to_remove=$(chroot /mnt env PATH=$CHROOT_PATH dpkg -S /lib/firmware/mellanox/{bmc,cec}/* | cut -d: -f1 | tr -s '\n' ' ')
+		elif (lspci -n -d 15b3: | grep -wq 'a2d6'); then
+			# BlueField-2
+			ln -snf snap_rpc_init_bf2.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
+			chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge libxlio libxlio-dev libxlio-utils || true
+			#chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge dpa-compiler dpacc dpaeumgmt flexio || true
+			packages_to_remove=$(chroot /mnt env PATH=$CHROOT_PATH dpkg -S /lib/firmware/mellanox/{bmc,cec}/* | grep "bf3" | cut -d: -f1 | tr -s '\n' ' ')
+		elif (lspci -n -d 15b3: | grep -wq 'a2dc'); then
+			# BlueField-3
+			chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge mlnx-snap || true
+			packages_to_remove=$(chroot /mnt env PATH=$CHROOT_PATH dpkg -S /lib/firmware/mellanox/{bmc,cec}/* | grep -viE "bf3-cec-fw|bf3-bmc-fw|bf3-bmc-gi|${dpu_part_number//_/-}" | cut -d: -f1 | tr -s '\n' ' ')
+		fi
+		if [ -n "$packages_to_remove" ]; then
+			ilog "Removing packages: $packages_to_remove"
+			chroot /mnt env PATH=$CHROOT_PATH  apt remove -y --purge $packages_to_remove || true
+		fi
+	else
+		if (lspci -n -d 15b3: | grep -wq 'a2d2'); then
+			# BlueField-1
+			ln -snf snap_rpc_init_bf1.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
+			# OOB interface does not exist on BlueField-1
+			/bin/rm -f /mnt/etc/sysconfig/network-scripts/ifcfg-oob_net0
+			packages_to_remove=$(chroot /mnt /bin/bash -c "/usr/bin/rpm -qf /lib/firmware/mellanox/{bmc,cec}/* 2>&1" | tr -s '\n' ' ')
+		elif (lspci -n -d 15b3: | grep -wq 'a2d6'); then
+			# BlueField-2
+			ln -snf snap_rpc_init_bf2.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
+			chroot /mnt bash -c "/usr/bin/yum remove -y libxlio libxlio-devel libxlio-utils" || true
+			packages_to_remove=$(chroot /mnt /bin/bash -c "/usr/bin/rpm -qf /lib/firmware/mellanox/{bmc,cec}/* 2>&1" | grep "bf3" | tr -s '\n' ' ')
+		elif (lspci -n -d 15b3: | grep -wq 'a2dc'); then
+			# BlueField-3
+			chroot /mnt rpm -e mlnx-snap || true
+			packages_to_remove=$(chroot /mnt /bin/bash -c "/usr/bin/rpm -qf /lib/firmware/mellanox/{bmc,cec}/* 2>&1" | grep -viE "bf3-cec-fw|bf3-bmc-fw|bf3-bmc-gi|${dpu_part_number//_/-}" | tr -s '\n' ' ')
+		fi
+		if [ -n "$packages_to_remove" ]; then
+			ilog "Removing packages: $packages_to_remove"
+			ilog "$(chroot /mnt bash -c "/usr/bin/yum remove -y $packages_to_remove" || true)"
+		fi
+	fi
 
 	chmod 600 /mnt/etc/ssh/*
 
@@ -413,12 +553,25 @@ interface "oob_net0" {
   send vendor-class-identifier "$DHCP_CLASS_ID_OOB";
 }
 EOF
+	cat >> /mnt/etc/dhcp/dhclient6.conf << EOF
+option dhcp6.vendor-opts code 16 = string;
+send dhcp6.vendor-opts $DHCP_CLASS_ID_DP_IPV6;
+
+interface "oob_net0" {
+  send dhcp6.vendor-opts $DHCP_CLASS_ID_OOB_IPV6;
+}
+EOF
 
 if [[ "X$ENABLE_SFC_HBN" == "Xyes" || "X$ENABLE_BR_HBN" == "Xyes" ]]; then
 	cat >> /mnt/etc/dhcp/dhclient.conf << EOF
 
 interface "mgmt" {
   send vendor-class-identifier "$DHCP_CLASS_ID_OOB";
+}
+EOF
+	cat >> /mnt/etc/dhcp/dhclient6.conf << EOF
+interface "mgmt" {
+  send dhcp6.vendor-opts $DHCP_CLASS_ID_OOB_IPV6;
 }
 EOF
 fi
@@ -473,57 +626,6 @@ configure_default_grub()
 	ilog "$(cat /mnt/etc/default/grub)"
 }
 
-configure_snap()
-{
-	if [[ "${PART_SCHEME}" == "SCHEME_B" ]]; then
-		sed -r -i -e "s@(^LOG_DIR=).*@\1/home/snap/log@" /mnt/usr/bin/rotate_nvme_snap_logs.sh
-		sed -i -e "s@^\$outchannel@# \$outchannel@" /mnt/etc/rsyslog.d/nvme_snap_logs.conf
-		sed -i -e "s@^## \$outchannel@\$outchannel@" /mnt/etc/rsyslog.d/nvme_snap_logs.conf
-	fi
-
-	if [ -e /mnt/usr/sbin/mlnx_snap_check_emulation.sh ]; then
-		sed -r -i -e "s@(NVME_SF_ECPF_DEV=).*@\1${cx_pcidev}@" /mnt/usr/sbin/mlnx_snap_check_emulation.sh
-	fi
-
-	ilog "PSID: $PSID"
-	case "${PSID}" in
-		MT_0000000634)
-		sed -r -i -e 's@(EXTRA_ARGS=).*@\1"--mem-size 1200"@' /mnt/etc/default/mlnx_snap
-		;;
-	esac
-
-	# Update HW-dependant files
-	if [ -e /mnt/etc/debian_version ]; then
-		if (lspci -n -d 15b3: | grep -wq 'a2d2'); then
-			# BlueField-1
-			ln -snf snap_rpc_init_bf1.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
-			# OOB interface does not exist on BlueField-1
-			sed -i -e '/oob_net0/,+1d' /mnt/var/lib/cloud/seed/nocloud-net/network-config
-			/bin/rm -f /mnt/etc/network/interfaces.d/*oob_net0
-		elif (lspci -n -d 15b3: | grep -wq 'a2d6'); then
-			# BlueField-2
-			ln -snf snap_rpc_init_bf2.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
-			#chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge dpa-compiler dpacc dpaeumgmt flexio || true
-		elif (lspci -n -d 15b3: | grep -wq 'a2dc'); then
-			# BlueField-3
-			chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge mlnx-snap || true
-		fi
-	else
-		if (lspci -n -d 15b3: | grep -wq 'a2d2'); then
-			# BlueField-1
-			ln -snf snap_rpc_init_bf1.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
-			# OOB interface does not exist on BlueField-1
-			/bin/rm -f /mnt/etc/sysconfig/network-scripts/ifcfg-oob_net0
-		elif (lspci -n -d 15b3: | grep -wq 'a2d6'); then
-			# BlueField-2
-			ln -snf snap_rpc_init_bf2.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
-		elif (lspci -n -d 15b3: | grep -wq 'a2dc'); then
-			# BlueField-3
-			chroot /mnt rpm -e mlnx-snap || true
-		fi
-	fi
-}
-
 os_installation_flow()
 {
 	mount_target_partition
@@ -570,6 +672,10 @@ os_installation_flow()
 
 install_dpu_os()
 {
+	if [ "X${ERASE_PARTITIONS}" == "Xyes" ]; then
+		erase_partitions
+	fi
+
 	log "INFO: $distro installation started"
 
 	prepare_target_partitions
@@ -687,7 +793,7 @@ CMDLINE:
 $(cat /proc/cmdline)
 
 PARTED:
-$(parted -l -s)
+$(parted -l -s 2> /dev/null)
 
 LSPCI:
 $(lspci)
@@ -711,6 +817,16 @@ if [ -e /etc/bf.cfg ]; then
 	fi
 fi
 
+if (echo "${BD_PSIDS}" | grep -qw "${PSID}"); then
+	case "${distro,,}" in
+		"debian"|"ubuntu")
+		;;
+		*)
+			fail "$distro is not supported on this DPU"
+		;;
+	esac
+fi
+
 if [ "X${DEBUG}" == "Xyes" ]; then
 	log_output=/dev/kmsg
 	if [ -n "$log_output" ]; then
@@ -726,6 +842,10 @@ NIC_FW_UPDATE_PASSED=0
 DHCP_CLASS_ID=${PXE_DHCP_CLASS_ID:-""}
 DHCP_CLASS_ID_OOB=${DHCP_CLASS_ID_OOB:-"NVIDIA/BF/OOB"}
 DHCP_CLASS_ID_DP=${DHCP_CLASS_ID_DP:-"NVIDIA/BF/DP"}
+# 00:00:16:47 represents the IANA-assigned Enterprise Number for NVIDIA (5703 in decimal) NVIDIA/BF/OOB
+DHCP_CLASS_ID_OOB_IPV6=${DHCP_CLASS_ID_OOB_IPV6:-"00:00:16:47:00:0d:4E:56:49:44:49:41:2F:42:46:2F:4F:4F:42"}
+# 00:00:16:47 represents the IANA-assigned Enterprise Number for NVIDIA (5703 in decimal) NVIDIA/BF/DP
+DHCP_CLASS_ID_DP_IPV6=${DHCP_CLASS_ID_DP_IPV6:-"00:00:16:47:00:0c:4E:56:49:44:49:41:2f:42:46:2f:44:50"}
 FACTORY_DEFAULT_DHCP_BEHAVIOR=${FACTORY_DEFAULT_DHCP_BEHAVIOR:-"true"}
 
 if [ "${FACTORY_DEFAULT_DHCP_BEHAVIOR}" == "true" ]; then
@@ -733,4 +853,10 @@ if [ "${FACTORY_DEFAULT_DHCP_BEHAVIOR}" == "true" ]; then
 	DHCP_CLASS_ID="NVIDIA/BF/PXE"
 	DHCP_CLASS_ID_OOB="NVIDIA/BF/OOB"
 	DHCP_CLASS_ID_DP="NVIDIA/BF/DP"
+	DHCP_CLASS_ID_OOB_IPV6="00:00:16:47:00:0d:4E:56:49:44:49:41:2F:42:46:2F:4F:4F:42"
+	DHCP_CLASS_ID_DP_IPV6="00:00:16:47:00:0c:4E:56:49:44:49:41:2f:42:46:2f:44:50"
 fi
+
+ERASE_PARTITIONS=${ERASE_PARTITIONS:-"no"}
+ERASE_EMMC=${ERASE_EMMC:-"yes"}
+ERASE_SSD=${ERASE_SSD:-"yes"}

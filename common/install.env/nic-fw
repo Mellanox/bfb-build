@@ -1,11 +1,11 @@
 NIC_FW_UPDATE_DONE=0
 FORCE_NIC_FW_UPDATE=${FORCE_NIC_FW_UPDATE:-"no"}
 NIC_FW_RESET_REQUIRED=0
-BFB_NIC_FW_UPDATE=0
 NIC_FW_FOUND=0
 FW_UPDATER=/opt/mellanox/mlnx-fw-updater/mlnx_fw_updater.pl
 FW_DIR=/opt/mellanox/mlnx-fw-updater/firmware/
 is_nic_mode=${is_nic_mode:-0}
+NIC_FW_EXTRACTION_DONE=0
 
 CHROOT=
 
@@ -21,19 +21,35 @@ provided_nic_fw()
 	fi
 }
 
+extract_nic_fw()
+{
+	if [ $NIC_FW_EXTRACTION_DONE -eq 1 ]; then
+		return
+	fi
+	ilog "Extracting NIC Firmware files from $fspath/image.tar.xz"
+	ilog "$(tar Jxf $fspath/image.tar.xz --warning=no-timestamp ./opt/mellanox/mlnx-fw-updater 2>&1)"
+	NIC_FW_EXTRACTION_DONE=1
+}
+
 fw_update()
 {
 	if [[ -x ${FW_UPDATER} && -d ${FW_DIR} ]]; then
-		BFB_NIC_FW_UPDATE=1
 		NIC_FW_FOUND=1
 	else
-		if [ ! -d /mnt/root ]; then
+		if [[ ! -d /mnt/root && ! -z "${root_device}" ]]; then
 			mount -t $ROOTFS /dev/${root_device} /mnt
 			bind_partitions
 		fi
 
 		if [[ -x /mnt/${FW_UPDATER} && -d /mnt/${FW_DIR} ]]; then
 			CHROOT="chroot /mnt"
+			NIC_FW_FOUND=1
+		fi
+	fi
+
+	if [ $NIC_FW_FOUND -eq 0 ]; then
+		extract_nic_fw
+		if [[ -x ${FW_UPDATER} && -d ${FW_DIR} ]]; then
 			NIC_FW_FOUND=1
 		fi
 	fi
@@ -80,7 +96,7 @@ fw_update()
 fw_reset()
 {
 	if [ $is_nic_mode -eq 1 ]; then
-		log "Run mlxfwreset or reboot from the Host to load new NIC firmware"
+		log "Run mlxfwreset or system-level reset to load new NIC firmware"
 		return
 	fi
 

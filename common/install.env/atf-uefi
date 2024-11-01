@@ -16,7 +16,7 @@ update_atf_uefi()
 		if [ -e /lib/firmware/mellanox/boot/capsule/efi_sbkeysync.cap ]; then
 			ilog "$(bfrec --capsule /lib/firmware/mellanox/boot/capsule/efi_sbkeysync.cap)"
 		fi
-		umount /mnt/efi_system_partition
+		unmount_partition /mnt/efi_system_partition
 	fi
 
 	if function_exists post_update_atf_uefi; then

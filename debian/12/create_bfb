@@ -182,7 +182,7 @@ touch ./etc/fstab
 
 for tool in xz efibootmgr bash getopt hexdump mstflint lspci \
 		lsblk watchdog shutdown systemctl strings aarch64-linux-gnu-strings \
-		mlxbf-bootctl id dirname curl openssl parted jq mlnx_bf_configure hwclock $ADDON_TOOLS
+		mlxbf-bootctl id dirname curl openssl parted jq mlnx_bf_configure hwclock xxd cmp $ADDON_TOOLS
 do
 	if [ -d $tool ]; then
 		continue
@@ -199,16 +199,16 @@ libpython3_minimal=$(dpkg -S /usr/lib/python3*/os.py | head -1 | cut -d ':' -f 1
 libpython3=$(dpkg -S /usr/lib/aarch64-linux-gnu/libpython3.*.so.1 | head -1 | cut -d ':' -f 1 | tr -d ',')
 python3_distutils=$(dpkg -S /usr/lib/python3.*/distutils | head -1 | cut -d ':' -f 1 | tr -d ',')
 python3_lib2to3=$(dpkg -S /usr/lib/python3.*/lib2to3 | head -1 | cut -d ':' -f 1 | tr -d ',')
-python_bin=$(readlink -f /usr/bin/python)
+python_bin=$(readlink -f /usr/bin/python3)
 python_deb=$(dpkg -S $python_bin | head -1 | cut -d ':' -f 1 | tr -d ',')
-python_ver=$(python -V | cut -d ' ' -f 2 | cut -d '.' -f1,2)
+python_ver=$(python3 -V | cut -d ' ' -f 2 | cut -d '.' -f1,2)
 
 for deb in mlxbf-scripts mft mft-oem dosfstools e2fsprogs fdisk kmod pciutils \
 		   usbutils tar coreutils nvme-cli mmc-utils iputils-ping uuid-runtime \
 		   sshpass openssh-client util-linux ipmitool procps debianutils \
 		   iproute2 findutils perl-base $libperl $perl_modules \
 		   $libpython3_minimal $python3_distutils $python3_lib2to3 $python3 $python_deb \
-		   $libpython3 bsdutils libexpat1 wget net-tools isc-dhcp-client $ADDON_DEBS
+		   $libpython3 bsdutils libexpat1 wget net-tools isc-dhcp-client hostname $ADDON_DEBS
 do
 	for pfile in $(dpkg -L $deb)
 	do
@@ -275,27 +275,6 @@ sudo mkdir -p ./etc/infiniband
 sudo cp /etc/infiniband/vf-net-link-name.sh ./etc/infiniband/vf-net-link-name.sh
 
 sudo mkdir -p mnt
-
-if [ -d ${SDIR}/BF3BMC/ ]; then
-	/bin/rm -rf BF3BMC
-	if (grep -q prod /etc/mlnx-release); then
-		cp -a ${SDIR}/BF3BMC/pk ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
-	elif (grep -q dev /etc/mlnx-release); then
-		cp -a ${SDIR}/BF3BMC/dk ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
-	else
-		cp -a ${SDIR}/BF3BMC/qp ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
-	fi
-	[ -d ${SDIR}/BF3BMC/golden_images ] && cp -a ${SDIR}/BF3BMC/golden_images ./BF3BMC
-fi
-
-if [ -d ${SDIR}/BF2BMC/ ]; then
-	/bin/rm -rf BF2BMC
-	if (grep -q prod /etc/mlnx-release); then
-		cp -a ${SDIR}/BF2BMC/pk ./BF2BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
-	else
-		cp -a ${SDIR}/BF2BMC/qp/ ./BF2BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
-	fi
-fi
 
 # Remove hostname that includes docker container's id
 /bin/rm -f ./etc/hostname

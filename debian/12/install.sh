@@ -29,6 +29,8 @@ CHROOT_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 distro="Debian"
 BDIR=$(dirname $0)
 
+export GENERATE_CONFIG_IMAGE=no
+
 #
 # Check PXE installation
 #
@@ -170,6 +172,34 @@ nameserver 127.0.0.53
 nameserver 192.168.100.1
 options edns0
 EOF
+
+	# Update HW-dependant files
+	if (lspci -n -d 15b3: | grep -wq 'a2d2'); then
+		# BlueField-1
+		ln -snf snap_rpc_init_bf1.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
+		# OOB interface does not exist on BlueField-1
+		sed -i -e '/oob_net0/,+1d' /mnt/var/lib/cloud/seed/nocloud-net/network-config
+		packages_to_remove=$(chroot /mnt env PATH=$CHROOT_PATH dpkg -S /lib/firmware/mellanox/{bmc,cec}/* | cut -d: -f1 | tr -s '\n' ' ')
+	elif (lspci -n -d 15b3: | grep -wq 'a2d6'); then
+		# BlueField-2
+		ln -snf snap_rpc_init_bf2.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
+		chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge libxlio libxlio-dev libxlio-utils || true
+		#chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge dpa-compiler dpacc dpaeumgmt flexio || true
+		packages_to_remove=$(chroot /mnt env PATH=$CHROOT_PATH dpkg -S /lib/firmware/mellanox/{bmc,cec}/* | grep "bf3" | cut -d: -f1 | tr -s '\n' ' ')
+	elif (lspci -n -d 15b3: | grep -wq 'a2dc'); then
+		# BlueField-3
+		chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge mlnx-snap || true
+		packages_to_remove=$(chroot /mnt env PATH=$CHROOT_PATH dpkg -S /lib/firmware/mellanox/{bmc,cec}/* | grep -viE "bf3-cec-fw|bf3-bmc-fw|bf3-bmc-gi|${dpu_part_number//_/-}" | cut -d: -f1 | tr -s '\n' ' ')
+	fi
+
+	if [ -n "$packages_to_remove" ]; then
+		ilog "Removing packages: $packages_to_remove"
+		chroot /mnt env PATH=$CHROOT_PATH  apt remove -y --purge $packages_to_remove || true
+	fi
+
+	if (echo "${BD_PSIDS}" | grep -qw "${PSID}"); then
+		sed -i -e 's/FRU_TYPE=.*/FRU_TYPE="1"/' /mnt/etc/ipmi/progconf
+	fi
 }
 
 update_efi_bootmgr()

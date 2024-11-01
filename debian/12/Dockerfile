@@ -3,13 +3,13 @@ ADD qemu-aarch64-static /usr/bin/
 
 ARG MLXBF_BOOTIMAGES=mlxbf-bootimages
 ARG MLNX_FW_UPDATER=mlnx-fw-updater-signed
+ARG BMC_FW_PACKAGES="bf2-bmc-fw-signed bf3-bmc-fw-signed bf3-bmc-gi-signed bf3-bmc-nic-fw*"
+ARG CEC_FW_PACKAGES="bf2-cec-fw-signed bf3-cec-fw-signed"
 WORKDIR /root/workspace
 ADD install.sh .
 ADD install.env ./install.env
 ADD create_bfb .
 ADD mlxbf-bootimages.deb .
-ADD BF2BMC ./BF2BMC
-ADD BF3BMC ./BF3BMC
 ADD 10-mlx-console-messages.conf /etc/sysctl.d/
 
 ENV DEBIAN_FRONTEND="noninteractive" FLASH_KERNEL_SKIP="yes" RUN_FW_UPDATER="no"
@@ -17,7 +17,10 @@ ENV DEBIAN_FRONTEND="noninteractive" FLASH_KERNEL_SKIP="yes" RUN_FW_UPDATER="no"
 ADD repos/ /etc/apt/sources.list.d/
 ADD apt-preferences /etc/apt/preferences.d/99doca
 ADD --chown=0:0 --chmod=644 https://download.docker.com/linux/debian/gpg /etc/apt/keyrings/docker.asc
-ADD --chown=0:0 --chmod=644 https://prod-cdn.packages.k8s.io/repositories/isv:/kubernetes:/core:/stable:/v1.29/deb/Release.key /etc/apt/keyrings/kubernetes.asc
+ADD --chown=0:0 --chmod=644 https://prod-cdn.packages.k8s.io/repositories/isv:/kubernetes:/core:/stable:/v1.30/deb/Release.key /etc/apt/keyrings/kubernetes.asc
+
+# Avoid running flash-kernel post install
+RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
 
 RUN apt-get clean -y && \
     apt-get update -o "Acquire::https::Verify-Peer=false" -y && \
@@ -26,6 +29,10 @@ RUN apt-get clean -y && \
     dpkg-reconfigure locales && \
     apt-get clean -y && \
     apt-get update -y && \
+    apt-get autoremove --purge -y \
+        snapd \
+        plymouth \
+    && \
     apt-get upgrade -y && \
     apt-get install -y \
         acpid \
@@ -86,7 +93,10 @@ RUN apt-get clean -y && \
         parted \
         pciutils \
         pkexec \
+        python3-netifaces \
         python3-pip \
+        python3-twisted \
+        python3.11 \
         rasdaemon \
         rsync \
         rsyslog \
@@ -101,6 +111,7 @@ RUN apt-get clean -y && \
         uuid \
         uuid-runtime \
         vim \
+        vim-common \
         watchdog \
         wget \
         xxd \
@@ -108,8 +119,13 @@ RUN apt-get clean -y && \
 #DOCA Packages
         doca-runtime \
         doca-devel \
+        libxlio \
+        libxlio-dev \
+        libxlio-utils \
         strongswan \
         ${MLNX_FW_UPDATER} \
+        ${BMC_FW_PACKAGES} \
+        ${CEC_FW_PACKAGES} \
     && \
     apt-get clean -y && \
     rm -rf /var/lib/apt/lists/* /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf && \
@@ -128,7 +144,6 @@ RUN systemctl enable mlx-openipmi.service || true
 RUN systemctl enable mlx_ipmid.service || true
 RUN systemctl enable set_emu_param.service || true
 RUN systemctl enable mst || true
-RUN systemctl disable mlx-regex.service || true
 RUN systemctl disable openvswitch-ipsec || true
 RUN systemctl disable srp_daemon.service || true
 RUN systemctl disable ibacm.service || true
@@ -141,4 +156,4 @@ RUN systemctl disable kubelet.service || true
 RUN systemctl disable containerd.service || true
 RUN systemctl disable ModemManager.service || true
 
-RUN sed -i "s/_unsigned|_prod|_dev//" /etc/mlnx-release; sed -i "s/$/_@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
+RUN sed -i -E "s/(_unsigned|_prod|_dev)/_@IMAGE_TYPE@@CUSTOM_VERSION@/;" /etc/mlnx-release

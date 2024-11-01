@@ -10,18 +10,18 @@ ADD blueman /opt/mellanox/doca/services/blueman
 ADD infrastructure /opt/mellanox/doca/services/infrastructure
 
 ARG MLNX_FW_UPDATER=mlnx-fw-updater-signed
+ARG BMC_FW_PACKAGES="bf2-bmc-fw-signed bf3-bmc-fw-signed bf3-bmc-gi-signed bf3-bmc-nic-fw*"
+ARG CEC_FW_PACKAGES="bf2-cec-fw-signed bf3-cec-fw-signed"
 WORKDIR /root/workspace
 ADD install.sh .
 ADD install.env ./install.env
 ADD create_bfb .
 ADD build_ubuntu_bfb .
 ADD mlxbf-bootimages.deb .
-ADD BF2BMC ./BF2BMC
-ADD BF3BMC ./BF3BMC
 ADD 10-mlx-console-messages.conf /etc/sysctl.d/
 ADD repos/ /etc/apt/sources.list.d/
 ADD apt-preferences /etc/apt/preferences.d/99doca
-ADD --chown=0:0 --chmod=644 https://prod-cdn.packages.k8s.io/repositories/isv:/kubernetes:/core:/stable:/v1.29/deb/Release.key /etc/apt/keyrings/kubernetes.asc
+ADD --chown=0:0 --chmod=644 https://prod-cdn.packages.k8s.io/repositories/isv:/kubernetes:/core:/stable:/v1.30/deb/Release.key /etc/apt/keyrings/kubernetes.asc
 
 RUN apt update
 RUN dpkg -i /root/workspace/mlxbf-bootimages*.deb
@@ -31,24 +31,24 @@ RUN apt remove -y --purge $(dpkg --list "*openipmi*" | grep openipmi | awk '{pri
 RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
 
 RUN apt install -y -f \
-	linux-bluefield-cloud-tools-common=5.15.0-1050.52 \
-	linux-bluefield-headers-5.15.0-1050=5.15.0-1050.52 \
-	linux-bluefield-modules-5.15.0-1050-bluefield=5.15.0-1050.52+1 \
-	linux-bluefield-modules-bluefield=5.15.0-1050.52+1 \
-	linux-bluefield-modules-headers=5.15.0-1050.52+1 \
-	linux-bluefield-modules-source=5.15.0-1050.52+1 \
-	linux-bluefield-modules=5.15.0-1050.52+1 \
-	linux-bluefield-tools-5.15.0-1050=5.15.0-1050.52 \
-	linux-bluefield=5.15.0.1050.52 \
-	linux-buildinfo-5.15.0-1050-bluefield=5.15.0-1050.52 \
-	linux-headers-5.15.0-1050-bluefield=5.15.0-1050.52 \
-	linux-headers-bluefield=5.15.0.1050.52 \
-	linux-image-5.15.0-1050-bluefield=5.15.0-1050.52 \
-	linux-image-bluefield=5.15.0.1050.52 \
-	linux-modules-5.15.0-1050-bluefield=5.15.0-1050.52 \
-	linux-modules-extra-5.15.0-1050-bluefield=5.15.0-1050.52 \
-	linux-tools-5.15.0-1050-bluefield=5.15.0-1050.52 \
-	linux-tools-bluefield=5.15.0.1050.52
+	linux-bluefield=5.15.0.1056.58 \
+	linux-bluefield-cloud-tools-common=5.15.0-1056.58 \
+	linux-bluefield-headers-5.15.0-1056=5.15.0-1056.58 \
+	linux-bluefield-modules=5.15.0-1056.58+1 \
+	linux-bluefield-modules-5.15.0-1056-bluefield=5.15.0-1056.58+1 \
+	linux-bluefield-modules-bluefield=5.15.0-1056.58+1 \
+	linux-bluefield-modules-headers=5.15.0-1056.58+1 \
+	linux-bluefield-modules-source=5.15.0-1056.58+1 \
+	linux-bluefield-tools-5.15.0-1056=5.15.0-1056.58 \
+	linux-buildinfo-5.15.0-1056-bluefield=5.15.0-1056.58 \
+	linux-headers-5.15.0-1056-bluefield=5.15.0-1056.58 \
+	linux-headers-bluefield=5.15.0.1056.58 \
+	linux-image-5.15.0-1056-bluefield=5.15.0-1056.58 \
+	linux-image-bluefield=5.15.0.1056.58 \
+	linux-modules-5.15.0-1056-bluefield=5.15.0-1056.58 \
+	linux-modules-extra-5.15.0-1056-bluefield=5.15.0-1056.58 \
+	linux-tools-5.15.0-1056-bluefield=5.15.0-1056.58 \
+	linux-tools-bluefield=5.15.0.1056.58
 
 RUN apt-get clean -y && \
     apt-get update -o "Acquire::https::Verify-Peer=false" -y && \
@@ -121,8 +121,8 @@ RUN apt-get clean -y && \
         pciutils \
         pkexec \
         python3-pip \
-		python3.10 \
-		python3-pyinotify \
+        python3-pyinotify \
+        python3.10 \
         rasdaemon \
         rsync \
         rsyslog \
@@ -139,13 +139,19 @@ RUN apt-get clean -y && \
         uuid-runtime \
         vim \
         watchdog \
+        xxd \
         zstd \
 #DOCA Packages
         doca-runtime \
         doca-devel \
+        libxlio \
+        libxlio-dev \
+        libxlio-utils \
         mlnx-snap \
         strongswan \
         ${MLNX_FW_UPDATER} \
+        ${BMC_FW_PACKAGES} \
+        ${CEC_FW_PACKAGES} \
     && \
     rm -rf /var/lib/apt/lists/* /root/workspace/doca-repo.deb /etc/default/grub.d/50-cloudimg-settings.cfg /etc/ssh/sshd_config.d/60-cloudimg-settings.conf /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf && \
     truncate -s0 /etc/machine-id && \
@@ -158,9 +164,8 @@ RUN apt-get clean -y && \
     sed -i -e "s/FORCE_MODE=.*/FORCE_MODE=yes/" /etc/infiniband/openib.conf && \
     sed -i -r -e "s/^(MACAddressPolicy.*)/# \1/" /usr/lib/systemd/network/99-default.link && \
     update-pciids && \
+    update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1 && \
     wget -qO - https://linux.mellanox.com/public/repo/doca/latest/ubuntu22.04/aarch64/GPG-KEY-Mellanox.pub | apt-key add -
-
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1
 
 # Manage system services
 RUN systemctl enable NetworkManager.service || true
@@ -172,7 +177,6 @@ RUN systemctl enable mlx-openipmi.service || true
 RUN systemctl enable mlx_ipmid.service || true
 RUN systemctl enable set_emu_param.service || true
 RUN systemctl enable mst || true
-RUN systemctl disable mlx-regex.service || true
 RUN systemctl disable openvswitch-ipsec || true
 RUN systemctl disable srp_daemon.service || true
 RUN systemctl disable ibacm.service || true
@@ -207,4 +211,4 @@ RUN mkdir -p /boot/efi/EFI/ubuntu/; \
 	   /usr/lib/shim/fbaa64.efi \
 	/boot/efi/EFI/BOOT/
 
-RUN sed -i "s/_unsigned|_prod|_dev//" /etc/mlnx-release; sed -i "s/$/_@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
+RUN sed -i -E "s/(_unsigned|_prod|_dev)/_@IMAGE_TYPE@@CUSTOM_VERSION@/;" /etc/mlnx-release

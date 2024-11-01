@@ -98,12 +98,7 @@ prepare_target_partitions()
 {
 	ilog "OS installation target: $device"
 
-	# We cannot use wait-for-root as it expects the device to contain a
-	# known filesystem, which might not be the case here.
-	while [ ! -b $device ]; do
-		log "Waiting for $device to be ready\n"
-		sleep 1
-	done
+	wait_for_device $device
 
 	DF=$(which df 2> /dev/null)
 	if [ -n "$DF" ]; then
@@ -323,13 +318,22 @@ EOF
 		ln -snf snap_rpc_init_bf1.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
 		# OOB interface does not exist on BlueField-1
 		sed -i -e '/oob_net0/,+1d' /mnt/var/lib/cloud/seed/nocloud-net/network-config
+		packages_to_remove=$(chroot /mnt env PATH=$CHROOT_PATH dpkg -S /lib/firmware/mellanox/{bmc,cec}/* | cut -d: -f1 | tr -s '\n' ' ')
 	elif (lspci -n -d 15b3: | grep -wq 'a2d6'); then
 		# BlueField-2
 		ln -snf snap_rpc_init_bf2.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
+		chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge libxlio libxlio-dev libxlio-utils || true
 		#chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge dpa-compiler dpacc dpaeumgmt flexio || true
+		packages_to_remove=$(chroot /mnt env PATH=$CHROOT_PATH dpkg -S /lib/firmware/mellanox/{bmc,cec}/* | grep "bf3" | cut -d: -f1 | tr -s '\n' ' ')
 	elif (lspci -n -d 15b3: | grep -wq 'a2dc'); then
 		# BlueField-3
 		chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge mlnx-snap || true
+		packages_to_remove=$(chroot /mnt env PATH=$CHROOT_PATH dpkg -S /lib/firmware/mellanox/{bmc,cec}/* | grep -viE "bf3-cec-fw|bf3-bmc-fw|bf3-bmc-gi|${dpu_part_number//_/-}" | cut -d: -f1 | tr -s '\n' ' ')
+	fi
+
+	if [ -n "$packages_to_remove" ]; then
+		ilog "Removing packages: $packages_to_remove"
+		chroot /mnt env PATH=$CHROOT_PATH  apt remove -y --purge $packages_to_remove || true
 	fi
 
 	pciid=$(echo $pciids | awk '{print $1}' | head -1)
@@ -376,7 +380,6 @@ EOF
 			;;
 		esac
 	fi
-
 } # End of configure_target_os
 
 update_efi_bootmgr()
@@ -535,6 +538,16 @@ install_os_image()
 
 install_dpu_os()
 {
+
+	erase_partitions
+
+	if (echo "${BD_PSIDS}" | grep -qw "${PSID}"); then
+		if [ "X$FORCE_UPDATE_DPU_OS" != "Xyes" ]; then
+			log "Skip DPU OS installation"
+			return
+		fi
+	fi
+
 	log "INFO: $distro installation started"
 
 	prepare_target_partitions

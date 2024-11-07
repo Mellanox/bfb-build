@@ -129,7 +129,6 @@ docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION} 2> /dev/null
 sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/g;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/g" Dockerfile
 
 docker build -t ${docker_image} \
-	--progress=plain \
 	-f Dockerfile .
 
 DOCKER_RUN_PARAMS="--privileged -e container=docker \

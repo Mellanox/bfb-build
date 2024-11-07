@@ -26,6 +26,10 @@ ADD --chown=0:0 --chmod=644 https://prod-cdn.packages.k8s.io/repositories/isv:/k
 RUN apt update
 RUN dpkg -i /root/workspace/mlxbf-bootimages*.deb
 RUN apt remove -y --purge $(dpkg --list "*openipmi*" | grep openipmi | awk '{print $2}') || true
+
+# Avoid running flash-kernel post install
+RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
+
 RUN apt install -y -f \
 	linux-bluefield-cloud-tools-common=5.15.0-1050.52 \
 	linux-bluefield-headers-5.15.0-1050=5.15.0-1050.52 \

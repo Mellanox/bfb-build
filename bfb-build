@@ -29,6 +29,10 @@ IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-".$(date +%Y%m%d)"}
 
 if [ "`uname -m`" != "aarch64" ]; then
+	# Install qemu-user-static using docker container:
+	# This is a workaround for qemu: uncaught target signal 11 (Segmentation fault)
+	docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+
 	if [ ! -d /etc/binfmt.d ]; then
 		echo "ERROR: systemd package is required"
 		exit 1

@@ -1,13 +1,14 @@
 from --platform=linux/arm64 openeuler/openeuler:20.03-lts-sp1
 ADD qemu-aarch64-static /usr/bin/
 
+ARG BMC_FW_PACKAGES=bf3-bmc-nic-fw
 ARG BASE_URL
 ARG BSP_VERSION
 ARG MLNX_FW_UPDATER=mlnx-fw-updater-signed
+ARG BMC_FW_PACKAGES="bf2-bmc-fw-signed bf3-bmc-fw-signed bf3-bmc-gi-signed bf3-bmc-nic-fw*"
+ARG CEC_FW_PACKAGES="bf2-cec-fw-signed bf3-cec-fw-signed"
 ADD bootimages bootimages/
 ADD 10-mlx-console-messages.conf /etc/sysctl.d/
-ADD BF2BMC /root/workspace/BF2BMC/
-ADD BF3BMC /root/workspace/BF3BMC/
 ADD install.env /root/workspace/install.env/
 ADD install.sh create_bfb /root/workspace/
 
@@ -86,24 +87,23 @@ RUN echo 'excludepkgs=OpenIPMI network-scripts-openvswitch' >> /etc/dnf/dnf.conf
         unzip \
         usbutils \
         vim \
+        vim-common \
         virt-install \
         watchdog \
         wget \
         xfsprogs \
-        https://linux.mellanox.com/public/repo/bluefield/latest/extras/addons/sshpass-1.09-1.oe2203.aarch64.rpm \
-        https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libmd-1.1.0-1.el8.aarch64.rpm \
-        https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libmd-devel-1.1.0-1.el8.aarch64.rpm \
-        https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libbsd-devel-0.12.2-1.el8.aarch64.rpm \
-        https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libbsd-0.12.2-1.el8.aarch64.rpm \
-        https://download.fedoraproject.org/pub/epel/7/aarch64/Packages/l/lcov-1.13-1.el7.noarch.rpm \
-        https://download.fedoraproject.org/pub/epel/7/aarch64/Packages/r/re2c-0.14.3-2.el7.aarch64.rpm \
-        https://vault.centos.org/centos/8/BaseOS/aarch64/os/Packages/watchdog-5.15-2.el8.aarch64.rpm \
+        https://linux.mellanox.com/public/repo/bluefield/latest/extras/addons/libmd-1.1.0-1.el8.aarch64.rpm \
+        https://linux.mellanox.com/public/repo/bluefield/latest/extras/addons/libmd-devel-1.1.0-1.el8.aarch64.rpm \
+        https://linux.mellanox.com/public/repo/bluefield/latest/extras/addons/libbsd-devel-0.12.2-1.el8.aarch64.rpm \
+        https://linux.mellanox.com/public/repo/bluefield/latest/extras/addons/libbsd-0.12.2-1.el8.aarch64.rpm \
 #DOCA Packages
         doca-runtime \
         doca-devel \
         mlnx-snap \
-        strongswan-bf \
+        strongswan \
         ${MLNX_FW_UPDATER} \
+        ${BMC_FW_PACKAGES} \
+        ${CEC_FW_PACKAGES} \
     && \
     dnf --exclude='mlxbf-bootimages*' -y reinstall bf-release && \
     dnf -y clean all && \
@@ -118,4 +118,4 @@ RUN systemctl enable mst || true
 RUN systemctl disable kubelet || true
 RUN systemctl disable containerd || true
 
-RUN sed -i "s/_unsigned|_prod|_dev//" /etc/mlnx-release; sed -i "s/$/_@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
+RUN sed -i -E "s/(_unsigned|_prod|_dev)/_@IMAGE_TYPE@@CUSTOM_VERSION@/;" /etc/mlnx-release

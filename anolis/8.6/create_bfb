@@ -190,7 +190,7 @@ done
 # Copy tools
 for tool in xz efibootmgr bash getopt hexdump mstflint lspci perl \
         lsblk shutdown systemctl strings \
-        mlxbf-bootctl id grep jq hostnamectl ipcalc $ADDON_TOOLS
+        mlxbf-bootctl id grep jq hostnamectl ipcalc xxd cmp $ADDON_TOOLS
 do
     if [ -d $tool ]; then
         continue
@@ -213,27 +213,6 @@ mkdir -p ./etc/infiniband
 cp /etc/infiniband/vf-net-link-name.sh ./etc/infiniband/vf-net-link-name.sh
 
 mkdir -p mnt
-
-if [ -d ${SDIR}/BF3BMC/ ]; then
-	/bin/rm -rf BF3BMC
-	if (grep -q prod /etc/mlnx-release); then
-		cp -a ${SDIR}/BF3BMC/pk ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
-	elif (grep -q dev /etc/mlnx-release); then
-		cp -a ${SDIR}/BF3BMC/dk ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
-	else
-		cp -a ${SDIR}/BF3BMC/qp ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
-	fi
-	[ -d ${SDIR}/BF3BMC/golden_images ] && cp -a ${SDIR}/BF3BMC/golden_images ./BF3BMC
-fi
-
-if [ -d ${SDIR}/BF2BMC/ ]; then
-	/bin/rm -rf BF2BMC
-	if (grep -q prod /etc/mlnx-release); then
-		cp -a ${SDIR}/BF2BMC/pk ./BF2BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
-	else
-		cp -a ${SDIR}/BF2BMC/qp/ ./BF2BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
-	fi
-fi
 
 # Remove hostname that includes docker container's id
 /bin/rm -f ./etc/hostname

@@ -29,51 +29,7 @@ LANG=C
 SDIR="/root/workspace"
 BFB="${BFB:-/lib/firmware/mellanox/boot/default.bfb}"
 CAPSULE="${CAPSULE:-/lib/firmware/mellanox/boot/capsule/boot_update2.cap}"
-verbose=0
-kdir=$(/bin/ls -1d /lib/modules/4.19* /lib/modules/4.20* /lib/modules/5.* 2> /dev/null | head -1)
-if [ -n "$kdir" ]; then
-    kernel=${kdir##*/}
-else
-    kernel=$(/bin/ls -1 /lib/modules/ | head -1)
-fi
-
-usage() {
-cat << EOF
-Usage: $(basename $0) [ OPTIONS ]
-OPTIONS:
--k, -kernel,         --kernel <kernel version>  Kernel version for the SmartNIC. Default: $kernel
--v, -verbose,   --verbose                       Run script in verbose mode. Will print out each step of execution.
--h, -help,      --help                          Display help
-
-
-EOF
-}
-
-options=$(getopt -l "kernel:,help,verbose" -o "k:hv" -a -- "$@")
-
-eval set -- "$options"
-
-while true
-do
-        case $1 in
-                -h|--help)
-                    usage
-                    exit 0
-                    ;;
-                -k|--kernel)
-                    shift
-                    kernel=$1
-                    ;;
-                -v|--verbose)
-                    verbose=1
-                    set -xv
-                    ;;
-                --)
-                    shift
-                    break;;
-        esac
-        shift
-done
+kernel=$(/bin/ls -1 /lib/modules/ | head -1)
 
 bootctl_module="mlxbf-bootctl"
 
@@ -107,9 +63,20 @@ cd ${WDIR}
 
 initramfs=$WDIR/dump-initramfs-v0
 
-dracut --no-hostonly -m "bash network base systemd systemd-initrd dracut-systemd shutdown udev-rules" \
+for mod in ${bootctl_module} sdhci-of-dwcmshc mlxbf_tmfifo dw_mmc_bluefield mmc_block virtio_console mlx5_core mlx5_ib mlxfw ib_umad nvme gpio-mlxbf2 gpio-mlxbf3 mlxbf-gige pinctrl-mlxbf3 8021q vitesse
+do
+    if (modinfo -k $kernel $mod 2>/dev/null | grep "filename:" | grep -q builtin); then
+        continue
+    fi
+    if ! (modinfo -k $kernel $mod 2>/dev/null); then
+        continue
+    fi
+    ADD_DRIVERS="$ADD_DRIVERS $mod"
+done
+
+dracut --no-hostonly -m "bash network base systemd systemd-initrd dracut-systemd shutdown udev-rules dm" \
 	--install "/usr/lib/udev/rules.d/91-tmfifo_net.rules /lib/udev/rules.d/92-oob_net.rules" \
-	--add-drivers "${bootctl_module} sdhci-of-dwcmshc mlxbf_tmfifo dw_mmc_bluefield mmc_block virtio_console mlx5_core mlx5_ib mlxfw ib_umad nvme gpio-mlxbf2 gpio-mlxbf3 mlxbf-gige pinctrl-mlxbf3 8021q" \
+	--add-drivers "${ADD_DRIVERS}" \
 	--filesystems "xfs vfat" --gzip $initramfs ${kernel}
 
 rm -f /etc/udev/rules.d/91-tmfifo_net.rules /etc/udev/rules.d/92-oob_net.rules
@@ -121,7 +88,7 @@ GRUB_DEFAULT=saved
 GRUB_DISABLE_SUBMENU=true
 GRUB_TERMINAL=console
 GRUB_SERIAL_COMMAND="serial --unit=1"
-GRUB_CMDLINE_LINUX="crashkernel=auto console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 modprobe.blacklist=mlx5_core,mlx5_ib net.ifnames=0 biosdevname=0"
+GRUB_CMDLINE_LINUX="crashkernel=1024M console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 modprobe.blacklist=mlx5_core,mlx5_ib net.ifnames=0 biosdevname=0"
 GRUB_DISABLE_RECOVERY="true"
 GRUB_TIMEOUT_STYLE=countdown
 GRUB_DISABLE_OS_PROBER=false
@@ -219,7 +186,7 @@ copy_rpm()
 }
 
 # Copy the content of RPM packages
-for package in mlxbf-bfscripts util-linux dosfstools e2fsprogs kmod pciutils usbutils chkconfig mft mft-oem kernel-mft kmod-kernel-mft-mlnx tar xfsprogs coreutils-single nvme-cli mmc-utils parted which curl openssl gawk lvm2-libs device-mapper lvm2 iputils sshpass openssh-clients $ADDON_RPMS
+for package in mlxbf-bfscripts util-linux dosfstools e2fsprogs kmod pciutils usbutils chkconfig mft mft-oem kernel-mft kmod-kernel-mft-mlnx tar xfsprogs coreutils-single nvme-cli mmc-utils parted which curl openssl gawk lvm2-libs device-mapper lvm2 iputils sshpass openssh-clients findutils mokutil dhcp-client net-tools wget $ADDON_RPMS
 do
     copy_rpm $package || true
 done
@@ -227,7 +194,7 @@ done
 # Copy tools
 for tool in xz efibootmgr bash getopt hexdump mstflint lspci perl \
         lsblk shutdown systemctl strings \
-        mlxbf-bootctl id grep jq $ADDON_TOOLS
+        mlxbf-bootctl id grep jq hostnamectl ipcalc xxd cmp $ADDON_TOOLS
 do
     if [ -d $tool ]; then
         continue
@@ -243,28 +210,19 @@ mkdir -p ./lib/firmware/mellanox/boot/
 cp /lib/firmware/mellanox/boot/default.bfb ./lib/firmware/mellanox/boot/default.bfb
 cp -a /lib/firmware/mellanox/boot/capsule ./lib/firmware/mellanox/boot/
 cp $CAPSULE ./lib/firmware/mellanox/boot/capsule/
+
+mkdir -p ./lib/udev/rules.d
+cp /lib/udev/rules.d/82-net-setup-link.rules ./lib/udev/rules.d/82-net-setup-link.rules
+mkdir -p ./etc/infiniband
+cp /etc/infiniband/vf-net-link-name.sh ./etc/infiniband/vf-net-link-name.sh
+
 mkdir -p mnt
 
-if [ -d ${SDIR}/BF3BMC/ ]; then
-	/bin/rm -rf BF3BMC
-	if (grep -q prod /etc/mlnx-release); then
-		cp -a ${SDIR}/BF3BMC/pk ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
-	elif (grep -q dev /etc/mlnx-release); then
-		cp -a ${SDIR}/BF3BMC/dk ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
-	else
-		cp -a ${SDIR}/BF3BMC/qp ./BF3BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
-	fi
-	[ -d ${SDIR}/BF3BMC/golden_images ] && cp -a ${SDIR}/BF3BMC/golden_images ./BF3BMC
-fi
+# Remove hostname that includes docker container's id
+/bin/rm -f ./etc/hostname
+echo localhost > /etc/hostname
 
-if [ -d ${SDIR}/BF2BMC/ ]; then
-	/bin/rm -rf BF2BMC
-	if (grep -q prod /etc/mlnx-release); then
-		cp -a ${SDIR}/BF2BMC/pk ./BF2BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
-	else
-		cp -a ${SDIR}/BF2BMC/qp/ ./BF2BMC || ( echo "ERROR: BMC Software was not found" && exit 1 )
-	fi
-fi
+touch ./etc/fstab
 
 mkdir -p rocky
 # Tar the image
@@ -284,7 +242,7 @@ echo "=================================" | tee /dev/kmsg
 echo "Installing Rocky Linux. Please wait..." | tee /dev/kmsg
 echo "=================================" | tee /dev/kmsg
 
-modprobe -a sdhci-of-dwcmshc mlxbf_tmfifo mlxbf_gige pinctrl-mlxbf3 8021q dw_mmc_bluefield mmc_block virtio_console nvme ${bootctl_module} 2>&1 | tee /dev/kmsg
+modprobe -a sdhci-of-dwcmshc mlxbf_tmfifo mlxbf_gige pinctrl-mlxbf3 8021q vitesse dw_mmc_bluefield mmc_block virtio_console nvme ${bootctl_module} 2>&1 | tee /dev/kmsg
 modprobe -a mlx5_ib mlxfw ib_umad 2>&1 | tee /dev/kmsg
 
 sleep 5
@@ -295,6 +253,7 @@ if [ \$? -eq 0 ]; then
         echo "Installation finished. Rebooting..." | tee /dev/kmsg
         echo "===================================" | tee /dev/kmsg
         echo
+        sleep 3
         reboot -f
 else
         echo "========================" | tee /dev/kmsg
@@ -307,7 +266,7 @@ chmod +x scripts/initrd-install
 
 cat > usr/lib/systemd/system/install-rocky.service << EOF
 [Unit]
-Description=Install Rocky Linux 
+Description=Install Rocky Linux
 After=initrd-root-fs.target initrd-parse-etc.service
 After=dracut-initqueue.service dracut-mount.service
 

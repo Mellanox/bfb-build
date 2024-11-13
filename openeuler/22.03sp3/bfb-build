@@ -1,0 +1,124 @@
+#!/bin/bash -e
+###############################################################################
+#
+# Copyright 2022 NVIDIA Corporation
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+###############################################################################
+
+cd ${0%*/*}
+
+if [ ! -e Dockerfile ]; then
+	echo "ERROR: Dockerfile is missing."
+	exit 1
+fi
+
+if ! (which wget > /dev/null 2>&1); then
+	echo "wget is required to build BFB"
+	exit 1
+fi
+
+if ! (which docker > /dev/null 2>&1); then
+	echo "docker is required to build BFB"
+	exit 1
+fi
+
+DISTRO="openeuler"
+DISTRO_VERSION="22.03sp3"
+DISTRO_KERNEL=${DISTRO_KERNEL:-""}
+ARCH=${ARCH:-"arm64-dpu"}
+DOCA_VERSION="2.9.0"
+BSP_VERSION="4.9.0-13378"
+MLNX_OFED_VERSION="24.10-0.6.8.1"
+IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
+CUSTOM_VERSION=${CUSTOM_VERSION:-""}
+BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
+
+WDIR=/tmp/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}.$$
+
+mkdir -p $WDIR
+
+echo "Downloading mlxbf-bootimages..."
+case "$IMAGE_TYPE" in
+	prod)
+		bootimages="mlxbf-bootimages-signed-${BSP_VERSION}.aarch64.rpm"
+		;;
+	dev)
+		bootimages="mlxbf-bootimages-devsigned-${BSP_VERSION}.aarch64.rpm"
+		;;
+	unsigned)
+		bootimages="mlxbf-bootimages-${BSP_VERSION}.aarch64.rpm"
+		;;
+esac
+
+mkdir -p $WDIR/bootimages
+wget --no-verbose -P $WDIR/bootimages ${BASE_URL}/doca/${DOCA_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/${ARCH}/$bootimages
+
+cp -a \
+	Dockerfile \
+	create_bfb \
+	install.sh \
+	repos \
+	10-mlx-console-messages.conf \
+	../../common/tools/qemu-aarch64-static \
+	$WDIR
+
+if [ -d install.env ]; then
+	cp -a install.env \
+		$WDIR
+else
+	cp -a ../../common/install.env \
+		$WDIR
+fi
+
+cd $WDIR
+
+echo -e "[doca] \n\
+name=Nvidia DOCA repository \n\
+baseurl=$BASE_URL/doca/$DOCA_VERSION/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/arm64-dpu/ \n\
+gpgcheck=0 \n\
+enabled=1" > $WDIR/repos/doca.repo
+
+
+docker_image=bfb_runtime_${DISTRO,,}${DISTRO_VERSION,,}
+
+docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION} 2> /dev/null || true
+
+sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/g;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/g" Dockerfile
+
+docker build -t ${docker_image} \
+	--build-arg BASE_URL=$BASE_URL \
+	--build-arg DOCA_VERSION=$DOCA_VERSION \
+	--build-arg BSP_VERSION=$BSP_VERSION \
+	--build-arg DISTRO=$DISTRO \
+	--build-arg DISTRO_VERSION=$DISTRO_VERSION \
+	--build-arg DISTRO_KERNEL=$DISTRO_KERNEL \
+	-f Dockerfile .
+
+docker run -t --rm --privileged -e container=docker \
+	-v $PWD:/workspace \
+	--name BlueField_OS_${DISTRO}_${DISTRO_VERSION}${DISTRO_KERNEL} \
+	--mount type=bind,source=/dev,target=/dev \
+	--mount type=bind,source=/sys,target=/sys \
+	--mount type=bind,source=/proc,target=/proc \
+	${docker_image} /bin/bash -x /root/workspace/create_bfb
+
+readlink -f *.bfb
+
+echo "Default root password is: openeuler"

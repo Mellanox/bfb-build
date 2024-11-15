@@ -9,11 +9,11 @@ Make sure you have the latest version of docker installed on your server!
 To install docker on your x86_64 or aarch64 server please refer to https://docs.docker.com/get-docker/
 Note: It is expected that these docker images will run faster on ARM (aarch64) server (without qemu)
 
-In case of using x86_64 server install and configure qemu:
-
-Install qemu-user-static using docker container:
+In case of using x86_64 server qemu-user-static using will be installed by:
   $ docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
   See more info under: https://github.com/multiarch/qemu-user-static
+
+- This step is required to prevent a segmentation fault in QEMU.
 
 ```
 
@@ -200,10 +200,10 @@ If the required OS is binary compatible with one of the supported OS that have
 prebuilt DOCA binaries then BFB can be created based on existing packages.
 Use the Dockerfile for the compatible OS.<br />
 E.g.:<br />
-For OS binary compatible with CentOS7.6:<br />
-Use [centos/7.6/Dockerfile](https://github.com/Mellanox/bfb-build/blob/master/centos/7.6/Dockerfile) as a
+For OS binary compatible with RHEL8.6:<br />
+Use [rockylinux/8.6/Dockerfile](https://github.com/Mellanox/bfb-build/blob/master/rockylinux/8.6/Dockerfile) as a
 template and change the base container in the Dockerfile to use the required OS:<br />
-[from mellanox/bluefield:bfb_builder_centos7.](https://github.com/Mellanox/bfb-build/blob/master/centos/7.6/Dockerfile#L1)<br />
+[from --platform=linux/arm64 rockylinux:8.6.20227707](https://github.com/Mellanox/bfb-build/blob/master/rockylinux/8.6/Dockerfile#L1)<br />
 For the kernel part refer to the [Kernel changes](https://github.com/Mellanox/bfb-build#22-kernel-changes) section above.
 
 

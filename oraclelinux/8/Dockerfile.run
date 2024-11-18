@@ -102,14 +102,13 @@ RUN dnf install -y \
 		dpacc-extract \
 		dpaeumgmt \
 		dpa-gdbserver \
-		dpa-ps \
-		dpa-statistics \
-		flexio \
+		dpa-stats \
+		flexio-sdk \
 		flexio-samples \
 		libckteec0 \
 		libseteec0 \
 		libteeacl0 \
-		libteec1 \
+		libteec2 \
 		meson \
 		mlnx-dpdk \
 		mlnx-dpdk-devel \

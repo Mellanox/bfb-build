@@ -242,7 +242,7 @@ if [ -n "$BFCFG" ]; then
 	fi
 
 if (echo "${BD_PSIDS}" | grep -qw "${PSID}"); then
-	if [ "$distro" == "debian" ]; then
+	if [ "${distro,,}" == "debian" ]; then
 		cat > /etc/bf.cfg << EOF
 BOOT0=DISK
 BOOT0_DESC='velinux1'

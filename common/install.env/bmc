@@ -136,7 +136,7 @@ create_vlan()
 	OOB_IF=$(ls -1 "/sys/bus/platform/drivers/mlxbf_gige/MLNXBF17:00/net")
 	ilog "Configuring VLAN id 4040 on ${OOB_IF}. This operation may take up to $BMC_IP_TIMEOUT seconds"
 	SECONDS=0
-	while ! ip link show vlan4040 2> /dev/null | grep -w '<BROADCAST,MULTICAST,UP,LOWER_UP>'; do
+	while ! (ping -c 3 $BMC_IP > /dev/null 2>&1); do
 		if [ $SECONDS -gt $BMC_IP_TIMEOUT ]; then
 			rlog "ERR Failed to create VLAN."
 			ilog "- ERROR: Failed to create VLAN interface after $SECONDS sec. All the BMC related operations will be skipped."
@@ -144,7 +144,7 @@ create_vlan()
 			return
 		fi
 		ilog "$(ip link set dev ${OOB_IF} up 2>&1)"
-		while ! ip link show ${OOB_IF} 2> /dev/null | grep -w '<BROADCAST,MULTICAST,UP,LOWER_UP>'; do
+		while [ "$(cat /sys/class/net/oob_net0/operstate 2> /dev/null)" != "up" ]; do
 			if [ $SECONDS -gt $BMC_IP_TIMEOUT ]; then
 				rlog "ERR Failed to bring UP ${OOB_IF}."
 				ilog "- ERROR: Failed to bring UP ${OOB_IF} interface after $SECONDS sec. All the BMC related operations will be skipped."
@@ -154,27 +154,32 @@ create_vlan()
 			sleep 1
 		done
 		ilog "$(ip link show ${OOB_IF} 2>&1)"
-		ilog "$(ip link add link ${OOB_IF} name vlan4040 type vlan id 4040 2>&1)"
-		ilog "$(ip link set dev vlan4040 up 2>&1)"
-		sleep 5
-		output=$(dhclient vlan4040 2>&1)
+		if [ ! -d /sys/class/net/vlan4040 ]; then
+			ilog "$(ip link add link ${OOB_IF} name vlan4040 type vlan id 4040 2>&1)"
+			ilog "$(ip link set dev vlan4040 up 2>&1)"
+		fi
+		while [ "$(cat /sys/class/net/vlan4040/operstate 2> /dev/null)" != "up" ]; do
+			if [ $SECONDS -gt $BMC_IP_TIMEOUT ]; then
+				rlog "ERR Failed to bring UP vlan4040"
+				ilog "- ERROR: Failed to bring UP vlan4040 interface after $SECONDS sec. All the BMC related operations will be skipped."
+				skip_bmc
+				return
+			fi
+			sleep 1
+		done
+		output=$(dhclient -e METRIC=1025 -e IF_METRIC=1025 vlan4040 2>&1)
 		rc=$?
 		ilog "$output"
+		sleep 5
+		ilog "$(ip addr show vlan4040 2>&1)"
+		if (ping -c 3 $BMC_IP > /dev/null 2>&1); then
+			break
+		fi
 		if [ $rc -ne 0 ]; then
 			ilog "dhclient failed"
 			ilog "Configuring static IP: ${OOB_IP}/${OOB_NETPREFIX} for vlan4040"
 			ip addr add ${OOB_IP}/${OOB_NETPREFIX} brd + dev vlan4040
 		fi
-	done
-	ilog "$(ip link show vlan4040 2>&1)"
-	while ! ping -c 3 $BMC_IP; do
-		if [ $SECONDS -gt $BMC_IP_TIMEOUT ]; then
-			rlog "ERR Failed to access BMC"
-			ilog "- ERROR: Failed to access $BMC_IP after $SECONDS sec."
-			skip_bmc
-			return
-		fi
-		sleep 1
 	done
 	BMC_LINK_UP="yes"
 }
@@ -606,7 +611,6 @@ generate_config_image()
 		RC=$((RC+1))
 		return 1
 	fi
-	save_config
 	ilog "mlx-mkbfb --capsule ${DPU_TMP_DIR}/bf.cfg.cap $1 ${DPU_TMP_DIR}/${CONFIG_IMAGE}"
 	ilog "$(mlx-mkbfb --capsule ${DPU_TMP_DIR}/bf.cfg.cap $1 ${DPU_TMP_DIR}/${CONFIG_IMAGE} 2>&1)"
 	if [ ! -e ${DPU_TMP_DIR}/${CONFIG_IMAGE} ]; then

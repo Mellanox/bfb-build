@@ -41,8 +41,9 @@ fi
 
 DISTRO="oraclelinux"
 DISTRO_VERSION="8"
-DOCA_VERSION="2.9.0"
-BSP_VERSION="4.9.0-13378"
+ARCH=${ARCH:-"aarch64"}
+DOCA_VERSION="2.9.1"
+BSP_VERSION="4.9.1-13442"
 BF_VERSION=${BSP_VERSION%-*}
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 BF3_BMC_VERSION="24.10-10"
@@ -65,8 +66,21 @@ BF3_CEC_VERSION=${BF3_CEC_VERSION}
 BF3_NIC_FW_VERSION=${BF3_NIC_FW_VERSION}
 EOF
 
+echo "Downloading mlxbf-bootimages..."
+case "$IMAGE_TYPE" in
+	prod)
+		bootimages="mlxbf-bootimages-signed-${BSP_VERSION}.aarch64.rpm"
+		;;
+	dev)
+		bootimages="mlxbf-bootimages-devsigned-${BSP_VERSION}.aarch64.rpm"
+		;;
+	unsigned)
+		bootimages="mlxbf-bootimages-${BSP_VERSION}.aarch64.rpm"
+		;;
+esac
+
 mkdir -p $WDIR/bootimages
-wget -P $WDIR/bootimages -r --no-verbose --no-directories -l1 --no-parent -A 'mlxbf-bootimages*.aarch64.rpm' ${BASE_URL}/bluefield/${BSP_VERSION}/bootimages/${IMAGE_TYPE}/
+wget --no-verbose -P $WDIR/bootimages ${BASE_URL}/doca/${DOCA_VERSION}/OracleLinux8/${ARCH}/$bootimages
 
 mkdir -p $WDIR/uek
 if [ -d uek ]; then

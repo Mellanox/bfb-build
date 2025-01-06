@@ -1,7 +1,6 @@
 FROM --platform=linux/arm64 debian:12
 ADD qemu-aarch64-static /usr/bin/
 
-ARG MLXBF_BOOTIMAGES=mlxbf-bootimages
 ARG MLNX_FW_UPDATER=mlnx-fw-updater-signed
 ARG BMC_FW_PACKAGES="bf2-bmc-fw-signed bf3-bmc-fw-signed bf3-bmc-gi-signed bf3-bmc-nic-fw*"
 ARG CEC_FW_PACKAGES="bf2-cec-fw-signed bf3-cec-fw-signed"
@@ -21,6 +20,8 @@ ADD --chown=0:0 --chmod=644 https://prod-cdn.packages.k8s.io/repositories/isv:/k
 
 # Avoid running flash-kernel post install
 RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
+
+RUN dpkg -i /root/workspace/mlxbf-bootimages.deb
 
 RUN apt-get clean -y && \
     apt-get update -o "Acquire::https::Verify-Peer=false" -y && \

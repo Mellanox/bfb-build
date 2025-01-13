@@ -119,7 +119,7 @@ wget https://linux.mellanox.com/public/repo/bluefield/3.9.0/extras/mlnx_ofed/5.6
 tar xzf MLNX_OFED_SRC-5.6-1.0.3.3.tgz
 cd MLNX_OFED_SRC-5.6-1.0.3.3
 ./install.pl -k <kernel version> --kernel-sources /lib/modules/<kernel version>/build \
-	--kernel-extra-args '--with-sf-cfg-drv --without-xdp --without-odp' \
+	--kernel-extra-args '--with-sf-cfg-drv --without-xdp' \
 	--kernel-only --build-only
 cd ..
 ````

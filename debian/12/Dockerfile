@@ -80,8 +80,7 @@ RUN apt-get clean -y && \
         libev4 \
         libgdbm-dev \
         libhugetlbfs-bin \
-        libiscsi7 \
-        lldpad \
+        lldpd \
         lm-sensors \
         mmc-utils \
         mstflint \
@@ -116,6 +115,7 @@ RUN apt-get clean -y && \
         watchdog \
         wget \
         xxd \
+        zip \
         zstd \
 #DOCA Packages
         doca-runtime \

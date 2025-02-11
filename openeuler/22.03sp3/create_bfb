@@ -165,7 +165,7 @@ copy_rpm()
             done
             ;;
         *mft*)
-            for f in $(rpm -ql $package | grep -v man)
+            for f in $(rpm -ql $package | grep -vw man)
             do
                 if [ -d $f ]; then
                     continue
@@ -189,7 +189,7 @@ copy_rpm()
 for package in mlxbf-bfscripts util-linux dosfstools e2fsprogs kmod pciutils \
 			   usbutils chkconfig mft mft-oem kernel-mft kmod-kernel-mft-mlnx \
 			   tar xfsprogs coreutils nvme-cli mmc-utils parted which curl \
-			   openssl gawk device-mapper lvm2 iputils sshpass openssh-clients findutils mokutil net-tools wget dhcp $ADDON_RPMS
+			   openssl gawk device-mapper lvm2 iputils sshpass openssh-clients findutils mokutil net-tools wget dhcp zip $ADDON_RPMS
 do
     copy_rpm $package || true
 done
@@ -197,7 +197,7 @@ done
 # Copy tools
 for tool in xz efibootmgr bash getopt hexdump mstflint lspci perl \
         lsblk shutdown systemctl strings \
-        mlxbf-bootctl id grep jq hostnamectl ipcalc xxd cmp $ADDON_TOOLS
+        mlxbf-bootctl id grep jq hostnamectl ipcalc xxd cmp file $ADDON_TOOLS
 do
     if [ -d $tool ]; then
         continue
@@ -213,6 +213,7 @@ mkdir -p ./lib/firmware/mellanox/boot/
 cp /lib/firmware/mellanox/boot/default.bfb ./lib/firmware/mellanox/boot/default.bfb
 cp -a /lib/firmware/mellanox/boot/capsule ./lib/firmware/mellanox/boot/
 cp $CAPSULE ./lib/firmware/mellanox/boot/capsule/
+rpm -qf --queryformat "[%{VERSION}].[%{RELEASE}]" $CAPSULE > ./lib/firmware/mellanox/boot/atf_uefi.version
 
 mkdir -p ./lib/udev/rules.d
 cp /lib/udev/rules.d/82-net-setup-link.rules ./lib/udev/rules.d/82-net-setup-link.rules

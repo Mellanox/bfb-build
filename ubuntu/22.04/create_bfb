@@ -157,7 +157,7 @@ cp $(readlink -f /usr/bin/which) ./usr/bin/which
 
 for tool in xz efibootmgr bash getopt hexdump mstflint lspci \
 		lsblk watchdog shutdown systemctl strings aarch64-linux-gnu-strings \
-		mlxbf-bootctl id dirname curl openssl parted jq mlnx_bf_configure xxd cmp $ADDON_TOOLS
+		mlxbf-bootctl id dirname curl openssl parted jq mlnx_bf_configure xxd cmp file $ADDON_TOOLS
 do
 	if [ -d $tool ]; then
 		continue
@@ -183,12 +183,12 @@ for deb in mlxbf-scripts mft mft-oem dosfstools e2fsprogs fdisk kmod pciutils \
 		   sshpass openssh-client util-linux ipmitool procps debianutils \
 		   iproute2 findutils perl-base $libperl $perl_modules \
 		   $libpython3_minimal $python3_distutils $python3_lib2to3 $python3 $python_deb \
-		   $libpython3 bsdutils libexpat1 wget net-tools isc-dhcp-client hostname $ADDON_DEBS
+		   $libpython3 bsdutils libexpat1 wget net-tools isc-dhcp-client hostname zip $ADDON_DEBS
 do
 	for pfile in $(dpkg -L $deb)
 	do
 		case "$pfile" in
-			*man*|*doc*)
+			*/man*|*doc*)
 				continue
 				;;
 			*share*)
@@ -237,6 +237,7 @@ sudo cp /lib/modules/$kernel/kernel/drivers/watchdog/sbsa_gwdt.ko .
 sudo mkdir -p ./lib/firmware/mellanox/boot/
 sudo cp /lib/firmware/mellanox/boot/default.bfb ./lib/firmware/mellanox/boot/default.bfb
 sudo cp -a /lib/firmware/mellanox/boot/capsule ./lib/firmware/mellanox/boot/
+dpkg-query -W -f='${Version}' $(dpkg -S $CAPSULE | cut -d: -f1) | tr -s '-' '.' > ./lib/firmware/mellanox/boot/atf_uefi.version
 
 sudo mkdir -p ./lib/udev/rules.d
 sudo cp /lib/udev/rules.d/82-net-setup-link.rules ./lib/udev/rules.d/82-net-setup-link.rules

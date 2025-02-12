@@ -12,7 +12,7 @@ UEFI_PASSWORD=${UEFI_PASSWORD:-""}
 NEW_UEFI_PASSWORD=${NEW_UEFI_PASSWORD:-""}
 OOB_IP=${OOB_IP:-"192.168.240.2"}
 OOB_NETPREFIX=${OOB_NETPREFIX:-"29"}
-BMC_IP_TIMEOUT=${BMC_IP_TIMEOUT:-600}
+BMC_IP_TIMEOUT=${BMC_IP_TIMEOUT:-60}
 BMC_TASK_TIMEOUT=${BMC_TASK_TIMEOUT:-"1800"}
 UPDATE_BMC_FW=${UPDATE_BMC_FW:-"yes"}
 BMC_REBOOT=${BMC_REBOOT:-"no"}
@@ -143,8 +143,10 @@ create_vlan()
 			skip_bmc
 			return
 		fi
+		ilog "Bringing up ${OOB_IF} interface..."
 		ilog "$(ip link set dev ${OOB_IF} up 2>&1)"
-		while [ "$(cat /sys/class/net/oob_net0/operstate 2> /dev/null)" != "up" ]; do
+		while [ "$(cat /sys/class/net/${OOB_IF}/operstate 2> /dev/null)" != "up" ]; do
+			ilog "${OOB_IF} status is $(cat /sys/class/net/${OOB_IF}/operstate 2>&1) after $SECONDS sec."
 			if [ $SECONDS -gt $BMC_IP_TIMEOUT ]; then
 				rlog "ERR Failed to bring UP ${OOB_IF}."
 				ilog "- ERROR: Failed to bring UP ${OOB_IF} interface after $SECONDS sec. All the BMC related operations will be skipped."
@@ -153,12 +155,15 @@ create_vlan()
 			fi
 			sleep 1
 		done
+		ilog "${OOB_IF} interface is UP."
 		ilog "$(ip link show ${OOB_IF} 2>&1)"
 		if [ ! -d /sys/class/net/vlan4040 ]; then
+			ilog "Bringing up VLAN4040 interface..."
 			ilog "$(ip link add link ${OOB_IF} name vlan4040 type vlan id 4040 2>&1)"
 			ilog "$(ip link set dev vlan4040 up 2>&1)"
 		fi
 		while [ "$(cat /sys/class/net/vlan4040/operstate 2> /dev/null)" != "up" ]; do
+			ilog "VLAN4040 status is $(cat /sys/class/net/vlan4040/operstate 2>&1) after $SECONDS sec."
 			if [ $SECONDS -gt $BMC_IP_TIMEOUT ]; then
 				rlog "ERR Failed to bring UP vlan4040"
 				ilog "- ERROR: Failed to bring UP vlan4040 interface after $SECONDS sec. All the BMC related operations will be skipped."
@@ -167,6 +172,8 @@ create_vlan()
 			fi
 			sleep 1
 		done
+		ilog "VLAN4040 interface is UP."
+		ilog "Running: dhclient -e METRIC=1025 -e IF_METRIC=1025 vlan4040"
 		output=$(dhclient -e METRIC=1025 -e IF_METRIC=1025 vlan4040 2>&1)
 		rc=$?
 		ilog "$output"
@@ -179,6 +186,7 @@ create_vlan()
 			ilog "dhclient failed"
 			ilog "Configuring static IP: ${OOB_IP}/${OOB_NETPREFIX} for vlan4040"
 			ip addr add ${OOB_IP}/${OOB_NETPREFIX} brd + dev vlan4040
+			ilog "$(ip addr show vlan4040 2>&1)"
 		fi
 	done
 	BMC_LINK_UP="yes"

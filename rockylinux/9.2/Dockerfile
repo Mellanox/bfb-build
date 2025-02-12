@@ -61,8 +61,6 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
         cri-tools \
         cryptsetup \
         curl \
-        device-mapper \
-        dhcp-client \
         docker-ce-cli \
         dosfstools \
         dracut \
@@ -71,8 +69,7 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
         e2fsprogs \
         edac-utils \
         efibootmgr \
-        findutils \
-        gawk \
+        epel-release \
         glibc-langpack-en \
         grub2 \
         grubby \
@@ -82,7 +79,6 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
         iproute-tc \
         jq \
         kexec-tools \
-        kmod \
         kubeadm \
         kubelet \
         kubernetes-cni \
@@ -94,10 +90,6 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
         lsof \
         ltrace \
         lvm2 \
-        lvm2-libs \
-        mmc-utils \
-        mokutil \
-        mstflint \
         net-tools \
         lsb-release \
         NetworkManager \
@@ -109,7 +101,6 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
         nvmetcli \
         openssh-clients \
         openssh-server \
-        openssl \
         parted \
         pciutils \
         perf \
@@ -118,8 +109,10 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
         rasdaemon \
         rrdtool \
         rsync \
+        sg3_utils \
         shim \
         sshpass \
+        sudo \
         sysstat \
         systemd-timesyncd \
         tcpdump \
@@ -131,6 +124,7 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
         watchdog \
         wget \
         xfsprogs \
+        yum-utils \
         zip \
         https://dl.rockylinux.org/pub/rocky/8/BaseOS/aarch64/os/Packages/l/libhugetlbfs-2.21-17.el8.aarch64.rpm \
         https://dl.rockylinux.org/pub/rocky/8/BaseOS/aarch64/os/Packages/l/libhugetlbfs-utils-2.21-17.el8.aarch64.rpm \
@@ -154,11 +148,10 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
     echo "PermitRootLogin yes" >> /etc/ssh/sshd_config
 
 # Manage services
-RUN systemctl enable openvswitch.service || true
 RUN systemctl enable mlx_ipmid.service || true
 RUN systemctl enable set_emu_param.service || true
 RUN systemctl enable mst || true
-RUN systemctl enable watchdog.service || true
+RUN systemctl enable mlnx_snap.service || true
 RUN systemctl disable kubelet || true
 RUN systemctl disable containerd || true
 

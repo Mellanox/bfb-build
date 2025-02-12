@@ -348,8 +348,8 @@ EOF
 			sed -r -i -e 's@(EXTRA_ARGS=).*@\1"--mem-size 1200"@' /mnt/etc/default/mlnx_snap
 			;;
 			MT_0000000667|MT_0000000698)
-			chroot /mnt /bin/systemctl disable lldpad.service
-			chroot /mnt /bin/systemctl disable lldpad.socket
+			chroot /mnt /bin/systemctl disable lldpd.service
+			chroot /mnt /bin/systemctl disable lldpd.socket
 			perl -ni -e "print unless /controller_nvme_namespace_attach/" /mnt/etc/mlnx_snap/snap_rpc_init_bf2.conf
 			sed -r -i -e "s@(controller_nvme_create.*)@\1 -c /etc/mlnx_snap/mlnx_snap.json.example@" /mnt/etc/mlnx_snap/snap_rpc_init_bf2.conf
 			sed -r -i -e 's@(CPU_MASK=).*@\10xff@' \

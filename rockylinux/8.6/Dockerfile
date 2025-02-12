@@ -52,6 +52,7 @@ RUN sed -i '/mirrorlist=.*/d;s/#baseurl/baseurl/g;s/$releasever/8.6/g' /etc/yum.
         e2fsprogs \
         edac-utils \
         efibootmgr \
+        epel-release \
         findutils \
         gawk \
         glibc-langpack-en \
@@ -99,7 +100,6 @@ RUN sed -i '/mirrorlist=.*/d;s/#baseurl/baseurl/g;s/$releasever/8.6/g' /etc/yum.
         python3-pip \
         qemu-kvm \
         rasdaemon \
-        rsyslog \
         redhat-lsb-core \
         rrdtool \
         rsync \
@@ -144,6 +144,7 @@ RUN sed -i '/mirrorlist=.*/d;s/#baseurl/baseurl/g;s/$releasever/8.6/g' /etc/yum.
 RUN systemctl enable mlx_ipmid.service || true
 RUN systemctl enable set_emu_param.service || true
 RUN systemctl enable mst || true
+RUN systemctl enable mlnx_snap.service || true
 RUN systemctl disable kubelet || true
 RUN systemctl disable containerd || true
 

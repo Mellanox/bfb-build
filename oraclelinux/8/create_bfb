@@ -135,7 +135,7 @@ chmod 0700 /root/.ssh
 touch /root/.ssh/authorized_keys
 chmod 600 /root/.ssh/authorized_keys
 echo "Building BFB's initramfs with: $kmods"
-dracut --no-hostonly -m "bash network base systemd systemd-initrd dracut-systemd shutdown ssh-client udev-rules" \
+dracut --no-hostonly -m "bash network base systemd systemd-initrd dracut-systemd shutdown sshd ssh-client udev-rules" \
 		--install "/usr/lib/udev/rules.d/91-tmfifo_net.rules /lib/udev/rules.d/92-oob_net.rules" \
 		--force-drivers "$kmods" --gzip $initramfs ${kernel}
 if [ $? -ne 0 ]; then
@@ -221,6 +221,7 @@ copy_rpm()
 	package=$1
 
 	if ! (rpm -q $package); then
+		echo "Did not find $package, attempting to download"
 		yum install -y $package || return
 	fi
 
@@ -256,11 +257,17 @@ copy_rpm()
 	esac
 }
 
+if (rpm -q kernel-mft > /dev/null 2>&1); then
+	kernel_mft="kernel-mft"
+elif (rpm -q kmod-kernel-mft-mlnx > /dev/null 2>&1); then
+	kernel_mft="kmod-kernel-mft-mlnx"
+fi
+
 # Copy the content of RPM packages
-			   #  openssh-server 
+			   #  openssh-server
 for package in gawk mlxbf-bfscripts mlxbf-bootctl util-linux dosfstools \
-			   e2fsprogs kmod pciutils usbutils chkconfig mstflint \
-			   tar xfsprogs coreutils parted which curl \
+			   e2fsprogs kmod pciutils usbutils chkconfig mstflint mft \
+			   mft-oem $kernel_mft tar xfsprogs coreutils parted which curl \
 			   openssl net-tools wget dhcp-client ipcalc iputils dbus-tools \
 			   systemd-udev initscripts shadow-utils crypto-policies \
 			   openssh openssh-server rng-tools passwd dmidecode \
@@ -289,9 +296,6 @@ sudo cp /lib/firmware/mellanox/boot/default.bfb ./lib/firmware/mellanox/boot/def
 sudo cp -a /lib/firmware/mellanox/boot/capsule ./lib/firmware/mellanox/boot/
 sudo cp $CAPSULE ./lib/firmware/mellanox/boot/capsule/
 sudo mkdir -p mnt
-if [ -d /workspace/BF3BMC/ ]; then
-	sudo cp -a /workspace/BF3BMC/ ./
-fi
 
 if [ -e /usr/bin/pkexec ]; then
     # CVE-2021-4034 workaround
@@ -302,6 +306,7 @@ ex mkdir -p ol
 # Tar the image
 XZ_OPT="--threads=0 -9 --verbose" tar -cJp --exclude='./workspace' --exclude='./signing-local' --exclude='./signing-shared' --exclude='./var/run/docker.sock' --exclude='./root/workspace' --exclude='./tmp/*' --exclude='./run/*' --exclude='./sys/*' --exclude='./proc/*' --exclude='./dev/*' --exclude='./.dockerenv' --exclude='./root/rpmbuild' --exclude='./root/.rpmmacros' --exclude='./root/.bash_history' --exclude='./var/tmp/*rpm' --exclude='./bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-arm-static' --exclude='./var/lib/yum/*' --exclude='./var/cache/yum/*' -f ./ol/image.tar.xz -C / .
 ex install -m 0755 ${SDIR}/install.sh ./ol/install.sh
+cp -a ${SDIR}/install.env ./ol/
 
 mkdir scripts
 cat > scripts/initrd-install << EOF

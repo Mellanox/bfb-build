@@ -4,6 +4,7 @@ ADD qemu-aarch64-static /usr/bin/
 
 WORKDIR /root/workspace
 ADD install.sh .
+ADD install.env /root/workspace/install.env/
 ADD create_bfb .
 ADD build_ol_bfb .
 ADD bootimages bootimages/

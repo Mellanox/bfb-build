@@ -1,0 +1,31 @@
+update_atf_uefi()
+{
+	if function_exists pre_update_atf_uefi; then
+		log "INFO: Running pre_update_atf_uefi from bf.cfg"
+		pre_update_atf_uefi
+	fi
+
+	UPDATE_BOOT=${UPDATE_BOOT:-1}
+	if [ $UPDATE_BOOT -eq 1 ]; then
+		ilog "Updating ATF/UEFI:"
+		efivars=/sys/firmware/efi/efivars
+		test "$(ls -A $efivars)" || mount -t efivarfs efivarfs $efivars
+		if [ ! -e "$efivars/PK-8be4df61-93ca-11d2-aa0d-00e098032b8c" ]; then
+			# Secure Boot is disabled
+			ilog "$(bfrec --bootctl || true)"
+		fi
+		if [ -e /lib/firmware/mellanox/boot/capsule/boot_update2.cap ]; then
+			ilog "$(bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap)"
+		fi
+
+		if [ -e /lib/firmware/mellanox/boot/capsule/efi_sbkeysync.cap ]; then
+			ilog "$(bfrec --capsule /lib/firmware/mellanox/boot/capsule/efi_sbkeysync.cap)"
+		fi
+		unmount_partition /mnt/efi_system_partition
+	fi
+
+	if function_exists post_update_atf_uefi; then
+		log "INFO: Running post_update_atf_uefi from bf.cfg"
+		post_update_atf_uefi
+	fi
+}

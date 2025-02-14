@@ -1,4 +1,4 @@
-from --platform=linux/arm64 oraclelinux:8.7
+FROM --platform=linux/arm64 oraclelinux:8.7
 
 ADD qemu-aarch64-static /usr/bin/
 
@@ -7,6 +7,7 @@ ARG DOCA_VERSION
 ARG BSP_VERSION
 WORKDIR /root/workspace
 ADD install.sh .
+ADD install.env /root/workspace/install.env/
 ADD create_bfb .
 ADD run_create_bfb .
 ADD bootimages bootimages/
@@ -23,17 +24,14 @@ gpgcheck=1 \n\
 enabled=1' > /etc/yum.repos.d/oracle-epel-ol8.repo
 
 #Kublet
-RUN echo -e '[kubernetes-1.29] \n\
+RUN echo -e '[kubernetes-1.30] \n\
 name=Kubernetes \n\
-baseurl=https://pkgs.k8s.io/core:/stable:/v1.29/rpm/ \n\
+baseurl=https://pkgs.k8s.io/core:/stable:/v1.30/rpm/ \n\
 gpgcheck=1 \n\
 enabled=1 \n\
-gpgkey=https://pkgs.k8s.io/core:/stable:/v1.29/rpm/repodata/repomd.xml.key \n' > /etc/yum.repos.d/kubernetes.repo
+gpgkey=https://pkgs.k8s.io/core:/stable:/v1.30/rpm/repodata/repomd.xml.key \n' > /etc/yum.repos.d/kubernetes.repo
 
 ADD docker-ce.repo /etc/yum.repos.d/docker-ce.repo
-# RUN yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-
-RUN sed -i 's|https://download.docker.com/linux|https://urm.nvidia.com/artifactory/docker-linux-rpm-remote|g' /etc/yum.repos.d/docker-ce.repo
 
 # ol8 does not have lm_sensors-sensord
 RUN dnf install --disableexcludes=kubernetes -y \
@@ -45,7 +43,7 @@ RUN dnf install --disableexcludes=kubernetes -y \
 	kexec-tools jq python3-pip libnghttp2 wget annobin kernel-rpm-macros \
 	iproute-tc NetworkManager NetworkManager-initscripts-updown initscripts usbutils nfs-utils python3-six chkconfig \
 	dosfstools e2fsprogs openssh openssh-server ipmitool \
-	containerd.io kubelet-1.29.7 cri-tools-1.29.0 kubernetes-cni-1.3.0 kubeadm-1.29.7 \
+	containerd.io kubelet cri-tools kubernetes-cni kubeadm \
 	systemd-timesyncd chrony sshpass libunwind \
 	gawk util-linux kmod dracut-tools \
 	tar xfsprogs coreutils parted which curl \
@@ -95,9 +93,9 @@ RUN dnf install -y \
 		doca-sdk-common-devel \
 		doca-sdk-dpdk-bridge \
 		doca-sdk-dpdk-bridge-devel \
-		doca-sdk-flow \
-		doca-sdk-flow-devel \
-		doca-sdk-flow-trace \
+		doca-sdk-legacy-flow \
+		doca-sdk-legacy-flow-devel \
+		doca-sdk-legacy-flow-trace \
 		dpacc \
 		dpacc-extract \
 		dpaeumgmt \
@@ -108,13 +106,10 @@ RUN dnf install -y \
 		libckteec0 \
 		libseteec0 \
 		libteeacl0 \
-		libteec1 \
 		meson \
 		mlnx-dpdk \
 		mlnx-dpdk-devel \
 		mlnx-fw-updater-signed \
-		mlnx-libsnap \
-		mlnx-snap \
 		mlnx-tools \
 		mlxbf-bfscripts \
 		mlxbf-bootctl \

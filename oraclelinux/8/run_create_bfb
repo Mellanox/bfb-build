@@ -1,40 +1,38 @@
 #!/bin/bash -x
 
+BF_VERSION=@BF_VERSION@
+BF_DATE=@BF_DATE@
+
 if [ -d /root/workspace/SoC/ ]; then
 	rpm -ihv --nodeps /root/workspace/SoC/*.rpm
 fi
 
+systemctl enable mlx_ipmid.service
+
 bfb_name=$(cat /etc/mlnx-release)
-BMC_URL="https://linux.mellanox.com/public/repo/bluefield/BMC/BF3"
 
 # Restore bfb name
 echo $bfb_name > /etc/mlnx-release
 
 for bootimage in /root/workspace/bootimages/*.rpm
 do
-    current_type=$(cat /etc/mlnx-release | grep -oE "unsigned|dev|prod")
-	echo "Current type: $current_type"
-	case "$bootimage" in
-	*devsigned*)
-		type=dev
-		;;
-	*signed*)
-		type=prod
-		/bin/rm -f /workspace/BF3BMC/bmc/*
-		/bin/rm -f /workspace/BF3BMC/cec/*
-		/bin/rm -f /workspace/BF3BMC/golden_images/dpu/*
-		echo "Downloading BlueField-3 BMC software..."
-		wget -P /workspace/BF3BMC/bmc -r --no-directories -l1 --no-parent -A 'bf3-bmc*fwpkg' ${BMC_URL}/bmc/${BF3_BMC_VERSION}/
-		wget -P /workspace/BF3BMC/cec -r --no-directories -l1 --no-parent -A 'cec*fwpkg' ${BMC_URL}/cec/${BF3_CEC_VERSION}/
-		wget -P /workspace/BF3BMC/golden_images/dpu -r --no-verbose --no-directories -l1 --no-parent -A 'BlueField*.bfb' ${BMC_URL}/golden_images/dpu/${BSP_VERSION}/
-		wget -P /workspace/BF3BMC/golden_images/fw -r --no-verbose --no-directories -l1 --no-parent -A 'fw*.bfb' ${BMC_URL}/golden_images/nic-fw/${BF3_NIC_FW_VERSION}/
-		;;
-	*)
-		type=unsigned
-		;;
-	esac
+    current_type=$(cat /etc/mlnx-release | awk -F '_' '{print $NF}')
+    echo "Current type: $current_type"
+    fw_name_pattern="^mlnx-fw-updater"
+    case "$bootimage" in
+        *devsigned*)
+            type=dev
+            ;;
+        *signed*)
+            type=prod
+            yum install -y bf3-*-signed* bf3-bmc-nic-fw-*
+            ;;
+        *)
+            type=unsigned
+            ;;
+    esac
 
-	rpm -ihv --force $bootimage
-	sed -i -e "s/$current_type/$type/" /etc/mlnx-release
-	/root/workspace/create_bfb -k $(/bin/ls -1 /lib/modules/ | head -1)
+    rpm -ihv --force $bootimage
+    sed -i -e "s/$current_type/$type/" /etc/mlnx-release
+    /root/workspace/create_bfb -k $(/bin/ls -1 /lib/modules/ | head -1)
 done

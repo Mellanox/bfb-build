@@ -1,0 +1,38 @@
+#!/bin/bash -x
+
+BF_VERSION=@BF_VERSION@
+BF_DATE=@BF_DATE@
+
+if [ -d /root/workspace/SoC/ ]; then
+	rpm -ihv --nodeps /root/workspace/SoC/*.rpm
+fi
+
+systemctl enable mlx_ipmid.service
+
+bfb_name=$(cat /etc/mlnx-release)
+
+# Restore bfb name
+echo $bfb_name > /etc/mlnx-release
+
+for bootimage in /root/workspace/bootimages/*.rpm
+do
+    current_type=$(cat /etc/mlnx-release | awk -F '_' '{print $NF}')
+    echo "Current type: $current_type"
+    fw_name_pattern="^mlnx-fw-updater"
+    case "$bootimage" in
+        *devsigned*)
+            type=dev
+            ;;
+        *signed*)
+            type=prod
+            yum install -y bf3-*-signed* bf3-bmc-nic-fw-*
+            ;;
+        *)
+            type=unsigned
+            ;;
+    esac
+
+    rpm -ihv --force $bootimage
+    sed -i -e "s/$current_type/$type/" /etc/mlnx-release
+    /root/workspace/create_bfb -k $(/bin/ls -1 /lib/modules/ | head -1)
+done

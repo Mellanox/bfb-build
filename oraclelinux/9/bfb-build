@@ -1,0 +1,180 @@
+#!/bin/bash -e
+###############################################################################
+#
+# Copyright 2022 NVIDIA Corporation
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+###############################################################################
+
+cd ${0%*/*}
+
+if ! (which wget > /dev/null 2>&1); then
+	echo "wget is required to build BFB"
+	exit 1
+fi
+
+if ! (which docker > /dev/null 2>&1); then
+	echo "docker is required to build BFB"
+	exit 1
+fi
+
+DISTRO="oraclelinux"
+DISTRO_VERSION="9.4"
+ARCH=${ARCH:-"aarch64"}
+DOCA_VERSION="2.10.0"
+BSP_VERSION="4.10.0-13520"
+BF_VERSION=${BSP_VERSION%-*}
+IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
+BF3_BMC_VERSION="25.01-4"
+BF3_CEC_VERSION="00.02.0195.0000"
+BF3_NIC_FW_VERSION="32_44_1036"
+RELTARGET="25.01"
+BUILDVER=${BUILDVER:-"151"}
+
+WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
+BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
+LEAVE_CONTAINER=${LEAVE_CONTAINER:-"no"}
+
+mkdir -p $WDIR
+
+# Add select env variables that will be passed into container during run phase
+cat > ${WDIR}/envfile << EOF
+BSP_VERSION=${BSP_VERSION}
+BF3_BMC_VERSION=${BF3_BMC_VERSION}
+BF3_CEC_VERSION=${BF3_CEC_VERSION}
+BF3_NIC_FW_VERSION=${BF3_NIC_FW_VERSION}
+EOF
+
+echo "Downloading mlxbf-bootimages..."
+case "$IMAGE_TYPE" in
+	prod)
+		bootimages="mlxbf-bootimages-signed-${BSP_VERSION}.aarch64.rpm"
+		;;
+	dev)
+		bootimages="mlxbf-bootimages-devsigned-${BSP_VERSION}.aarch64.rpm"
+		;;
+	unsigned)
+		bootimages="mlxbf-bootimages-${BSP_VERSION}.aarch64.rpm"
+		;;
+esac
+
+mkdir -p $WDIR/bootimages
+wget --no-verbose -P $WDIR/bootimages ${BASE_URL}/doca/${DOCA_VERSION}/OracleLinux9/${ARCH}/$bootimages
+
+mkdir -p $WDIR/uek
+if [ -d uek ]; then
+	cp -a uek $WDIR
+else
+	wget -P $WDIR/uek -r --no-verbose --no-directories -l1 --no-parent -A 'kernel*aarch64.rpm' ${BASE_URL}/doca/${DOCA_VERSION}/OracleLinux9/uek7/aarch64/
+fi
+
+cp	Dockerfile.* \
+	create_bfb \
+	install.sh \
+	build_ol_bfb \
+	run_create_bfb \
+	docker-ce.repo \
+	../../common/tools/qemu-aarch64-static \
+	$WDIR
+
+cp -a ../install.env \
+	$WDIR
+
+if [ -d uek ]; then
+	cp -a uek $WDIR
+fi
+
+build_rpms=${build_rpms:-0}
+BUILDNUM=${BUILDNUM:-"1.inbox"}
+
+cd $WDIR
+
+docker_image=bfb_runtime_${DISTRO,,}${DISTRO_VERSION,,}
+
+docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION} 2> /dev/null || true
+
+if [ $build_rpms -eq 1 ]; then
+	sed -e "s/@DISTRO_VERSION@/${DISTRO_VERSION}/g" \
+		-e "s/@IMAGE_TYPE@/${IMAGE_TYPE}/g" \
+		-e "s/@CUSTOM_VERSION@/$CUSTOM_VERSION/" \
+		-e "s/@BF_VERSION@/${BF_VERSION}/g" \
+		-e "s/@BSP_VERSION@/${BSP_VERSION}/g" \
+		-e "s/@BUILDVER@/${BUILDVER}/g" \
+		Dockerfile.build > $WDIR/Dockerfile
+
+	docker build -t bfb_build_${DISTRO}${DISTRO_VERSION} -f Dockerfile .
+	docker run -t --rm --privileged -e container=docker \
+		-v $PWD:/workspace \
+		--name BlueField_OS_${DISTRO}_${DISTRO_VERSION} \
+		--mount type=bind,source=/dev,target=/dev \
+		--mount type=bind,source=/sys,target=/sys \
+		--mount type=bind,source=/proc,target=/proc \
+		bfb_build_${DISTRO}${DISTRO_VERSION}
+
+    /bin/rm -f *debug*.rpm
+
+    mkdir -p $WDIR/SoC
+    mv *.rpm $WDIR/SoC
+fi
+
+sed -e "s/@DISTRO_VERSION@/${DISTRO_VERSION}/g" \
+	-e "s/@IMAGE_TYPE@/${IMAGE_TYPE}/g" \
+	-e "s/@CUSTOM_VERSION@/${CUSTOM_VERSION}/g" \
+	-e "s/@BSP_VERSION@/${BSP_VERSION}/g" \
+	-e "s/@DOCA_VERSION@/${DOCA_VERSION}/g" \
+	-e "s/@BF_VERSION@/${BF_VERSION}/g" \
+	-e "s|@BASE_URL@|${BASE_URL}|g" \
+	-e "s/@BUILDVER@/${BUILDVER}/g" \
+	-e "s/@RELTARGET@/${RELTARGET}/g" \
+	Dockerfile.run > $WDIR/Dockerfile
+
+docker build -t ${docker_image} \
+	--progress=plain \
+	--no-cache \
+	--build-arg BASE_URL=$BASE_URL \
+	--build-arg DOCA_VERSION=$DOCA_VERSION \
+	--build-arg BSP_VERSION=$BSP_VERSION \
+	-f Dockerfile .
+
+DOCKER_RUN_PARAMS="--privileged -e container=docker \
+	-v $PWD:/workspace \
+	--name BlueField_OS_${DISTRO}_${DISTRO_VERSION} \
+	--mount type=bind,source=/dev,target=/dev \
+	--mount type=bind,source=/sys,target=/sys \
+	--mount type=bind,source=/proc,target=/proc \
+	--env-file envfile"
+
+if [ "X${LEAVE_CONTAINER}" == "Xyes" ]; then
+	DOCKER_RUN_PARAMS="-d -it ${DOCKER_RUN_PARAMS}"
+	docker_id=$(docker run ${DOCKER_RUN_PARAMS} \
+		${docker_image} /bin/bash)
+	docker exec -it ${docker_id} /bin/bash -x /root/workspace/run_create_bfb
+else
+	DOCKER_RUN_PARAMS="-t --rm ${DOCKER_RUN_PARAMS}"
+	docker run ${DOCKER_RUN_PARAMS} \
+		${docker_image} /bin/bash -x /root/workspace/run_create_bfb
+fi
+
+readlink -f *.bfb
+
+echo "Default root password is: oracle"
+
+if [ "X${LEAVE_CONTAINER}" == "Xyes" ]; then
+	echo "Container name: BlueField_OS_${DISTRO}_${DISTRO_VERSION} id: ${docker_id}"
+fi

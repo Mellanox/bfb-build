@@ -22,7 +22,6 @@ RUN rpm -ihv --force bootimages/mlxbf-bootimages-*.aarch64.rpm || true
 RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
     dnf -y clean all && \
     dnf install -y epel-release && \
-    dnf --exclude='mlxbf-bootimages*' -y update && \
     dnf --exclude='mlxbf-bootimages*' -y install coreutils-single && \
     dnf --exclude='mlxbf-bootimages*' -y install \
         acpid \
@@ -123,6 +122,7 @@ RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
 RUN systemctl enable mlx_ipmid.service || true
 RUN systemctl enable set_emu_param.service || true
 RUN systemctl enable mst || true
+RUN systemctl enable mlnx_snap.service || true
 RUN systemctl disable kubelet || true
 RUN systemctl disable containerd || true
 

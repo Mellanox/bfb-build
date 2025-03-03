@@ -161,7 +161,7 @@ copy_rpm()
             done
             ;;
         *mft*)
-            for f in $(rpm -ql $package | grep -v man)
+            for f in $(rpm -ql $package | grep -vw man)
             do
                 if [ -d $f ]; then
                     continue
@@ -182,7 +182,7 @@ copy_rpm()
 }
 
 # Copy the content of RPM packages
-for package in mlxbf-bfscripts kmod util-linux dosfstools e2fsprogs pciutils usbutils chkconfig mft mft-oem kernel-mft tar xfsprogs coreutils-single parted which curl openssl gawk passwd net-tools wget nvme-cli mmc-utils iputils sshpass openssh-clients findutils mokutil dhcp-client $ADDON_RPMS
+for package in mlxbf-bfscripts kmod util-linux dosfstools e2fsprogs pciutils usbutils chkconfig mft mft-oem kernel-mft tar xfsprogs coreutils-single parted which curl openssl gawk passwd net-tools wget nvme-cli mmc-utils iputils sshpass openssh-clients findutils mokutil dhcp-client zip $ADDON_RPMS
 do
     copy_rpm $package || true
 done
@@ -206,6 +206,9 @@ mkdir -p ./lib/firmware/mellanox/boot/
 cp /lib/firmware/mellanox/boot/default.bfb ./lib/firmware/mellanox/boot/default.bfb
 cp -a /lib/firmware/mellanox/boot/capsule ./lib/firmware/mellanox/boot/
 cp $CAPSULE ./lib/firmware/mellanox/boot/capsule/
+if [ -d /lib/firmware/swissbit/ ]; then
+    cp -a /lib/firmware/swissbit/ ./lib/firmware/
+fi
 
 mkdir -p ./lib/udev/rules.d
 cp /lib/udev/rules.d/82-net-setup-link.rules ./lib/udev/rules.d/82-net-setup-link.rules

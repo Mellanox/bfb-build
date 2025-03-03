@@ -123,6 +123,7 @@ RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
 RUN systemctl enable mlx_ipmid.service || true
 RUN systemctl enable set_emu_param.service || true
 RUN systemctl enable mst || true
+RUN systemctl enable mlnx_snap.service || true
 RUN systemctl disable kubelet || true
 RUN systemctl disable containerd || true
 

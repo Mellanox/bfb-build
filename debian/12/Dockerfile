@@ -116,6 +116,7 @@ RUN apt-get clean -y && \
         watchdog \
         wget \
         xxd \
+        zip \
         zstd \
 #DOCA Packages
         doca-runtime \

@@ -1,4 +1,4 @@
-from --platform=linux/arm64 rockylinux:9.2
+FROM --platform=linux/arm64 rockylinux:9.2
 ADD qemu-aarch64-static /usr/bin/
 
 ARG BMC_FW_PACKAGES=bf3-bmc-nic-fw
@@ -118,8 +118,10 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
         rasdaemon \
         rrdtool \
         rsync \
+        sg3_utils \
         shim \
         sshpass \
+        sudo \
         sysstat \
         systemd-timesyncd \
         tcpdump \
@@ -154,11 +156,10 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
     echo "PermitRootLogin yes" >> /etc/ssh/sshd_config
 
 # Manage services
-RUN systemctl enable openvswitch.service || true
 RUN systemctl enable mlx_ipmid.service || true
 RUN systemctl enable set_emu_param.service || true
 RUN systemctl enable mst || true
-RUN systemctl enable watchdog.service || true
+RUN systemctl enable mlnx_snap.service || true
 RUN systemctl disable kubelet || true
 RUN systemctl disable containerd || true
 

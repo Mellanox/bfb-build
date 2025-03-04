@@ -121,6 +121,7 @@ RUN dnf versionlock add kernel-headers-5.10.0-224.0.0.127.oe2203sp3.aarch64
 RUN systemctl enable mlx_ipmid.service || true
 RUN systemctl enable set_emu_param.service || true
 RUN systemctl enable mst || true
+RUN systemctl enable mlnx_snap.service || true
 RUN systemctl disable kubelet || true
 RUN systemctl disable containerd || true
 

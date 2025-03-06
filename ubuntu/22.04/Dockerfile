@@ -31,19 +31,19 @@ RUN apt remove -y --purge $(dpkg --list "*openipmi*" | grep openipmi | awk '{pri
 RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
 
 RUN apt install -y -f \
-	linux-bluefield=5.15.0.1057.59 \
-	linux-bluefield-cloud-tools-common=5.15.0-1057.59 \
-	linux-bluefield-headers-5.15.0-1057=5.15.0-1057.59 \
-	linux-bluefield-tools-5.15.0-1057=5.15.0-1057.59 \
-	linux-buildinfo-5.15.0-1057-bluefield=5.15.0-1057.59 \
-	linux-headers-5.15.0-1057-bluefield=5.15.0-1057.59 \
-	linux-headers-bluefield=5.15.0.1057.59 \
-	linux-image-5.15.0-1057-bluefield=5.15.0-1057.59 \
-	linux-image-bluefield=5.15.0.1057.59 \
-	linux-modules-5.15.0-1057-bluefield=5.15.0-1057.59 \
-	linux-modules-extra-5.15.0-1057-bluefield=5.15.0-1057.59 \
-	linux-tools-5.15.0-1057-bluefield=5.15.0-1057.59 \
-	linux-tools-bluefield=5.15.0.1057.59
+	linux-bluefield=5.15.0.1060.62 \
+	linux-bluefield-cloud-tools-common=5.15.0-1060.62 \
+	linux-bluefield-headers-5.15.0-1060=5.15.0-1060.62 \
+	linux-bluefield-tools-5.15.0-1060=5.15.0-1060.62 \
+	linux-buildinfo-5.15.0-1060-bluefield=5.15.0-1060.62 \
+	linux-headers-5.15.0-1060-bluefield=5.15.0-1060.62 \
+	linux-headers-bluefield=5.15.0.1060.62 \
+	linux-image-5.15.0-1060-bluefield=5.15.0-1060.62 \
+	linux-image-bluefield=5.15.0.1060.62 \
+	linux-modules-5.15.0-1060-bluefield=5.15.0-1060.62 \
+	linux-modules-extra-5.15.0-1060-bluefield=5.15.0-1060.62 \
+	linux-tools-5.15.0-1060-bluefield=5.15.0-1060.62 \
+	linux-tools-bluefield=5.15.0.1060.62
 
 RUN apt-get clean -y && \
     apt-get update -o "Acquire::https::Verify-Peer=false" -y && \
@@ -135,6 +135,7 @@ RUN apt-get clean -y && \
         vim \
         watchdog \
         xxd \
+        zip \
         zstd \
 #DOCA Packages
         doca-runtime \

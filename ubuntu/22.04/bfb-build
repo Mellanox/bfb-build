@@ -45,6 +45,8 @@ DISTRO_BASE_URL="https://cloud-images.ubuntu.com/jammy/current/jammy-server-clou
 ARCH=${ARCH:-"arm64-dpu"}
 DOCA_VERSION="2.9.2"
 BSP_VERSION="4.9.2-13551"
+RELEASE_SUFFIX=${RELEASE_SUFFIX:-"_OVS-DOCA_update"}
+RELEASE_DIR_NAME="${DOCA_VERSION}-${BSP_VERSION}${RELEASE_SUFFIX}"  # this is the directory name under /doca at linux.mellanox.com
 MLNX_OFED_VERSION="24.10-2.1.8.0"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-""}
@@ -83,7 +85,7 @@ cp -a \
 	../../common/tools/qemu-aarch64-static \
 	$WDIR
 
-echo "deb [trusted=yes] ${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/${DISTRO}${DISTRO_VERSION}/arm64-dpu/ /" | tee $WDIR/repos/doca.base.list
+echo "deb [trusted=yes] ${BASE_URL}/doca/${RELEASE_DIR_NAME}/${DISTRO}${DISTRO_VERSION}/arm64-dpu/ /" | tee $WDIR/repos/doca.base.list
 
 if [ -d install.env ]; then
 	cp -a install.env \
@@ -97,7 +99,7 @@ cd $WDIR
 
 if [ "$INCLUDE_DOCA_SERVICES" == "yes" ]; then
 	echo "Downloading DOCA services..."
-	wget --quiet -r -np -nH --cut-dirs=5 -R "index.html*" ${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/services/
+	wget --quiet -r -np -nH --cut-dirs=5 -R "index.html*" ${BASE_URL}/doca/${RELEASE_DIR_NAME}/services/
 fi
 echo "Downloading $DISTRO base image..."
 wget -q --no-check-certificate $DISTRO_BASE_URL

@@ -191,6 +191,8 @@ RUN sed -i -e "s/FORCE_MODE=.*/FORCE_MODE=yes/" /etc/infiniband/openib.conf
 
 # Copy boot bits from rootfs to EFI partition
 RUN mkdir -p /boot/efi/EFI/ubuntu/; \
+	cp /usr/lib/grub/arm64-efi/monolithic/grubaa64.efi \
+	/usr/lib/grub/arm64-efi-signed/grubaa64.efi.signed; \
 	cp /usr/lib/grub/arm64-efi-signed/grubaa64.efi.signed \
 	/boot/efi/EFI/ubuntu/grubaa64.efi; \
 	cp /usr/lib/grub/arm64-efi-signed/grubnetaa64.efi.signed \

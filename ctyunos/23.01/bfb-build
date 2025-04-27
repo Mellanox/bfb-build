@@ -49,6 +49,7 @@ MLNX_OFED_VERSION="24.10-2.1.8.0"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-""}
 BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
+LEAVE_CONTAINER=${LEAVE_CONTAINER:-"no"}
 
 WDIR=/tmp/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}.$$
 
@@ -96,7 +97,6 @@ baseurl=$BASE_URL/doca/$DOCA_VERSION/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/
 gpgcheck=0 \n\
 enabled=1" > $WDIR/repos/doca.repo
 
-
 docker_image=bfb_runtime_${DISTRO,,}${DISTRO_VERSION,,}
 
 docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION} 2> /dev/null || true
@@ -108,7 +108,7 @@ sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/g;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/g" \
 	-e "s,@BASE_URL@,$BASE_URL,g" \
 	-e "s/@DISTRO_VERSION@/$DISTRO_VERSION/g" build_ctyunos_bfb
 
-docker build --no-cache -t ${docker_image} \
+docker build -t ${docker_image} \
 	--build-arg BASE_URL=$BASE_URL \
 	--build-arg DOCA_VERSION=$DOCA_VERSION \
 	--build-arg BSP_VERSION=$BSP_VERSION \
@@ -117,14 +117,28 @@ docker build --no-cache -t ${docker_image} \
 	--build-arg DISTRO_KERNEL=$DISTRO_KERNEL \
 	-f Dockerfile .
 
-docker run -t --rm --privileged -e container=docker \
+DOCKER_RUN_PARAMS="--privileged -e container=docker \
 	-v $PWD:/workspace \
 	--name BlueField_OS_${DISTRO}_${DISTRO_VERSION}${DISTRO_KERNEL} \
 	--mount type=bind,source=/dev,target=/dev \
 	--mount type=bind,source=/sys,target=/sys \
-	--mount type=bind,source=/proc,target=/proc \
-	${docker_image}
+	--mount type=bind,source=/proc,target=/proc"
+
+if [ "X${LEAVE_CONTAINER}" == "Xyes" ]; then
+	DOCKER_RUN_PARAMS="-d -it ${DOCKER_RUN_PARAMS}"
+	docker_id=$(docker run ${DOCKER_RUN_PARAMS} \
+		${docker_image} /bin/bash)
+	docker exec -it ${docker_id} /bin/bash -x /root/workspace/create_bfb
+else
+	DOCKER_RUN_PARAMS="-t --rm ${DOCKER_RUN_PARAMS}"
+	docker run ${DOCKER_RUN_PARAMS} \
+		${docker_image} /bin/bash -x /root/workspace/create_bfb
+fi
 
 readlink -f *.bfb
 
 echo "Default root password is: ctyunos_23"
+
+if [ "X${LEAVE_CONTAINER}" == "Xyes" ]; then
+	echo "Container name: BlueField_OS_${DISTRO}_${DISTRO_VERSION}${DISTRO_KERNEL} id: ${docker_id}"
+fi

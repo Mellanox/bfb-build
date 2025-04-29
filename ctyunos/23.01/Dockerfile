@@ -15,23 +15,16 @@ ADD install.sh create_bfb /root/workspace/
 
 ENV RUN_FW_UPDATER="no"
 
+RUN rm -rf /etc/yum.repos.d/*  # remove existing repos from the image (non-reachable)
+
 ADD repos/ /etc/yum.repos.d/
-
-RUN command -v dnf || command -v yum || echo "No dnf or yum found"
-
-RUN dnf install -y bash
-RUN pwd
-RUN ls -l
 
 RUN rpm -ihv --force bootimages/mlxbf-bootimages-*.aarch64.rpm || true
 
 RUN echo 'excludepkgs=OpenIPMI libreswan' >> /etc/dnf/dnf.conf && \
     dnf -y clean all && \
-    rpm --install /root/workspace/doca-repo.rpm && \
-    rpm --install /usr/share/doca-dpu-repo*/repo/${MLXBF_BOOTIMAGES}-[0-9]*.rpm && \
     dnf --setopt='tsflags=noscripts' -y autoremove 'kernel*' && rm -rf /lib/modules/* && \
     dnf --exclude='mlxbf-bootimages*' -y update && \
-    mv /etc/yum.repos.d/ctyunos.repo.rpmnew /etc/yum.repos.d/ctyunos.repo && \
     dnf -y clean all && \
     dnf --exclude='mlxbf-bootimages*' -y install \
         acpid \
@@ -79,6 +72,7 @@ RUN echo 'excludepkgs=OpenIPMI libreswan' >> /etc/dnf/dnf.conf && \
         openssh-clients \
         openssh-server \
         parted \
+        passwd \
         pciutils \
         perf \
         python3-pip \
@@ -99,13 +93,17 @@ RUN echo 'excludepkgs=OpenIPMI libreswan' >> /etc/dnf/dnf.conf && \
         watchdog \
         wget \
         xfsprogs \
+        https://www.rpmfind.net/linux/epel/8/Everything/aarch64/Packages/e/edac-ctl-0.18-27.el8.aarch64.rpm \
+        https://www.rpmfind.net/linux/epel/8/Everything/aarch64/Packages/e/edac-util-0.18-27.el8.aarch64.rpm \
+        https://www.rpmfind.net/linux/epel/8/Everything/aarch64/Packages/l/libedac-0.18-27.el8.aarch64.rpm \
         https://rpmfind.net/linux/epel/8/Everything/aarch64/Packages/e/edac-utils-0.18-27.el8.aarch64.rpm \
         https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libmd-1.1.0-1.el8.aarch64.rpm \
         https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libmd-devel-1.1.0-1.el8.aarch64.rpm \
         https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libbsd-0.12.2-1.el8.aarch64.rpm \
         https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libbsd-devel-0.12.2-1.el8.aarch64.rpm \
-        https://rpmfind.net/linux/epel/8/Everything/aarch64/Packages/p/python3-twisted-19.10.0-4.el8.aarch64.rpm \
-        https://rpmfind.net/linux/epel/8/Everything/aarch64/Packages/p/python3-zope-interface-4.6.0-1.el8.aarch64.rpm \
+        https://www.rpmfind.net/linux/epel/9/Everything/aarch64/Packages/p/python3-twisted-22.10.0-3.el9.noarch.rpm \
+        https://www.rpmfind.net/linux/epel/9/Everything/aarch64/Packages/p/python3-zope-interface-5.4.0-5.el9.1.aarch64.rpm \
+        https://www.rpmfind.net/linux/epel/9/Everything/aarch64/Packages/p/python3-Automat-22.10.0-2.el9.noarch.rpm \
 #DOCA Packages
         doca-runtime \
         doca-devel \
@@ -118,9 +116,8 @@ RUN echo 'excludepkgs=OpenIPMI libreswan' >> /etc/dnf/dnf.conf && \
         ${BMC_FW_PACKAGES} \
     && \
     dnf --exclude='mlxbf-bootimages*' -y reinstall bf-release grub2 grub2-common && \
-    dnf -y remove 'doca-dpu-repo*' && \
     dnf -y clean all && \
-    rm -rf /var/cache/* /etc/yum.repos.d/urm.repo /root/workspace/doca-repo.rpm && \
+    rm -rf /var/cache/* && \
     truncate -s0 /etc/machine-id && \
     update-pciids
 
@@ -134,7 +131,3 @@ RUN systemctl disable containerd || true
 
 # Reinstall broken RPMs
 RUN for ff in `rpm -qa`; do if ! (rpm --verify $ff > /dev/null 2>&1); then dnf reinstall --nogpgcheck -y $ff; fi; done
-
-RUN dnf install -y kernel-5.10.0-136.12.0.88.4.ctl3.aarch64.rpm kernel-devel-5.10.0-136.12.0.88.4.ctl3.aarch64.rpm
-
-CMD ["/root/workspace/build_ctyunos_bfb"]

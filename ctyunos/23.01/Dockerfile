@@ -72,6 +72,7 @@ RUN echo 'excludepkgs=OpenIPMI libreswan' >> /etc/dnf/dnf.conf && \
         openssh-clients \
         openssh-server \
         parted \
+        passwd \
         pciutils \
         perf \
         python3-pip \

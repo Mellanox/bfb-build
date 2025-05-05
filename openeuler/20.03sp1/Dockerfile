@@ -1,4 +1,4 @@
-from --platform=linux/arm64 openeuler/openeuler:20.03-lts-sp1
+FROM --platform=linux/arm64 openeuler/openeuler:20.03-lts-sp1
 ADD qemu-aarch64-static /usr/bin/
 
 ARG BMC_FW_PACKAGES=bf3-bmc-nic-fw
@@ -18,7 +18,7 @@ ADD repos/ /etc/yum.repos.d/
 
 RUN rpm -ihv --force bootimages/mlxbf-bootimages-*.aarch64.rpm || true
 
-RUN dnf install -y kernel-4.19.90-2109.1.0.0108.oe1.aarch64 kernel-devel-4.19.90-2109.1.0.0108.oe1.aarch64
+RUN dnf install -y kernel-4.19.90-2405.5.0.0251.oe1.aarch64 kernel-devel-4.19.90-2405.5.0.0251.oe1.aarch64
 
 RUN echo 'excludepkgs=OpenIPMI network-scripts-openvswitch' >> /etc/dnf/dnf.conf && \
     dnf -y clean all && \
@@ -92,10 +92,10 @@ RUN echo 'excludepkgs=OpenIPMI network-scripts-openvswitch' >> /etc/dnf/dnf.conf
         watchdog \
         wget \
         xfsprogs \
-        https://linux.mellanox.com/public/repo/bluefield/latest/extras/addons/libmd-1.1.0-1.el8.aarch64.rpm \
-        https://linux.mellanox.com/public/repo/bluefield/latest/extras/addons/libmd-devel-1.1.0-1.el8.aarch64.rpm \
-        https://linux.mellanox.com/public/repo/bluefield/latest/extras/addons/libbsd-devel-0.12.2-1.el8.aarch64.rpm \
-        https://linux.mellanox.com/public/repo/bluefield/latest/extras/addons/libbsd-0.12.2-1.el8.aarch64.rpm \
+        https://linux.mellanox.com/public/repo/bluefield/4.9.1/extras/addons/libmd-1.1.0-1.el8.aarch64.rpm \
+        https://linux.mellanox.com/public/repo/bluefield/4.9.1/extras/addons/libmd-devel-1.1.0-1.el8.aarch64.rpm \
+        https://linux.mellanox.com/public/repo/bluefield/4.9.1/extras/addons/libbsd-devel-0.12.2-1.el8.aarch64.rpm \
+        https://linux.mellanox.com/public/repo/bluefield/4.9.1/extras/addons/libbsd-0.12.2-1.el8.aarch64.rpm \
 #DOCA Packages
         doca-runtime \
         doca-devel \

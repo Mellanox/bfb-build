@@ -1,4 +1,4 @@
-from --platform=linux/arm64 rockylinux:9.2
+FROM --platform=linux/arm64 rockylinux:9.2
 ADD qemu-aarch64-static /usr/bin/
 
 ARG BMC_FW_PACKAGES=bf3-bmc-nic-fw
@@ -85,6 +85,8 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
         libguestfs-tools \
         libhugetlbfs-utils \
         libvirt \
+        libbsd \
+        libbsd-devel \
         lm_sensors \
         lm_sensors-sensord \
         lsof \

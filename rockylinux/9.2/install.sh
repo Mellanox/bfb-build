@@ -89,6 +89,9 @@ configure_grub()
 	configure_default_grub
 	find /mnt/boot/loader/entries/ -type f -name "*.conf" -exec sed -i 's/\/boot//g' {} +
 	ilog "$(chroot /mnt grub2-mkconfig -o /boot/efi/EFI/rocky/grub.cfg 2>&1)"
+	if [[ ! -e /mnt/boot/efi/EFI/rocky/grubenv && -e /mnt/boot/grub2/grubenv ]]; then
+		cp /mnt/boot/grub2/grubenv /mnt/boot/efi/EFI/rocky/
+	fi
 }
 
 set_root_password()

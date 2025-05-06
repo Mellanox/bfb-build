@@ -243,6 +243,8 @@ mount_target_partition()
 	sync
 	sleep 1
 
+	tune2fs -o journal_data $ROOT_PARTITION
+
 	mkdir -p /mnt
 	mount -t ${ROOTFS} $ROOT_PARTITION /mnt
 	mkdir -p /mnt/boot/efi
@@ -323,7 +325,7 @@ EOF
 		# BlueField-2
 		ln -snf snap_rpc_init_bf2.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
 		chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge libxlio libxlio-dev libxlio-utils || true
-		#chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge dpa-compiler dpacc dpaeumgmt flexio || true
+		#chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge dpa-compiler dpacc dpa-resource-mgmt flexio || true
 		packages_to_remove=$(chroot /mnt env PATH=$CHROOT_PATH dpkg -S /lib/firmware/mellanox/{bmc,cec}/* | grep "bf3" | cut -d: -f1 | tr -s '\n' ' ')
 	elif (lspci -n -d 15b3: | grep -wq 'a2dc'); then
 		# BlueField-3
@@ -455,10 +457,8 @@ enable_sfc_hbn()
 	LINK_PROPAGATION=${LINK_PROPAGATION:-""}
 	ENABLE_BR_SFC=${ENABLE_BR_SFC:-""}
 	ENABLE_BR_SFC_DEFAULT_FLOWS=${ENABLE_BR_SFC_DEFAULT_FLOWS:-""}
-
-        # configurable sf/vf mapping
-	HUGEPAGE_SIZE=${HUGEPAGE_SIZE:-2048}
-	HUGEPAGE_COUNT=${HUGEPAGE_COUNT:-3072}
+	HUGEPAGE_SIZE=${HUGEPAGE_SIZE:-""}
+	HUGEPAGE_COUNT=${HUGEPAGE_COUNT:-""}
 	CLOUD_OPTION=${CLOUD_OPTION:-""}
 	log "INFO: Installing SFC HBN environment"
 	ilog "$(BR_HBN_UPLINKS=${BR_HBN_UPLINKS} BR_HBN_REPS=${BR_HBN_REPS} BR_HBN_SFS=${BR_HBN_SFS} BR_SFC_UPLINKS=${BR_SFC_UPLINKS} BR_SFC_REPS=${BR_SFC_REPS} BR_SFC_SFS=${BR_SFC_SFS} BR_HBN_SFC_PATCH_PORTS=${BR_HBN_SFC_PATCH_PORTS} LINK_PROPAGATION=${LINK_PROPAGATION} ENABLE_BR_SFC=${ENABLE_BR_SFC} ENABLE_BR_SFC_DEFAULT_FLOWS=${ENABLE_BR_SFC_DEFAULT_FLOWS} HUGEPAGE_SIZE=${HUGEPAGE_SIZE} HUGEPAGE_COUNT=${HUGEPAGE_COUNT} CLOUD_OPTION=${CLOUD_OPTION} chroot /mnt /opt/mellanox/sfc-hbn/install.sh ${ARG_PORT0} ${ARG_PORT1} 2>&1)"

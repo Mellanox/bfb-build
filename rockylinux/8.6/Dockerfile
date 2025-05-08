@@ -72,6 +72,8 @@ RUN sed -i '/mirrorlist=.*/d;s/#baseurl/baseurl/g;s/$releasever/8.6/g' /etc/yum.
         libguestfs-tools \
         libhugetlbfs-utils \
         libvirt \
+        libbsd \
+        libbsd-devel \
         lm_sensors \
         lm_sensors-sensord \
         lsof \

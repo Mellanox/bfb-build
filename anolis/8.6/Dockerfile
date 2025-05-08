@@ -60,6 +60,8 @@ RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
         libguestfs-tools \
         libhugetlbfs-utils \
         libvirt \
+        libbsd \
+        libbsd-devel \
         lm_sensors \
         lm_sensors-sensord \
         lsof \

@@ -184,7 +184,7 @@ EOF
 		# BlueField-2
 		ln -snf snap_rpc_init_bf2.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
 		chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge libxlio libxlio-dev libxlio-utils || true
-		#chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge dpa-compiler dpacc dpaeumgmt flexio || true
+		#chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge dpa-compiler dpacc dpa-resource-mgmt flexio || true
 		packages_to_remove=$(chroot /mnt env PATH=$CHROOT_PATH dpkg -S /lib/firmware/mellanox/{bmc,cec}/* | grep "bf3" | cut -d: -f1 | tr -s '\n' ' ')
 	elif (lspci -n -d 15b3: | grep -wq 'a2dc'); then
 		# BlueField-3

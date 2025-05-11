@@ -93,14 +93,13 @@ RUN dnf install -y \
 		doca-sdk-common-devel \
 		doca-sdk-dpdk-bridge \
 		doca-sdk-dpdk-bridge-devel \
-		doca-sdk-legacy-flow \
-		doca-sdk-legacy-flow-devel \
-		doca-sdk-legacy-flow-trace \
+		doca-sdk-flow \
+		doca-sdk-flow-devel \
+		doca-sdk-flow-trace \
 		dpacc \
 		dpacc-extract \
-		dpaeumgmt \
+		dpa-resource-mgmt \
 		dpa-gdbserver \
-		dpa-stats \
 		flexio-sdk \
 		flexio-samples \
 		libckteec0 \

@@ -1,4 +1,4 @@
-FROM registry.redhat.io/ubi9/ubi:9.4
+FROM --platform=linux/arm64 registry.access.redhat.com/ubi9/ubi:9.4
 
 ENV RUN_FW_UPDATER="no"
 

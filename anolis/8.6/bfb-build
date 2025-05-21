@@ -45,6 +45,7 @@ DISTRO_KERNEL=${DISTRO_KERNEL:-""}
 ARCH=${ARCH:-"arm64-dpu"}
 DOCA_VERSION="3.0.0"
 BSP_VERSION="4.11.0-13611"
+RELEASE_DIR_SUFFIX=${RELEASE_DIR_SUFFIX:-""}
 MLNX_OFED_VERSION="25.04-0.5.9.0"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-""}
@@ -69,7 +70,7 @@ case "$IMAGE_TYPE" in
 esac
 
 mkdir -p $WDIR/bootimages
-wget --no-verbose -P $WDIR/bootimages ${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/${ARCH}/$bootimages
+wget --no-verbose -P $WDIR/bootimages ${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}${RELEASE_DIR_SUFFIX}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/${ARCH}/$bootimages
 
 cp -a \
 	Dockerfile \
@@ -92,7 +93,7 @@ cd $WDIR
 
 echo -e "[doca] \n\
 name=Nvidia DOCA repository \n\
-baseurl=$BASE_URL/doca/${DOCA_VERSION}-${BSP_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/arm64-dpu/ \n\
+baseurl=$BASE_URL/doca/${DOCA_VERSION}-${BSP_VERSION}${RELEASE_DIR_SUFFIX}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/arm64-dpu/ \n\
 gpgcheck=0 \n\
 enabled=1" > $WDIR/repos/doca.repo
 
@@ -109,14 +110,28 @@ docker build -t ${docker_image} \
 	--build-arg BSP_VERSION=$BSP_VERSION \
 	-f Dockerfile .
 
-docker run -t --rm --privileged -e container=docker \
+DOCKER_RUN_PARAMS="--privileged -e container=docker \
 	-v $PWD:/workspace \
 	--name BlueField_OS_${DISTRO}_${DISTRO_VERSION}${DISTRO_KERNEL} \
 	--mount type=bind,source=/dev,target=/dev \
 	--mount type=bind,source=/sys,target=/sys \
-	--mount type=bind,source=/proc,target=/proc \
-	${docker_image} /bin/bash -x /root/workspace/create_bfb
+	--mount type=bind,source=/proc,target=/proc"
+
+if [ "X${LEAVE_CONTAINER}" == "Xyes" ]; then
+	DOCKER_RUN_PARAMS="-d -it ${DOCKER_RUN_PARAMS}"
+	docker_id=$(docker run ${DOCKER_RUN_PARAMS} \
+		${docker_image} /bin/bash)
+	docker exec -it ${docker_id} /bin/bash -x /root/workspace/create_bfb
+else
+	DOCKER_RUN_PARAMS="-t --rm ${DOCKER_RUN_PARAMS}"
+	docker run ${DOCKER_RUN_PARAMS} \
+		${docker_image} /bin/bash -x /root/workspace/create_bfb
+fi
 
 readlink -f *.bfb
 
 echo "Default root password is: anolis"
+
+if [ "X${LEAVE_CONTAINER}" == "Xyes" ]; then
+	echo "Container name: BlueField_OS_${DISTRO}_${DISTRO_VERSION}${DISTRO_KERNEL} id: ${docker_id}"
+fi

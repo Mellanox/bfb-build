@@ -17,6 +17,7 @@ BMC_TASK_TIMEOUT=${BMC_TASK_TIMEOUT:-"1800"}
 UPDATE_BMC_FW=${UPDATE_BMC_FW:-"yes"}
 BMC_REBOOT=${BMC_REBOOT:-"no"}
 CEC_REBOOT=${CEC_REBOOT:-"no"}
+BMC_UPGRADE_RESET=${BMC_UPGRADE_RESET:-"no"}
 FIELD_MODE_SET=0
 UPDATE_CEC_FW=${UPDATE_CEC_FW:-"yes"}
 BMC_INSTALLED_VERSION=""
@@ -24,7 +25,9 @@ BMC_MIN_MULTIPART_VERSION="24.04"
 CEC_MIN_RESET_VERSION="00.02.0180.0000"
 UPDATE_DPU_GOLDEN_IMAGE=${UPDATE_DPU_GOLDEN_IMAGE:-"yes"}
 UPDATE_NIC_FW_GOLDEN_IMAGE=${UPDATE_NIC_FW_GOLDEN_IMAGE:-"yes"}
+UPDATE_CERTIFICATES=${UPDATE_CERTIFICATES:-"yes"}
 bmc_pref=""
+cec_sfx=""
 if (lspci -n -d 15b3: | grep -wq 'a2dc'); then
 	bmc_pref="bf3"
 	cec_sfx="fwpkg"
@@ -44,8 +47,8 @@ elif (lspci -n -d 15b3: | grep -wq 'a2d6'); then
 	# BF2 does not support Golden Images
 	UPDATE_DPU_GOLDEN_IMAGE="no"
 	UPDATE_NIC_FW_GOLDEN_IMAGE="no"
-	if [ -d /BF2BMC ]; then
 	cec_sfx="bin"
+	if [ -d /BF2BMC ]; then
 		BMC_PATH=${BMC_PATH:-"/BF2BMC/bmc"}
 		CEC_PATH=${CEC_PATH:-"/BF2BMC/cec"}
 	else
@@ -69,6 +72,10 @@ CONFIG_IMAGE=${CONFIG_IMAGE:-"config-image.bfb"}
 CONFIG_CAP_DIR=${CONFIG_CAP_DIR:-"EFI/DefaultConfig"}
 CONFIG_CAP=${CONFIG_CAP:-"efi_bfcfg_defaults.cap"}
 
+L1_CERT=${L1_CERT:-"/lib/firmware/mellanox/boot/capsule/profile/keys/NV_NPGS_L1-certificate.pem"}
+L2_CERT=${L2_CERT:-"/lib/firmware/mellanox/boot/capsule/profile/keys/NV_NPGS_L2-certificate.pem"}
+CA_CHAIN_JSON=${CA_CHAIN_JSON:-"${DPU_TMP_DIR}/CA-chain.json"}
+
 export NIC_FW_GI_PATH
 export DPU_GI_PATH
 export BMC_PATH
@@ -90,12 +97,22 @@ mlx_mkcap="/usr/lib/firmware/mellanox/boot/capsule/scripts/mlx-mkcap"
 
 skip_bmc()
 {
+	skip_status=1
+	if [ ! -z "$1" ]; then
+		skip_status=$1
+	fi
 	log "WARN Skipping BMC components upgrade."
-	RC=$((RC+1))
+	RC=$((RC+$skip_status))
 	UPDATE_BMC_FW="no"
 	UPDATE_CEC_FW="no"
 	UPDATE_DPU_GOLDEN_IMAGE="no"
 	UPDATE_NIC_FW_GOLDEN_IMAGE="no"
+	if [ $skip_status -ne 0 ]; then
+		update_progress bmc_fw 1
+		update_progress cec_fw 1
+		update_progress dpu_golden_image 1
+		update_progress nic_firmware_golden_image 1
+	fi
 }
 
 wait_for_bmc_ip()
@@ -118,7 +135,7 @@ wait_for_bmc_ip()
 create_vlan()
 {
 	if [ "$BMC_LINK_UP" == "yes" ]; then
-		return
+		return 0
 	fi
 
 	if [ "$(get_field_mode)" == "01" ]; then
@@ -131,7 +148,7 @@ create_vlan()
 	if [ ! -d "/sys/bus/platform/drivers/mlxbf_gige" ]; then
 		ilog "- ERROR: mlxbf_gige driver is not loaded"
 		RC=$((RC+1))
-		return
+		return 1
 	fi
 	OOB_IF=$(ls -1 "/sys/bus/platform/drivers/mlxbf_gige/MLNXBF17:00/net")
 	ilog "Configuring VLAN id 4040 on ${OOB_IF}. This operation may take up to $BMC_IP_TIMEOUT seconds"
@@ -141,7 +158,7 @@ create_vlan()
 			rlog "ERR Failed to create VLAN."
 			ilog "- ERROR: Failed to create VLAN interface after $SECONDS sec. All the BMC related operations will be skipped."
 			skip_bmc
-			return
+			return 1
 		fi
 		ilog "Bringing up ${OOB_IF} interface..."
 		ilog "$(ip link set dev ${OOB_IF} up 2>&1)"
@@ -151,7 +168,7 @@ create_vlan()
 				rlog "ERR Failed to bring UP ${OOB_IF}."
 				ilog "- ERROR: Failed to bring UP ${OOB_IF} interface after $SECONDS sec. All the BMC related operations will be skipped."
 				skip_bmc
-				return
+				return 1
 			fi
 			sleep 1
 		done
@@ -168,7 +185,7 @@ create_vlan()
 				rlog "ERR Failed to bring UP vlan4040"
 				ilog "- ERROR: Failed to bring UP vlan4040 interface after $SECONDS sec. All the BMC related operations will be skipped."
 				skip_bmc
-				return
+				return 1
 			fi
 			sleep 1
 		done
@@ -190,6 +207,7 @@ create_vlan()
 		fi
 	done
 	BMC_LINK_UP="yes"
+	return 0
 }
 
 prepare_sshpass_environment()
@@ -338,6 +356,10 @@ wait_bmc_task_complete()
 			ilog "- ERROR: BMC task $task_id exception"
 			RC=$((RC+1))
 			break
+		elif [ "$task_state" == "Aborted" ]; then
+			ilog "- ERROR: BMC task $task_id aborted"
+			RC=$((RC+1))
+			break
 		fi
 		sleep 10
 	done
@@ -364,6 +386,7 @@ extract_images()
 
 update_bmc_fw()
 {
+	rc=0
 	wait_bmc_task_complete
 	log "Updating BMC firmware"
 	image=$(/bin/ls -1 {/mnt,/}${BMC_PATH}/${bmc_pref}*bmc*{fwpkg,tar} 2> /dev/null | grep -v preboot | tail -1)
@@ -373,7 +396,7 @@ update_bmc_fw()
 		if [ -z "$image" ]; then
 			ilog "- ERROR: Cannot find BMC firmware image"
 			RC=$((RC+1))
-			return
+			return 1
 		fi
 	fi
 	ilog "Found BMC firmware image: $image"
@@ -389,7 +412,7 @@ update_bmc_fw()
 		if [ -z "$BMC_IMAGE_VERSION" ]; then
 			ilog "- ERROR: Cannot detect included BMC firmware version"
 			RC=$((RC+1))
-			return
+			return 1
 		fi
 	fi
 	ilog "Provided BMC firmware version: $BMC_IMAGE_VERSION"
@@ -402,7 +425,7 @@ update_bmc_fw()
 	if [ -z "$BMC_INSTALLED_VERSION" ]; then
 		ilog "- ERROR: Cannot detect running BMC firmware version"
 		RC=$((RC+1))
-		return
+		return 1
 	fi
 	ilog "Running BMC firmware version: $BMC_INSTALLED_VERSION"
 
@@ -411,7 +434,7 @@ update_bmc_fw()
 			ilog "Installed BMC version is the same as provided. FORCE_BMC_FW_INSTALL is set."
 		else
 			ilog "Installed BMC version is the same as provided. Skipping BMC firmware update."
-			return
+			return 0
 		fi
 	fi
 
@@ -429,13 +452,21 @@ update_bmc_fw()
 	BMC_FIRMWARE_UPDATED="yes"
 
 	wait_bmc_task_complete
+	post_bmc_install_message="INFO: BMC firmware was updated to: ${BMC_IMAGE_VERSION}"
 	if [ "$BMC_REBOOT" != "yes" ]; then
-		log "INFO: BMC firmware was updated to: ${BMC_IMAGE_VERSION}. BMC restart is required."
+		post_bmc_install_message="${post_bmc_install_message}. BMC restart is required"
 	fi
+	log "${post_bmc_install_message}"
+	if [ "$BMC_UPGRADE_RESET" == "yes" ]; then
+		BMC_UPGRADE_RESET=1 bfcfg -f /dev/null
+	fi
+
+	return $rc
 }
 
 update_cec_fw()
 {
+	rc=0
 	wait_bmc_task_complete
 	log "Updating CEC firmware"
 	image=$(/bin/ls -1 {/mnt,/}${CEC_PATH}/${bmc_pref}*cec*${cec_sfx} 2> /dev/null | tail -1)
@@ -446,7 +477,7 @@ update_cec_fw()
 		if [ -z "$image" ]; then
 			ilog "- ERROR: Cannot find CEC firmware image"
 			RC=$((RC+1))
-			return
+			return 1
 		fi
 	fi
 	ilog "Found CEC firmware image: $image"
@@ -463,7 +494,7 @@ update_cec_fw()
 	if [ -z "$CEC_IMAGE_VERSION" ]; then
 		ilog "- ERROR: Cannot detect included CEC firmware version"
 		RC=$((RC+1))
-		return
+		return 1
 	fi
 	ilog "Provided CEC firmware version: $CEC_IMAGE_VERSION"
 
@@ -473,7 +504,7 @@ update_cec_fw()
 	if [ -z "$CEC_INSTALLED_VERSION" ]; then
 		ilog "- ERROR: Cannot detect running CEC firmware version"
 		RC=$((RC+1))
-		return
+		return 1
 	fi
 	ilog "Running CEC firmware version: $CEC_INSTALLED_VERSION"
 
@@ -482,7 +513,7 @@ update_cec_fw()
 			ilog "Installed CEC version is the same as provided. FORCE_CEC_INSTALL is set."
 		else
 			ilog "Installed CEC version is the same as provided. Skipping CEC firmware update."
-			return
+			return 0
 		fi
 	fi
 
@@ -498,7 +529,7 @@ update_cec_fw()
 		if [ -z "$BMC_INSTALLED_VERSION" ]; then
 			ilog "- ERROR: Cannot detect running BMC firmware version"
 			RC=$((RC+1))
-			return
+			return 1
 		fi
 	fi
 
@@ -520,6 +551,7 @@ update_cec_fw()
 			if [ "$status" == "\"The request completed successfully."\" ]; then
 				log "INFO: CEC firmware was updated to ${CEC_IMAGE_VERSION}."
 			else
+				rc=1
 				rlog "ERR Failed to reset CEC"
 				ilog "Failed to reset CEC. Output: $output"
 				log "INFO: CEC firmware was updated to ${CEC_IMAGE_VERSION}. Host power cycle is required"
@@ -528,6 +560,11 @@ update_cec_fw()
 			log "INFO: CEC firmware was updated to ${CEC_IMAGE_VERSION}. Host power cycle is required"
 		fi
 	fi
+	if [ "$BMC_UPGRADE_RESET" == "yes" ]; then
+		BMC_UPGRADE_RESET=1 bfcfg -f /dev/null
+	fi
+
+	return $rc
 }
 
 bmc_reboot()
@@ -599,25 +636,31 @@ save_config()
 
 generate_config_image()
 {
-	ilog "Generating Config image"
-	mkdir -p ${DPU_TMP_DIR}
-	cd ${DPU_TMP_DIR}
-	sed -i "s/\bpython\b/python3/" $mlx_mkcap
-	ilog "cp /etc/bf.cfg ${DPU_TMP_DIR}"
-	ilog "$(cp /etc/bf.cfg ${DPU_TMP_DIR} 2>&1)"
-	ilog "bfcfg --cfg2bin ${DPU_TMP_DIR}/bf.cfg --skip-mfg"
-	ilog "$(bfcfg --cfg2bin ${DPU_TMP_DIR}/bf.cfg --skip-mfg)"
-	if [ ! -e bf.cfg.bin ]; then
-		log "Failed to create bf.cfg.bin"
-		RC=$((RC+1))
-		return 1
+	if [ -e ${DPU_GI_PATH}/${CONFIG_IMAGE} ]; then
+		ilog "Found ${DPU_GI_PATH}/${CONFIG_IMAGE}"
+		return 0
 	fi
-	ilog "$mlx_mkcap --cfg-data ${DPU_TMP_DIR}/bf.cfg.bin ${DPU_TMP_DIR}/bf.cfg.cap"
-	ilog "$($mlx_mkcap --cfg-data ${DPU_TMP_DIR}/bf.cfg.bin ${DPU_TMP_DIR}/bf.cfg.cap 2>&1)"
 	if [ ! -e ${DPU_TMP_DIR}/bf.cfg.cap ]; then
-		log "Failed to create capsule: ${DPU_TMP_DIR}/bf.cfg.cap"
-		RC=$((RC+1))
-		return 1
+		ilog "Generating Config image"
+		mkdir -p ${DPU_TMP_DIR}
+		cd ${DPU_TMP_DIR}
+		sed -i "s/\bpython\b/python3/" $mlx_mkcap
+		ilog "cp /etc/bf.cfg ${DPU_TMP_DIR}"
+		ilog "$(cp /etc/bf.cfg ${DPU_TMP_DIR} 2>&1)"
+		ilog "bfcfg --cfg2bin ${DPU_TMP_DIR}/bf.cfg --skip-mfg"
+		ilog "$(bfcfg --cfg2bin ${DPU_TMP_DIR}/bf.cfg --skip-mfg)"
+		if [ ! -e bf.cfg.bin ]; then
+			log "Failed to create bf.cfg.bin"
+			RC=$((RC+1))
+			return 1
+		fi
+		ilog "$mlx_mkcap --cfg-data ${DPU_TMP_DIR}/bf.cfg.bin ${DPU_TMP_DIR}/bf.cfg.cap"
+		ilog "$($mlx_mkcap --cfg-data ${DPU_TMP_DIR}/bf.cfg.bin ${DPU_TMP_DIR}/bf.cfg.cap 2>&1)"
+		if [ ! -e ${DPU_TMP_DIR}/bf.cfg.cap ]; then
+			log "Failed to create capsule: ${DPU_TMP_DIR}/bf.cfg.cap"
+			RC=$((RC+1))
+			return 1
+		fi
 	fi
 	ilog "mlx-mkbfb --capsule ${DPU_TMP_DIR}/bf.cfg.cap $1 ${DPU_TMP_DIR}/${CONFIG_IMAGE}"
 	ilog "$(mlx-mkbfb --capsule ${DPU_TMP_DIR}/bf.cfg.cap $1 ${DPU_TMP_DIR}/${CONFIG_IMAGE} 2>&1)"
@@ -634,6 +677,7 @@ generate_config_image()
 
 update_dpu_golden_image()
 {
+	rc=0
 	log "Updating DPU Golden Image"
 	image=$(/bin/ls -1 {/mnt,/}${DPU_GI_PATH}/${bmc_pref}*preboot-install.bfb 2> /dev/null | tail -1)
 
@@ -642,8 +686,8 @@ update_dpu_golden_image()
 		image=$(/bin/ls -1 {/mnt,/}${DPU_GI_PATH}/*preboot-install.bfb 2> /dev/null | tail -1)
 		if [ -z "$image" ]; then
 			ilog "DPU golden image was not found"
-			RC=$((RC+rc))
-			return
+			RC=$((RC+1))
+			return 1
 		fi
 	fi
 
@@ -659,43 +703,52 @@ update_dpu_golden_image()
 	if [ "$DPU_GI_IMAGE_VERSION" == "$DPU_GI_INSTALLED_VERSION" ]; then
 		ilog "Installed DPU Golden Image version is the same as provided. Skipping DPU Golden Image update."
 	else
-		sshpass -p $BMC_SSH_PASSWORD $SCP $image ${BMC_SSH_USER}@${BMC_IP}:/tmp/
-		output=$(sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} dpu_golden_image golden_image_arm -w /tmp/$(basename $image) 2>&1)
+		sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} mkdir -p ${BMC_TMP_DIR}/golden-image-arm
+		ilog "Copying $image to ${BMC_SSH_USER}@${BMC_IP}:${BMC_TMP_DIR}/golden-image-arm"
+		sshpass -p $BMC_SSH_PASSWORD $SCP $image ${BMC_SSH_USER}@${BMC_IP}:${BMC_TMP_DIR}/golden-image-arm
+		ilog "Installing DPU Golden Image on the BMC by: dpu_golden_image golden_image_arm -w ${BMC_TMP_DIR}/golden-image-arm/$(basename $image)"
+		output=$(sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} dpu_golden_image golden_image_arm -w ${BMC_TMP_DIR}/golden-image-arm/$(basename $image) 2>&1)
 		if [ $? -eq 0 ]; then
 			log "DPU Golden Image installed successfully"
 		else
 			log "DPU Golden Image installed failed"
+			rc=1
 		fi
 		ilog "$output"
 	fi
 
 	if (echo "${BD_PSIDS}" | grep -qw "${PSID}"); then
-		if [ "X${GENERATE_CONFIG_IMAGE}" == "Xyes" ]; then
-			generate_config_image $image
+		if [ "X${UPLOAD_CONFIG_IMAGE}" == "Xyes" ]; then
+			if [ "X${GENERATE_CONFIG_IMAGE}" == "Xyes" ]; then
+				generate_config_image $image
+			fi
 			config_image=${DPU_GI_PATH}/${CONFIG_IMAGE}
 			if [ ! -e "$config_image" ]; then
 				ilog "Config image does not exist: $config_image"
 				return 1
 			fi
-			if [ "X${UPLOAD_CONFIG_IMAGE}" == "Xyes" ]; then
-				sshpass -p $BMC_SSH_PASSWORD $SCP $config_image ${BMC_SSH_USER}@${BMC_IP}:${BMC_TMP_DIR}
-				if [ "X$BMC_INSTALL_CONFIG_IMAGE" == "Xyes" ]; then
-					output=$(sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} dpu_golden_image golden_image_config -w ${BMC_TMP_DIR}/$(basename $config_image) 2>&1)
-					if [ $? -eq 0 ]; then
-						log "Installed BMC config image"
-						BMC_CONFIG_UPDATED="yes"
-					else
-						log "Failed to install BMC config image"
-					fi
-					ilog "$output"
+			sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} mkdir -p ${BMC_TMP_DIR}/golden-image-config
+			ilog "Copying $config_image to ${BMC_SSH_USER}@${BMC_IP}:${BMC_TMP_DIR}/golden-image-config"
+			sshpass -p $BMC_SSH_PASSWORD $SCP $config_image ${BMC_SSH_USER}@${BMC_IP}:${BMC_TMP_DIR}/golden-image-config
+			if [ "X$BMC_INSTALL_CONFIG_IMAGE" == "Xyes" ]; then
+				ilog "Installing DPU Config Image on the BMC by: dpu_golden_image golden_image_config -w ${BMC_TMP_DIR}/golden-image-config/$(basename $config_image)"
+				output=$(sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} dpu_golden_image golden_image_config -w ${BMC_TMP_DIR}/golden-image-config/$(basename $config_image) 2>&1)
+				if [ $? -eq 0 ]; then
+					log "Installed BMC config image"
+					BMC_CONFIG_UPDATED="yes"
+				else
+					log "Failed to install BMC config image"
 				fi
+				ilog "$output"
 			fi
 		fi
 	fi
+	return $rc
 }
 
 update_nic_firmware_golden_image()
 {
+	rc=0
 	log "Updating NIC firmware Golden Image"
 	image=$(/bin/ls -1 {/mnt,/}${NIC_FW_GI_PATH}/*${dpu_part_number}* 2> /dev/null | tail -1)
 
@@ -704,8 +757,8 @@ update_nic_firmware_golden_image()
 		if [ -z "$image" ]; then
 			image=$(/bin/ls -1 {/mnt,/}${NIC_FW_GI_PATH}/*${dpu_part_number}* 2> /dev/null | tail -1)
 			ilog "NIC firmware Golden Image for $dpu_part_number was not found"
-			RC=$((RC+rc))
-			return
+			RC=$((RC+1))
+			return 1
 		fi
 	fi
 
@@ -720,17 +773,67 @@ update_nic_firmware_golden_image()
 
 	if [ "$NIC_GI_IMAGE_VERSION" == "$NIC_GI_INSTALLED_VERSION" ]; then
 		ilog "Installed NIC firmware Golden Image version is the same as provided. Skipping NIC firmware Golden Image update."
-		return
+		return 0
 	fi
 
-	sshpass -p $BMC_SSH_PASSWORD $SCP $image ${BMC_SSH_USER}@${BMC_IP}:/tmp/
-	output=$(sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} dpu_golden_image golden_image_nic -w /tmp/$(basename $image) 2>&1)
+	sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} mkdir -p ${BMC_TMP_DIR}/golden-image-nic
+	sshpass -p $BMC_SSH_PASSWORD $SCP $image ${BMC_SSH_USER}@${BMC_IP}:${BMC_TMP_DIR}/golden-image-nic
+	output=$(sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} dpu_golden_image golden_image_nic -w ${BMC_TMP_DIR}/golden-image-nic/$(basename $image) 2>&1)
 	if [ $? -eq 0 ]; then
 		log "NIC firmware Golden Image installed successfully"
 	else
 		log "NIC firmware Golden Image installed failed"
+		rc=1
 	fi
 	ilog "$output"
+	return $rc
+}
+
+update_certificates()
+{
+	rc=0
+	log "Updating certificates"
+
+	# Get the number of existing certificates
+	num_certs=$(curl -sSk -u $BMC_USER:$BMC_PASSWORD -X GET https://${BMC_IP}/redfish/v1/Systems/Bluefield/Oem/Nvidia/SystemConfigProfile/Truststore/NvidiaCertificates | jq '."Members@odata.count"')
+	ilog "Number of existing certificates: $num_certs"
+	if [ $num_certs -gt 0 ]; then
+		ilog "Checking if certificates are already uploaded"
+		uploaded_pem_certs=0
+		cert_ids=$(curl -sSk -u $BMC_USER:$BMC_PASSWORD -X GET https://${BMC_IP}/redfish/v1/Systems/Bluefield/Oem/Nvidia/SystemConfigProfile/Truststore/NvidiaCertificates | jq '."Members"[] | ."@odata.id"' | tr -d '"')
+		for cert_id in $cert_ids; do
+			curl -sSk -u $BMC_USER:$BMC_PASSWORD -X GET https://${BMC_IP}${cert_id} | jq '."CertificateType"' | grep -q '"PEM"'
+			if [ $? -eq 0 ]; then
+				uploaded_pem_certs=$((uploaded_pem_certs+1))
+			fi
+		done
+		if [ $uploaded_pem_certs -gt 0 ]; then
+			ilog "Found $uploaded_pem_certs PEM certificates already uploaded"
+			return $rc
+		fi
+	fi
+
+	# Create JSON file with certificates
+	cat << EOF > ${CA_CHAIN_JSON}
+	{
+		"CertificateType": "PEM",
+		"CertificateString": "$(cat ${L2_CERT} ${L1_CERT} | sed ':a;N;$!ba;s/\n/\\n/g')"
+	}
+EOF
+
+	# Upload certificates to BMC
+	ilog "curl -sSk -u <BMC_USER:BMC_PASSWORD> -X POST https://${BMC_IP}/redfish/v1/Systems/Bluefield/Oem/Nvidia/SystemConfigProfile/Truststore/NvidiaCertificates -d @${CA_CHAIN_JSON}"
+	output=$(curl -sSk -u $BMC_USER:$BMC_PASSWORD -X POST https://${BMC_IP}/redfish/v1/Systems/Bluefield/Oem/Nvidia/SystemConfigProfile/Truststore/NvidiaCertificates -d @${CA_CHAIN_JSON} 2>&1)
+	status=$(echo $output | jq '."Issuer"."Organization"')
+	if [ "$status" == "\"NVIDIA"\" ]; then
+		log "INFO: Certificates uploaded successfully"
+	else
+		rc=1
+		rlog "ERR Failed to upload certificates"
+		ilog "Failed to upload certificates. Output: $output"
+	fi
+
+	return $rc
 }
 
 bmc_components_update()
@@ -744,28 +847,31 @@ bmc_components_update()
 		if [[ -z "$BMC_USER" || -z "$BMC_PASSWORD" ]]; then
 			ilog "BMC_USER and/or BMC_PASSWORD are not defined. Skipping UEFI password change."
 		else
-			create_vlan
+			create_vlan || return
 			change_uefi_password
+			update_progress uefi_password $?
 		fi
 	fi
 
 	if [[ "$UPDATE_BMC_FW" == "yes" || "$UPDATE_CEC_FW" == "yes" || "$UPDATE_DPU_GOLDEN_IMAGE" == "yes" || "$UPDATE_NIC_FW_GOLDEN_IMAGE" == "yes" || ! -z "$NEW_BMC_PASSWORD" ]]; then
 		if [[ -z "$BMC_USER" || -z "$BMC_PASSWORD" ]]; then
 			ilog "BMC_USER and/or BMC_PASSWORD are not defined. Skipping BMC components upgrade."
-			skip_bmc
+			skip_bmc 0
 			return
 		else
 			ilog "INFO: Running BMC components update flow"
-			create_vlan
+			create_vlan || return
 			# get_bmc_public_key
 			if [ "$BMC_LINK_UP" == "yes" ]; then
 				if [ ! -z "$NEW_BMC_PASSWORD" ]; then
 					if change_bmc_password "$BMC_PASSWORD" "$NEW_BMC_PASSWORD"; then
+						update_progress bmc_password 0
 						if [ "$BMC_PASSWORD" == "$BMC_SSH_PASSWORD" ]; then
 							BMC_SSH_PASSWORD="$NEW_BMC_PASSWORD"
 						fi
 						BMC_PASSWORD="$NEW_BMC_PASSWORD"
 					else
+						update_progress bmc_password 0
 						skip_bmc
 						return
 					fi
@@ -773,6 +879,7 @@ bmc_components_update()
 					ilog "BMC password has the default value. Changing to the temporary password."
 					if change_bmc_password "$BMC_PASSWORD" "$TMP_BMC_PASSWORD"; then
 						BMC_PASSWORD="$TMP_BMC_PASSWORD"
+						BMC_SSH_PASSWORD="$TMP_BMC_PASSWORD"
 					else
 						skip_bmc
 						return
@@ -802,6 +909,7 @@ bmc_components_update()
 
 	if [[ "$UPDATE_BMC_FW" == "yes" && "$BMC_LINK_UP" == "yes" ]]; then
 		update_bmc_fw
+		update_progress bmc_fw $?
 	fi
 
 	if function_exists bmc_custom_action2; then
@@ -811,6 +919,7 @@ bmc_components_update()
 
 	if [[ "$UPDATE_CEC_FW" == "yes" && "$BMC_LINK_UP" == "yes" ]]; then
 		update_cec_fw
+		update_progress cec_fw $?
 	fi
 
 	if function_exists bmc_custom_action3; then
@@ -829,6 +938,7 @@ bmc_components_update()
 
 	if [[ "$UPDATE_DPU_GOLDEN_IMAGE" == "yes" && "$BMC_LINK_UP" == "yes" ]]; then
 		update_dpu_golden_image
+		update_progress dpu_golden_image $?
 	fi
 
 	if function_exists bmc_post_dpu_gi; then
@@ -841,12 +951,28 @@ bmc_components_update()
 			log "Cannot identify DPU Part Number. Skipping NIC firmware Golden Image update."
 		else
 			update_nic_firmware_golden_image
+			update_progress nic_firmware_golden_image $?
 		fi
 	fi
 
 	if function_exists bmc_post_nic_fw_gi; then
 		log "INFO: Running bmc_post_nic_fw_gi from bf.cfg"
 		bmc_post_nic_fw_gi
+	fi
+
+	if function_exists bmc_pre_certificates; then
+		log "INFO: Running bmc_pre_certificates from bf.cfg"
+		bmc_pre_certificates
+	fi
+
+	if [ "$UPDATE_CERTIFICATES" == "yes"  ]; then
+		update_certificates
+		update_progress certificates $?
+	fi
+
+	if function_exists bmc_post_certificates; then
+		log "INFO: Running bmc_post_certificates from bf.cfg"
+		bmc_post_certificates
 	fi
 
 	if [[ "X${BMC_REBOOT}" == "Xyes" && "X${BMC_REBOOT_CONFIG}" == "Xyes" && "${BMC_CONFIG_UPDATED}" == "yes" ]]; then

@@ -1,3 +1,5 @@
+DPU_TMP_DIR=${DPU_TMP_DIR:-"/tmp"}
+
 update_atf_uefi()
 {
 	if function_exists pre_update_atf_uefi; then
@@ -21,7 +23,19 @@ update_atf_uefi()
 		if [ -e /lib/firmware/mellanox/boot/capsule/efi_sbkeysync.cap ]; then
 			ilog "$(bfrec --capsule /lib/firmware/mellanox/boot/capsule/efi_sbkeysync.cap)"
 		fi
-		unmount_partition /mnt/efi_system_partition
+
+		if [[ -e /sys/firmware/efi/efivars/BfProfileRootKey-f4d4a988-e8c5-11ef-8afc-0242c0a80103 && -e /sys/firmware/efi/efivars/BfProfileCaCertNvidia-f4d4a988-e8c5-11ef-8afc-0242c0a80103 ]]; then
+			ilog "Profile Root Key and Profile CA Certificate already enrolled"
+		else
+			if [ -e /lib/firmware/mellanox/boot/capsule/EnrollProfileKeyCertCap ]; then
+				ilog "Enrolling Profile Root Key and Profile CA Certificate"
+				ilog "$(bfrec --capsule /lib/firmware/mellanox/boot/capsule/EnrollProfileKeyCertCap)"
+			else
+				ilog "Profile Root Key and Profile CA Certificate capsule not found"
+			fi
+		fi
+
+		unmount_partition /mnt/sys/firmware/efi/efivars
 	fi
 
 	if function_exists post_update_atf_uefi; then

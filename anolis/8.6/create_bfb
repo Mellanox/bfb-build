@@ -161,7 +161,7 @@ copy_rpm()
             done
             ;;
         *mft*)
-            for f in $(rpm -ql $package | grep -v man)
+            for f in $(rpm -ql $package | grep -vw man)
             do
                 if [ -d $f ]; then
                     continue

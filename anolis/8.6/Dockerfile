@@ -22,9 +22,13 @@ RUN rpm -ihv --force bootimages/mlxbf-bootimages-*.aarch64.rpm || true
 RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
     dnf -y clean all && \
     dnf install -y epel-release && \
-    dnf --exclude='mlxbf-bootimages*' -y update && \
-    dnf --exclude='mlxbf-bootimages*' -y install coreutils-single && \
-    dnf --exclude='mlxbf-bootimages*' -y install \
+    dnf --exclude='mlxbf-bootimages*,kernel*' -y update && \
+    dnf --exclude='mlxbf-bootimages*,kernel*' -y install coreutils-single && \
+    dnf --exclude='mlxbf-bootimages*,kernel*' -y install http://mirrors.openanolis.cn/anolis/8.6/BaseOS/aarch64/os/Packages/rasdaemon-0.6.1-12.0.2.an8.aarch64.rpm && \
+    dnf -y install python3-dnf-plugin-versionlock && \
+    dnf --exclude='mlxbf-bootimages*' -y install kernel-5.10.134-13.1.an8 kernel-devel-5.10.134-13.1.an8 kernel-headers-5.10.134-13.1.an8 && \
+    dnf versionlock add kernel-5.10.134-13.1.an8 kernel-devel-5.10.134-13.1.an8 kernel-headers-5.10.134-13.1.an8 && \
+    dnf --exclude='mlxbf-bootimages*,rasdaemon*,libtraceevent*' -y install \
         acpid \
         audit \
         chkconfig \
@@ -60,6 +64,8 @@ RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
         libguestfs-tools \
         libhugetlbfs-utils \
         libvirt \
+        libbsd \
+        libbsd-devel \
         lm_sensors \
         lm_sensors-sensord \
         lsof \
@@ -84,7 +90,6 @@ RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
         perf \
         python3-pip \
         qemu-kvm \
-        rasdaemon \
         rsyslog \
         sg3_utils \
         shim \
@@ -113,7 +118,7 @@ RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
         ${BMC_FW_PACKAGES} \
         ${CEC_FW_PACKAGES} \
     && \
-    dnf --exclude='mlxbf-bootimages*' -y reinstall bf-release && \
+    dnf --disablerepo='*' --enablerepo='doca' --exclude='mlxbf-bootimages*' -y reinstall bf-release && \
     dnf -y clean all && \
     rm -rf /var/cache/* && \
     truncate -s0 /etc/machine-id && \

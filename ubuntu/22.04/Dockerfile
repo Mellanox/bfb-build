@@ -31,19 +31,19 @@ RUN apt remove -y --purge $(dpkg --list "*openipmi*" | grep openipmi | awk '{pri
 RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
 
 RUN apt install -y -f \
-	linux-bluefield=5.15.0.1060.62 \
-	linux-bluefield-cloud-tools-common=5.15.0-1060.62 \
-	linux-bluefield-headers-5.15.0-1060=5.15.0-1060.62 \
-	linux-bluefield-tools-5.15.0-1060=5.15.0-1060.62 \
-	linux-buildinfo-5.15.0-1060-bluefield=5.15.0-1060.62 \
-	linux-headers-5.15.0-1060-bluefield=5.15.0-1060.62 \
-	linux-headers-bluefield=5.15.0.1060.62 \
-	linux-image-5.15.0-1060-bluefield=5.15.0-1060.62 \
-	linux-image-bluefield=5.15.0.1060.62 \
-	linux-modules-5.15.0-1060-bluefield=5.15.0-1060.62 \
-	linux-modules-extra-5.15.0-1060-bluefield=5.15.0-1060.62 \
-	linux-tools-5.15.0-1060-bluefield=5.15.0-1060.62 \
-	linux-tools-bluefield=5.15.0.1060.62
+    linux-bluefield=5.15.0.1070.72 \
+    linux-bluefield-cloud-tools-common=5.15.0-1070.72 \
+    linux-bluefield-headers-5.15.0-1070=5.15.0-1070.72 \
+    linux-bluefield-tools-5.15.0-1070=5.15.0-1070.72 \
+    linux-buildinfo-5.15.0-1070-bluefield=5.15.0-1070.72 \
+    linux-headers-5.15.0-1070-bluefield=5.15.0-1070.72 \
+    linux-headers-bluefield=5.15.0.1070.72 \
+    linux-image-5.15.0-1070-bluefield=5.15.0-1070.72 \
+    linux-image-bluefield=5.15.0.1070.72 \
+    linux-modules-5.15.0-1070-bluefield=5.15.0-1070.72 \
+    linux-modules-extra-5.15.0-1070-bluefield=5.15.0-1070.72 \
+    linux-tools-5.15.0-1070-bluefield=5.15.0-1070.72 \
+    linux-tools-bluefield=5.15.0.1070.72
 
 RUN apt-get clean -y && \
     apt-get update -o "Acquire::https::Verify-Peer=false" -y && \
@@ -57,6 +57,7 @@ RUN apt-get clean -y && \
         plymouth \
     && \
     apt-get upgrade -y && \
+    apt-get install -y grub-efi-arm64-signed=1.187.6+2.06-2ubuntu14.4 && \
     apt-get install -y \
         acpid \
         bash-completion \
@@ -149,10 +150,10 @@ RUN apt-get clean -y && \
         ${BMC_FW_PACKAGES} \
         ${CEC_FW_PACKAGES} \
     && \
-    rm -rf /var/lib/apt/lists/* /root/workspace/doca-repo.deb /etc/default/grub.d/50-cloudimg-settings.cfg /etc/ssh/sshd_config.d/60-cloudimg-settings.conf /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf && \
+    rm -rf /var/lib/apt/lists/* /etc/apt/sources.list.d/00urm.sources /root/workspace/doca-repo.deb /etc/default/grub.d/50-cloudimg-settings.cfg /etc/ssh/sshd_config.d/60-cloudimg-settings.conf /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf && \
     truncate -s0 /etc/machine-id && \
-    printf 'set superusers="admin"' >> /etc/grub.d/40_custom && \
-    printf 'password_pbkdf2 admin grub.pbkdf2.sha512.10000.5EB1FF92FDD89BDAF3395174282C77430656A6DBEC1F9289D5F5DAD17811AD0E2196D0E49B49EF31C21972669D180713E265BB2D1D4452B2EA9C7413C3471C53.F533423479EE7465785CC2C79B637BDF77004B5CC16C1DDE806BCEA50BF411DE04DFCCE42279E2E1F605459F1ABA3A0928CE9271F2C84E7FE7BF575DC22935B1' >> /etc/grub.d/40_custom && \
+    printf 'set superusers="admin"\n' >> /etc/grub.d/40_custom && \
+    printf 'password_pbkdf2 admin grub.pbkdf2.sha512.10000.5EB1FF92FDD89BDAF3395174282C77430656A6DBEC1F9289D5F5DAD17811AD0E2196D0E49B49EF31C21972669D180713E265BB2D1D4452B2EA9C7413C3471C53.F533423479EE7465785CC2C79B637BDF77004B5CC16C1DDE806BCEA50BF411DE04DFCCE42279E2E1F605459F1ABA3A0928CE9271F2C84E7FE7BF575DC22935B1\n' >> /etc/grub.d/40_custom && \
     sed -i -r -e "s/# minlen =.*/minlen = 12/" /etc/security/pwquality.conf && \
     sed -i -r -e "s/# silent/silent/;s/# deny.*/deny = 10/;s/# unlock_time.*/unlock_time = 600/" /etc/security/faillock.conf && \
     sed -i -e '/use_authtok/ipassword\trequired\t\t\tpam_pwhistory.so remember=3' /etc/pam.d/common-password && \

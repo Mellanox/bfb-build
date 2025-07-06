@@ -243,6 +243,8 @@ mount_target_partition()
 	sync
 	sleep 1
 
+	tune2fs -o journal_data $ROOT_PARTITION
+
 	mkdir -p /mnt
 	mount -t ${ROOTFS} $ROOT_PARTITION /mnt
 	mkdir -p /mnt/boot/efi

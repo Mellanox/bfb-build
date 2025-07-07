@@ -14,6 +14,7 @@ pciids=$(lspci -nD 2> /dev/null | grep 15b3:a2d[26c] | awk '{print $1}')
 dpu_part_number=$(mstflint -d $cx_pcidev q full | grep "Part Number:" | awk '{print $NF}')
 PSID=$(mstflint -d $cx_pcidev q | grep PSID | awk '{print $NF}')
 BD_PSIDS=${BD_PSIDS:-"BD_0000000004 BD_0000000005"}
+DEVICE_TIMEOUT=${DEVICE_TIMEOUT:-30}
 
 rlog()
 {
@@ -196,6 +197,47 @@ function_exists()
 	return $?
 }
 
+upgrade_emmc_fw()
+{
+	# Check that the eMMC is from Swissbit
+	if [ "$(cat /sys/block/mmcblk0/device/cid 2> /dev/null | cut -c 1-4)" != "fb01" ]; then
+		ilog "eMMC device does not require firmware update"
+		return
+	fi
+
+	if [ "$(cat /sys/block/mmcblk0/device/fwrev 2> /dev/null)" != "0x1100000000000000" ]; then
+		ilog "Swissbit eMMC device does not require firmware update"
+		return
+	fi
+
+	if [ ! -e "$EMMC_SWISSBIT_FIRMWARE" ]; then
+		ilog "eMMC Firmware file was not found: $EMMC_SWISSBIT_FIRMWARE"
+		return
+	fi
+
+	if [ "$(md5sum $EMMC_SWISSBIT_FIRMWARE | awk '{print $1}')" != "$EMMC_SWISSBIT_FIRMWARE_MD5SUM" ]; then
+		ilog "eMMC Firmware file is corrupted: $EMMC_SWISSBIT_FIRMWARE"
+		return
+	fi
+
+	# Update eMMC Firmware
+	cmd="mmc ffu $EMMC_SWISSBIT_FIRMWARE /dev/mmcblk0"
+	ilog "Runnning: $cmd"
+	output=$(eval $cmd 2>&1)
+	rc=$?
+	ilog "$output"
+	if [ $rc -eq 0 ]; then
+		ilog "eMMC Firmware was updated successfully"
+		ilog "A system power cycle is required to apply the new eMMC firmware"
+		sync
+		rmmod sdhci_of_dwcmshc
+		modprobe sdhci_of_dwcmshc
+	else
+		ilog "ERROR: Failed to update eMMC Firmware. Status: $rc"
+	fi
+
+	return
+}
 extract_os_image()
 {
 	if [ ! -e $fspath/image.tar.xz ]; then
@@ -252,10 +294,12 @@ BOOT1_DESC='debian0'
 BOOT1_DEVPATH='\\EFI\\debian\\grubaa64.efi'
 BOOT2=NET-NIC_P0-IPV6
 BOOT3=NET-NIC_P1-IPV6
-BOOT4=NET-NIC_P0-IPV4
-BOOT5=NET-NIC_P1-IPV4
-BOOT6=UEFI_SHELL
-BOOT6_ARGS='ATTR=INACTIVE'
+BOOT4=NET-OOB-IPV6
+BOOT5=NET-NIC_P0-IPV4
+BOOT6=NET-NIC_P1-IPV4
+BOOT7=NET-OOB-IPV4
+BOOT8=UEFI_SHELL
+BOOT8_ARGS='ATTR=INACTIVE'
 PXE_DHCP_CLASS_ID=$DHCP_CLASS_ID
 EOF
 	else
@@ -689,10 +733,115 @@ install_dpu_os()
 	log "INFO: $distro installation completed"
 }
 
+calculate_total_weight()
+{
+	step_weights["install_setup"]=1
+
+	if [ "$UPDATE_DPU_OS" == "yes" ]; then
+		step_weights["dpu_os"]=40
+	fi
+
+	if [ "$UPDATE_ATF_UEFI" == "yes" ]; then
+		step_weights["atf_uefi"]=1
+	fi
+
+	if [ "$WITH_NIC_FW_UPDATE" == "yes" ]; then
+		step_weights["nic_firmware"]=10
+	fi
+
+	if [[ ! -z "$BMC_USER" && ! -z "$BMC_PASSWORD" ]]; then
+		if [[ ! -z "$UEFI_PASSWORD" && ! -z "$NEW_UEFI_PASSWORD" ]]; then
+			step_weights["uefi_password"]=5
+		fi
+		if [ ! -z "$NEW_BMC_PASSWORD" ]; then
+			step_weights["bmc_password"]=5
+		fi
+		if [ "$UPDATE_BMC_FW" == "yes" ]; then
+			step_weights["bmc_fw"]=200
+		fi
+		if [ "$UPDATE_CEC_FW" == "yes" ]; then
+			step_weights["cec_fw"]=5
+		fi
+		if [ "$UPDATE_DPU_GOLDEN_IMAGE" == "yes" ]; then
+			step_weights["dpu_golden_image"]=60
+		fi
+		if [ "$UPDATE_NIC_FW_GOLDEN_IMAGE" == "yes" ]; then
+			step_weights["nic_firmware_golden_image"]=60
+		fi
+	fi
+
+	for weight in "${step_weights[@]}"; do
+		((total_weight += weight))
+	done
+}
+
+step2str()
+{
+	case "$1" in
+	"install_setup")
+		echo "BFB Installation Environment"
+	;;
+	"dpu_os")
+		echo "DPU OS"
+	;;
+	"atf_uefi")
+		echo "ARM Capsule"
+	;;
+	"nic_firmware")
+		echo "NIC FW"
+	;;
+	"uefi_password")
+		echo "UEFI Password"
+	;;
+	"bmc_password")
+		echo "BMC Password"
+	;;
+	"bmc_fw")
+		echo "BMC Image"
+	;;
+	"cec_fw")
+		echo "Glacier Image"
+	;;
+	"dpu_golden_image")
+		echo "DPU Golden Image"
+	;;
+	"nic_firmware_golden_image")
+		echo "NIC FW Golden Image"
+	;;
+	esac
+}
+
+update_progress()
+{
+    local step=$1
+	local status=$2
+    local weight=${step_weights[$step]}
+
+	if [ $weight -eq 0 ]; then
+		return
+	fi
+    ((current_progress += weight))
+    local percentage=$((current_progress * 100 / total_weight))
+
+	if [ $status -eq 0 ]; then
+		status_str="passed"
+	else
+		status_str="failed"
+	fi
+
+	step_str=$(step2str $step)
+	printf "BFB-Installer: Installing %s %s, total %d%% complete" "$step_str" "$status_str" $percentage
+	ilog "BFB-Installer: Installing ${step_str} ${status_str}, total ${percentage}% complete"
+}
+
 global_installation_flow()
 {
+	calculate_total_weight
+	update_progress install_setup 0
+
 	if [ "$UPDATE_DPU_OS" == "yes" ]; then
 		install_dpu_os
+		update_progress dpu_os $?
 	fi
 
 	if function_exists bfb_custom_action1; then
@@ -702,6 +851,7 @@ global_installation_flow()
 
 	if [ "$UPDATE_ATF_UEFI" == "yes" ]; then
 		update_atf_uefi
+		update_progress atf_uefi $?
 	fi
 
 	if function_exists bmc_components_update; then
@@ -710,6 +860,7 @@ global_installation_flow()
 
 	if [ "$WITH_NIC_FW_UPDATE" == "yes" ]; then
 		update_nic_firmware
+		update_progress nic_firmware $?
 	fi
 
 	unmount_partitions
@@ -717,6 +868,10 @@ global_installation_flow()
 	if function_exists bfb_post_install; then
 		log "INFO: Running bfb_post_install from bf.cfg"
 		bfb_post_install
+	fi
+
+	if [ "$UPGRADE_EMMC_FIRMWARE" == "yes" ]; then
+		upgrade_emmc_fw
 	fi
 
 	log "INFO: Installation finished"
@@ -835,10 +990,28 @@ if [ "X${DEBUG}" == "Xyes" ]; then
 	fi
 fi
 
+EMMC_SWISSBIT_FIRMWARE="/lib/firmware/swissbit/emmc/FW_SFEM040GByED1TO-I-7G-11P-NVI.bin"
+EMMC_SWISSBIT_FIRMWARE_MD5SUM="4bc1c5a09bc778f1e7c1eae8c656779c"
 UPDATE_ATF_UEFI=${UPDATE_ATF_UEFI:-"yes"}
 UPDATE_DPU_OS=${UPDATE_DPU_OS:-"yes"}
+UPGRADE_EMMC_FIRMWARE=${UPGRADE_EMMC_FIRMWARE:-"yes"}
 WITH_NIC_FW_UPDATE=${WITH_NIC_FW_UPDATE:-"yes"}
 NIC_FW_UPDATE_PASSED=0
+
+total_weight=0
+current_progress=0
+declare -A step_weights
+step_weights["install_setup"]=0
+step_weights["dpu_os"]=0
+step_weights["atf_uefi"]=0
+step_weights["nic_firmware"]=0
+step_weights["uefi_password"]=0
+step_weights["bmc_password"]=0
+step_weights["bmc_fw"]=0
+step_weights["cec_fw"]=0
+step_weights["dpu_golden_image"]=0
+step_weights["nic_firmware_golden_image"]=0
+
 DHCP_CLASS_ID=${PXE_DHCP_CLASS_ID:-""}
 DHCP_CLASS_ID_OOB=${DHCP_CLASS_ID_OOB:-"NVIDIA/BF/OOB"}
 DHCP_CLASS_ID_DP=${DHCP_CLASS_ID_DP:-"NVIDIA/BF/DP"}

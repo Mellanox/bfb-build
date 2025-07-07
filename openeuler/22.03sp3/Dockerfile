@@ -23,6 +23,7 @@ RUN dnf install -y kernel-5.10.0-224.0.0.127.oe2203sp3.aarch64 kernel-devel-5.10
 RUN echo 'excludepkgs=OpenIPMI network-scripts-openvswitch' >> /etc/dnf/dnf.conf && \
     dnf -y clean all && \
     dnf --enablerepo='update,kubernetes,doca' --exclude='mlxbf-bootimages*' --exclude='kernel' --exclude='kernel-devel' -y update && \
+    dnf --enablerepo='update,kubernetes,doca' --exclude='mlxbf-bootimages*' --exclude='kernel' --exclude='kernel-devel' -y install systemd && \
     dnf --enablerepo='update,kubernetes,doca' --exclude='mlxbf-bootimages*' --exclude='kernel' --exclude='kernel-devel' -y install \
         acpid \
         audit \
@@ -58,6 +59,7 @@ RUN echo 'excludepkgs=OpenIPMI network-scripts-openvswitch' >> /etc/dnf/dnf.conf
         lsof \
         ltrace \
         lvm2 \
+        https://www.rpmfind.net/linux/opensuse/distribution/leap/15.5/repo/oss/aarch64/mmc-utils-0.1+git.20220208-bp155.1.12.aarch64.rpm \
         mstflint \
         net-tools \
         NetworkManager \
@@ -92,10 +94,10 @@ RUN echo 'excludepkgs=OpenIPMI network-scripts-openvswitch' >> /etc/dnf/dnf.conf
         watchdog \
         wget \
         xfsprogs \
-        https://linux.mellanox.com/public/repo/bluefield/latest/extras/addons/libmd-1.1.0-1.el8.aarch64.rpm \
-        https://linux.mellanox.com/public/repo/bluefield/latest/extras/addons/libmd-devel-1.1.0-1.el8.aarch64.rpm \
-        https://linux.mellanox.com/public/repo/bluefield/latest/extras/addons/libbsd-devel-0.12.2-1.el8.aarch64.rpm \
-        https://linux.mellanox.com/public/repo/bluefield/latest/extras/addons/libbsd-0.12.2-1.el8.aarch64.rpm \
+        https://linux.mellanox.com/public/repo/bluefield/4.9.1-13442/extras/addons/libmd-1.1.0-1.el8.aarch64.rpm \
+        https://linux.mellanox.com/public/repo/bluefield/4.9.1-13442/extras/addons/libmd-devel-1.1.0-1.el8.aarch64.rpm \
+        https://linux.mellanox.com/public/repo/bluefield/4.9.1-13442/extras/addons/libbsd-devel-0.12.2-1.el8.aarch64.rpm \
+        https://linux.mellanox.com/public/repo/bluefield/4.9.1-13442/extras/addons/libbsd-0.12.2-1.el8.aarch64.rpm \
 #DOCA Packages
         doca-runtime \
         doca-devel \

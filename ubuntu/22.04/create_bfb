@@ -77,7 +77,15 @@ initramfs=$(realpath $initramfs)
 initramfs=$WDIR/dump-initramfs-v0
 
 ADD_DRIVERS=""
-for mod in mlxbf-bootctl sdhci-of-dwcmshc mlxbf-tmfifo dw_mmc-bluefield mlx5_core mlx5_ib mlxfw ib_umad nvme gpio-mlxbf2 gpio-mlxbf3 mlxbf-gige pinctrl-mlxbf3 8021q
+for mod in mlxbf-bootctl dw_mmc dw_mmc-pltfm mmc_block dw_mmc-bluefield \
+	sdhci sdhci-of-dwcmshc mlxbf-tmfifo \
+	mlx5_core mlx5_ib mlxfw ib_umad nvme \
+	nvme-rdma nvme-tcp ib_ipoib ib_iser \
+	mst_pci mst_pciconf bf3_livefish \
+	gpio-mlxbf2 gpio-mlxbf3 mlxbf-gige \
+	pinctrl-mlxbf3 8021q \
+	ipmi_devintf ipmb_host ipmi_ssif i2c-mlxbf \
+	nls_iso8859-1 $ADDON_KERNEL_MODULES
 do
 	if (modinfo -k $kernel $mod 2>/dev/null | grep "filename:" | grep -q builtin); then
 		continue
@@ -144,43 +152,12 @@ copy_file()
 	done
 }
 
-module_exist()
-{
-	mod=$(find ./lib/modules/$kernel -name "${1}.ko*" 2> /dev/null)
-	test -n "$mod"
-	return $?
-}
-
-copy_module()
-{
-	if module_exist $1; then
-		return
-	fi
-
-	if (modinfo -k $kernel $1 2>/dev/null | grep "filename:" | grep -q builtin); then
-		return
-	fi
-
-	if ! (modinfo -k $kernel $1 2>/dev/null); then
-		return
-	fi
-
-	for mod in $(modinfo -F depends -k $kernel $1 | tr -s ',' ' ')
-	do
-		copy_module $mod
-	done
-
-	mod_ko=$(modinfo -F filename -k $kernel $1)
-	mkdir -p ./$(dirname ${mod_ko})
-	sudo cp ${mod_ko} ./${mod_ko}
-}
-
 (cd usr/bin; sudo ln -s xz xzcat)
 cp $(readlink -f /usr/bin/which) ./usr/bin/which
 
 for tool in xz efibootmgr bash getopt hexdump mstflint lspci \
 		lsblk watchdog shutdown systemctl strings aarch64-linux-gnu-strings \
-		mlxbf-bootctl id dirname curl openssl parted jq mlnx_bf_configure $ADDON_TOOLS
+		mlxbf-bootctl id dirname curl openssl parted jq mlnx_bf_configure xxd cmp $ADDON_TOOLS
 do
 	if [ -d $tool ]; then
 		continue
@@ -197,13 +174,16 @@ libpython3_minimal=$(dpkg -S /usr/lib/python3*/os.py | head -1 | cut -d ':' -f 1
 libpython3=$(dpkg -S /usr/lib/aarch64-linux-gnu/libpython3.*.so.1 | head -1 | cut -d ':' -f 1 | tr -d ',')
 python3_distutils=$(dpkg -S /usr/lib/python3.*/distutils | head -1 | cut -d ':' -f 1 | tr -d ',')
 python3_lib2to3=$(dpkg -S /usr/lib/python3.*/lib2to3 | head -1 | cut -d ':' -f 1 | tr -d ',')
+python_bin=$(readlink -f /usr/bin/python)
+python_deb=$(dpkg -S $python_bin | head -1 | cut -d ':' -f 1 | tr -d ',')
+python_ver=$(python -V | cut -d ' ' -f 2 | cut -d '.' -f1,2)
 
 for deb in mlxbf-scripts mft mft-oem dosfstools e2fsprogs fdisk kmod pciutils \
 		   usbutils tar coreutils nvme-cli mmc-utils iputils-ping uuid-runtime \
 		   sshpass openssh-client util-linux ipmitool procps debianutils \
 		   iproute2 findutils perl-base $libperl $perl_modules \
-		   $libpython3_minimal $python3_distutils $python3_lib2to3 $python3 \
-		   $libpython3 bsdutils libexpat1 wget net-tools isc-dhcp-client $ADDON_DEBS
+		   $libpython3_minimal $python3_distutils $python3_lib2to3 $python3 $python_deb \
+		   $libpython3 bsdutils libexpat1 wget net-tools isc-dhcp-client hostname $ADDON_DEBS
 do
 	for pfile in $(dpkg -L $deb)
 	do
@@ -229,21 +209,14 @@ do
 	done
 done
 
-for mod in mlxbf_tmfifo dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block sdhci sdhci-of-dwcmshc nvme-rdma nvme-tcp nvme mlx5_ib mlxfw ib_umad ib_ipoib ib_iser mst_pci mst_pciconf bf3_livefish ipmi_devintf ipmb_host ipmi_ssif i2c-mlxbf nls_iso8859-1 $ADDON_KERNEL_MODULES
-do
-	copy_module $mod
-done
-sudo depmod -a -b ./ $kernel
-
 sudo mkdir -p usr/share/misc/ bin/ var/log/watchdog
 sudo cp /usr/share/misc/pci.ids usr/share/misc/
 sudo cp /etc/watchdog.conf etc
 if ! [ -e usr/bin/python ]; then
-	if [ -e usr/bin/python3.8 ]; then
-		ln -s python3.8 usr/bin/python
-	else
-		ln -s python3.10 usr/bin/python
-	fi
+	ln -s python${python_ver} usr/bin/python
+fi
+if ! [ -e usr/bin/python3 ]; then
+	ln -s python${python_ver} usr/bin/python3
 fi
 
 # Make sure we can load mlx-bootctl
@@ -297,6 +270,16 @@ fi
 /bin/rm -f ./etc/hostname
 echo localhost > /etc/hostname
 
+touch ./etc/fstab
+
+# Prevent the modules from loading automatically by blacklisting them
+cat > ./etc/modprobe.d/blacklist-mlx5.conf << EOF
+blacklist mlx5_core
+blacklist mlx5_ib
+blacklist mlxfw
+blacklist ib_umad
+EOF
+
 ex mkdir -p ubuntu
 # Tar the image
 XZ_OPT="--threads=0 -9 --verbose" tar -cJp --exclude='./workspace' --exclude='./signing-local' --exclude='./signing-shared' --exclude='./var/run/docker.sock' --exclude='./root/workspace' --exclude='./tmp/*' --exclude='./run/*' --exclude='./sys/*' --exclude='./proc/*' --exclude='./dev/*' --exclude='./.dockerenv' --exclude='./root/.bash_history' --exclude='./var/tmp/*' --exclude='./bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-arm-static' --exclude='./var/cache/apt/*' --exclude='./var/lib/apt/lists/*' -f ./ubuntu/image.tar.xz -C / .
@@ -318,8 +301,6 @@ modprobe mlxbf_tmfifo > /dev/null 2>&1
 modprobe -a ipmi_msghandler ipmi_devintf i2c-mlxbf
 modprobe ipmb_host slave_add=0x10
 echo ipmb-host 0x1011 > /sys/bus/i2c/devices/i2c-1/new_device
-modprobe -a mlx5_ib mlxfw ib_umad
-modprobe nvme > /dev/null 2>&1
 insmod /mlx-bootctl.ko > /dev/null 2>&1
 insmod /sbsa_gwdt.ko > /dev/null 2>&1
 /usr/sbin/watchdog > /dev/null 2>&1
@@ -334,6 +315,7 @@ if [ \$? -eq 0 ]; then
 	printf_msg "Installation finished. Rebooting..."
 	printf_msg "==================================="
 	printf_msg
+	sleep 3
 	reboot -f
 else
 	printf_msg "========================"

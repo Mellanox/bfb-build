@@ -1,5 +1,7 @@
-#  docker build -t bfb_runtime_ubuntu22.04 -f Dockerfile .
 FROM scratch
+
+ENV DEBIAN_FRONTEND="noninteractive" FLASH_KERNEL_SKIP="yes" RUN_FW_UPDATER="no"
+
 ADD jammy-server-cloudimg-arm64-root.tar.xz /
 ADD qemu-aarch64-static /usr/bin/
 RUN mkdir -p /opt/mellanox/doca/services/
@@ -19,9 +21,6 @@ ADD create_bfb .
 ADD build_ubuntu_bfb .
 ADD mlxbf-bootimages.deb .
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV FLASH_KERNEL_SKIP=yes
-ENV RUN_FW_UPDATER=no
 
 # Avoid running flash-kernel post install
 RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
@@ -36,11 +35,8 @@ RUN apt install -y docker.io; systemctl disable docker.service || true; systemct
 RUN apt install -y qemu-user-static qemu-utils qemu-user
 RUN apt install -y python3-pip
 RUN apt install -y build-essential
-RUN apt install -y libpam-pwquality; \
-	sed -i -r -e "s/# minlen =.*/minlen = 12/" /etc/security/pwquality.conf; \
-	sed -i -e '/use_authtok/ipassword\trequired\t\t\tpam_pwhistory.so  remember=3' /etc/pam.d/common-password; \
-	sed -i -r -e "s/# silent/silent/;s/# deny.*/deny = 10/;s/# unlock_time.*/unlock_time = 600/" /etc/security/faillock.conf
-RUN apt install -y python3.10 python3-pyinotify
+RUN apt install -y libpam-pwquality; echo "minlen = 8" >> /etc/security/pwquality.conf; echo "minclass = 3" >> /etc/security/pwquality.conf
+RUN apt install -y python2.7 python3.10 python3-pyinotify
 
 # Grub password
 RUN echo 'set superusers="admin"' >> /etc/grub.d/40_custom; \
@@ -49,19 +45,21 @@ RUN echo 'set superusers="admin"' >> /etc/grub.d/40_custom; \
 	       -e "s@'gnulinux-\$version-\$type-\$boot_device_id'@'gnulinux-\$version-\$type-\$boot_device_id' --users ''@" /etc/grub.d/10_linux
 
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python2.7 10
 
-RUN mkdir -p -m 755 /etc/apt/keyrings/
-RUN curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-RUN echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+RUN echo "deb [signed-by=/etc/apt/keyrings/kubernetes.asc] https://pkgs.k8s.io/core:/stable:/v1.25/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+RUN mkdir -p /etc/apt/keyrings/
+ADD --chown=0:0 --chmod=644 https://prod-cdn.packages.k8s.io/repositories/isv:/kubernetes:/core:/stable:/v1.30/deb/Release.key /etc/apt/keyrings/kubernetes.asc
 
 RUN wget -qO - $BASE_URL/doca/GPG-KEY-Mellanox.pub | sudo apt-key add -
+
 
 RUN apt update
 # Install Libvirt+QEMU+KVM
 RUN apt install -y bridge-utils cpu-checker libvirt-clients libvirt-daemon qemu qemu-kvm
 RUN apt upgrade -y
-RUN apt install -y containerd=1.7.12-0ubuntu2~22.04.1 runc
-RUN apt install -y kubelet=1.29.3-1.1 kubernetes-cni=1.3.0-1.1 cri-tools=1.29.0-1.1 kubeadm=1.29.3-1.1
+RUN apt install -y --allow-downgrades containerd=1.7.24-0ubuntu1~22.04.2 runc
+RUN apt install -y kubelet cri-tools kubernetes-cni
 RUN rm -f /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf
 RUN apt-mark hold kubelet cri-tools kubernetes-cni kubeadm
 RUN echo "deb [trusted=yes] ${BASE_URL}/doca/${DOCA_VERSION}/${DISTRO}${DISTRO_VERSION}/arm64-dpu/ /" | sudo tee /etc/apt/sources.list.d/doca.base.list
@@ -73,19 +71,19 @@ RUN apt remove -y --purge $(dpkg --list "*openipmi*" | grep openipmi | awk '{pri
 RUN apt install -y -f $MLNX_FW_UPDATER
 
 RUN apt install -y -f \
-	linux-bluefield=5.15.0.1045.47 \
-	linux-bluefield-cloud-tools-common=5.15.0-1045.47 \
-	linux-bluefield-headers-5.15.0-1045=5.15.0-1045.47 \
-	linux-bluefield-tools-5.15.0-1045=5.15.0-1045.47 \
-	linux-buildinfo-5.15.0-1045-bluefield=5.15.0-1045.47 \
-	linux-headers-5.15.0-1045-bluefield=5.15.0-1045.47 \
-	linux-headers-bluefield=5.15.0.1045.47 \
-	linux-image-5.15.0-1045-bluefield=5.15.0-1045.47 \
-	linux-image-bluefield=5.15.0.1045.47 \
-	linux-modules-5.15.0-1045-bluefield=5.15.0-1045.47 \
-	linux-modules-extra-5.15.0-1045-bluefield=5.15.0-1045.47 \
-	linux-tools-5.15.0-1045-bluefield=5.15.0-1045.47 \
-	linux-tools-bluefield=5.15.0.1045.47
+	linux-bluefield=5.15.0.1069.71 \
+	linux-bluefield-cloud-tools-common=5.15.0-1069.71 \
+	linux-bluefield-headers-5.15.0-1069=5.15.0-1069.71 \
+	linux-bluefield-tools-5.15.0-1069=5.15.0-1069.71 \
+	linux-buildinfo-5.15.0-1069-bluefield=5.15.0-1069.71 \
+	linux-headers-5.15.0-1069-bluefield=5.15.0-1069.71 \
+	linux-headers-bluefield=5.15.0.1069.71 \
+	linux-image-5.15.0-1069-bluefield=5.15.0-1069.71 \
+	linux-image-bluefield=5.15.0.1069.71 \
+	linux-modules-5.15.0-1069-bluefield=5.15.0-1069.71 \
+	linux-modules-extra-5.15.0-1069-bluefield=5.15.0-1069.71 \
+	linux-tools-5.15.0-1069-bluefield=5.15.0-1069.71 \
+	linux-tools-bluefield=5.15.0.1069.71
 
 RUN apt install -y -f doca-runtime doca-sdk doca-tools mlx-openipmi || true
 RUN apt --fix-broken install -y || true
@@ -115,6 +113,7 @@ RUN systemctl disable docker.service || true
 RUN systemctl disable docker.socket || true
 RUN systemctl disable kubelet.service || true
 RUN systemctl disable containerd.service || true
+RUN systemctl disable mosquitto.service || true
 RUN systemctl disable ModemManager.service || true
 
 RUN /usr/sbin/update-pciids || true

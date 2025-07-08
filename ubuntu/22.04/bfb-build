@@ -43,9 +43,9 @@ DISTRO="ubuntu"
 DISTRO_VERSION="22.04"
 DISTRO_BASE_URL="https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-arm64-root.tar.xz"
 ARCH=${ARCH:-"arm64-dpu"}
-DOCA_VERSION="2.5.2"
-BSP_VERSION="4.5.2-13210"
-MLNX_OFED_VERSION="23.10-3.2.1.1"
+DOCA_VERSION="2.5.4"
+BSP_VERSION="4.5.4-13669"
+MLNX_OFED_VERSION="23.10-5.1.4.0"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-""}
 

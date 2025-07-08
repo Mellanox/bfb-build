@@ -38,22 +38,26 @@ LOG=/tmp/$logfile
 
 fspath=$(readlink -f "$(dirname $0)")
 
-log()
+rlog()
 {
-	msg="[$(date +%H:%M:%S)] $*"
-	echo "$msg" > /dev/ttyAMA0
-	echo "$msg" > /dev/hvc0
+	msg=$(echo "$*" | sed 's/INFO://;s/ERROR:/ERR/;s/WARNING:/WARN/')
 	if [ -n "$rshimlog" ]; then
-		$rshimlog "$*"
+		$rshimlog "$msg"
 	fi
-	echo "$msg" >> $LOG
 }
 
 ilog()
 {
 	msg="[$(date +%H:%M:%S)] $*"
 	echo "$msg" >> $LOG
-	echo "$msg"
+	echo "$msg" > /dev/ttyAMA0
+	echo "$msg" > /dev/hvc0
+}
+
+log()
+{
+	ilog "$*"
+	rlog "$*"
 }
 
 save_log()
@@ -69,6 +73,13 @@ EOF
 	fi
 	cp $LOG /mnt/root
 	umount /mnt
+}
+
+load_module()
+{
+	local mod=$1
+
+	modprobe $mod
 }
 
 fw_update()
@@ -98,8 +109,27 @@ fw_update()
 
 fw_reset()
 {
-	ilog "Running mlnx_bf_configure:"
-	ilog "$(chroot /mnt /sbin/mlnx_bf_configure)"
+	if [ $is_nic_mode -eq 1 ]; then
+		log "Run mlxfwreset or reboot from the Host to load new NIC firmware"
+		return
+	fi
+
+	/sbin/modprobe -a mlx5_core ib_umad
+
+	run_mlnx_bf_configure=0
+	if [ -x /mnt/sbin/mlnx_bf_configure ]; then
+		CHROOT="chroot /mnt"
+		run_mlnx_bf_configure=1
+	elif [ -x /sbin/mlnx_bf_configure ]; then
+		run_mlnx_bf_configure=1
+	else
+		run_mlnx_bf_configure=0
+	fi
+
+	if [ $run_mlnx_bf_configure -eq 1 ]; then
+		ilog "Running mlnx_bf_configure:"
+		ilog "$($CHROOT /sbin/mlnx_bf_configure)"
+	fi
 
 	MLXFWRESET_TIMEOUT=${MLXFWRESET_TIMEOUT:-180}
 	SECONDS=0
@@ -136,14 +166,31 @@ fw_reset()
 
 hwclock -w
 
+# Check NIC mode
+is_nic_mode=0
+cx_pcidev=$(lspci -nD 2> /dev/null | grep 15b3:a2d[26c] | awk '{print $1}' | head -1)
+str=$(mlxconfig -d $cx_pcidev -e q INTERNAL_CPU_OFFLOAD_ENGINE 2>/dev/null | grep INTERNAL_CPU_OFFLOAD_ENGINE | awk '{print $(NF-1)}')
+
+if [ ."$str" = ."DISABLED(1)" ]; then
+	is_nic_mode=1
+fi
+
+if [ $is_nic_mode -eq 0 ]; then
+	load_module mlx5_core
+	load_module mlx5_ib
+	load_module mlxfw
+	load_module ib_umad
+	load_module nvme
+fi
+
 #
 # Check auto configuration passed from boot-fifo
 #
 boot_fifo_path="/sys/bus/platform/devices/MLNXBF04:00/bootfifo"
 if [ -e "${boot_fifo_path}" ]; then
 	cfg_file=$(mktemp)
-	# Get 16KB assuming it's big enough to hold the config file.
-	dd if=${boot_fifo_path} of=${cfg_file} bs=4096 count=4 > /dev/null 2>&1
+	# Get 128KB assuming it's big enough to hold the config file.
+	dd if=${boot_fifo_path} of=${cfg_file} bs=4096 count=32 > /dev/null 2>&1
 
 	#
 	# Check the .xz signature {0xFD, '7', 'z', 'X', 'Z', 0x00} and extract the
@@ -444,6 +491,8 @@ install_os_image()
 	sleep 1
 	blockdev --rereadpt ${device} > /dev/null 2>&1
 
+	tune2fs -o journal_data $ROOT_PARTITION
+
 	mkdir -p /mnt
 	mount -t ${ROOTFS} $ROOT_PARTITION /mnt
 	mkdir -p /mnt/boot/efi
@@ -723,7 +772,13 @@ blockdev --rereadpt ${device} > /dev/null 2>&1
 sync
 
 ilog "Updating ATF/UEFI:"
-ilog "$(bfrec --bootctl || true)"
+efivars=/sys/firmware/efi/efivars
+test "$(ls -A $efivars)" || mount -t efivarfs efivarfs $efivars
+if [ ! -e "$efivars/PK-8be4df61-93ca-11d2-aa0d-00e098032b8c" ]; then
+	# Secure Boot is disabled
+	ilog "$(bfrec --bootctl || true)"
+fi
+
 if [ -e /lib/firmware/mellanox/boot/capsule/boot_update2.cap ]; then
 	ilog "$(bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap)"
 fi

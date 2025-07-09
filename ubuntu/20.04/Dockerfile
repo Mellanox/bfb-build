@@ -19,6 +19,7 @@ ENV RUN_FW_UPDATER=no
 RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
 
 RUN apt update
+RUN apt upgrade -y
 RUN apt remove --purge -y snapd plymouth
 RUN apt autoremove -y
 RUN apt install -y watchdog binutils sbsigntool rasdaemon net-tools nfs-common iptables-persistent rsync tcpdump nvme-cli iputils-arping iputils-ping iputils-tracepath bridge-utils iperf3 bc lm-sensors ifenslave acpid network-manager kexec-tools i2c-tools dc lldpad unzip sysstat mmc-utils uuid ntp jq libev4 conntrack wget
@@ -31,8 +32,6 @@ RUN apt install -y build-essential
 RUN apt install -y libpam-pwquality; echo "minlen = 8" >> /etc/security/pwquality.conf; echo "minclass = 3" >> /etc/security/pwquality.conf
 RUN apt install -y python2.7 python3.8 python3-pyinotify
 
-#line below was commented out due to missmatch between versions coming from focal-proposed
-#RUN echo 'deb http://ports.ubuntu.com/ubuntu-ports focal-proposed main restricted universe multiverse' >> /etc/apt/sources.list
 RUN apt update
 RUN apt install -y grub-efi-arm64-signed grub-efi-arm64-bin shim-signed
 RUN perl -ni -e 'print unless /focal-proposed/' /etc/apt/sources.list
@@ -49,32 +48,33 @@ RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.8 1
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python2.7 10
 
 RUN mkdir -p -m 755 /etc/apt/keyrings/
-RUN echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.25/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+RUN echo "deb [signed-by=/etc/apt/keyrings/kubernetes.asc] https://pkgs.k8s.io/core:/stable:/v1.25/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list
 RUN mkdir -p /etc/apt/keyrings/
-RUN curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.25/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+ADD --chown=0:0 --chmod=644 https://prod-cdn.packages.k8s.io/repositories/isv:/kubernetes:/core:/stable:/v1.30/deb/Release.key /etc/apt/keyrings/kubernetes.asc
 RUN apt update
 # Install Libvirt+QEMU+KVM
-RUN apt install -y cpu-checker libvirt-clients libvirt-daemon qemu qemu-kvm
+RUN apt install -y bridge-utils cpu-checker libvirt-clients libvirt-daemon qemu qemu-kvm
 RUN apt install -y kubelet=1.25.16-1.1 runc containerd cri-tools=1.26.0-1.1 kubernetes-cni=1.2.0-2.1
 RUN apt-mark hold kubelet cri-tools kubernetes-cni
-RUN wget -qO - $BASE_URL/doca/$DOCA_VERSION/GPG-KEY-Mellanox.pub | sudo apt-key add -
+RUN wget -qO - $BASE_URL/doca/$DOCA_VERSION/ubuntu20.04/arm64-dpu/GPG-KEY-Mellanox.pub | sudo apt-key add -
 RUN echo "deb [trusted=yes] ${BASE_URL}/doca/${DOCA_VERSION}/ubuntu20.04/arm64-dpu/ ./" | sudo tee /etc/apt/sources.list.d/doca.base.list
 RUN apt update || true
 
-RUN apt install -y -f \
-    linux-bluefield=5.4.0.1087.83 \
-    linux-bluefield-headers-5.4.0-1087=5.4.0-1087.94 \
-    linux-bluefield-tools-5.4.0-1087=5.4.0-1087.94 \
-    linux-headers-5.4.0-1087-bluefield=5.4.0-1087.94 \
-    linux-headers-bluefield=5.4.0.1087.83 \
-    linux-image-5.4.0-1087-bluefield=5.4.0-1087.94 \
-    linux-image-bluefield=5.4.0.1087.83 \
-    linux-libc-dev:arm64 \
-    linux-modules-5.4.0-1087-bluefield=5.4.0-1087.94 \
-    linux-tools-5.4.0-1087-bluefield=5.4.0-1087.94 \
-    linux-tools-bluefield=5.4.0.1087.83 \
-    linux-tools-common
+RUN dpkg -i bootimages/mlxbf-bootimages.deb
 
+RUN apt install -y -f \
+    linux-bluefield=5.4.0.1105.101 \
+    linux-bluefield-headers-5.4.0-1105=5.4.0-1105.112 \
+    linux-bluefield-tools-5.4.0-1105=5.4.0-1105.112 \
+    linux-headers-5.4.0-1105-bluefield=5.4.0-1105.112 \
+    linux-headers-bluefield=5.4.0.1105.101 \
+    linux-image-5.4.0-1105-bluefield=5.4.0-1105.112 \
+    linux-image-bluefield=5.4.0.1105.101 \
+    linux-libc-dev:arm64 \
+    linux-modules-5.4.0-1105-bluefield=5.4.0-1105.112 \
+    linux-tools-5.4.0-1105-bluefield=5.4.0-1105.112 \
+    linux-tools-bluefield=5.4.0.1105.101 \
+    linux-tools-common
 
 RUN apt install -y -f doca-runtime doca-tools doca-sdk || true
 RUN apt --fix-broken install -y || true
@@ -83,7 +83,6 @@ RUN apt update || true
 RUN /usr/sbin/dpkg-reconfigure bf-release || true
 RUN mkdir -p /etc/kubelet.d
 RUN mkdir -p /workspace
-RUN dpkg -i bootimages/mlxbf-bootimages*_arm64.deb
 RUN /bin/rm -f /etc/ssh/sshd_config.d/60-cloudimg-settings.conf || true
 RUN /bin/rm -f /etc/default/grub.d/50-cloudimg-settings.cfg || true
 
@@ -108,6 +107,7 @@ RUN systemctl disable docker.socket || true
 RUN systemctl disable kubelet.service || true
 RUN systemctl disable containerd.service || true
 RUN systemctl disable mosquitto.service || true
+RUN systemctl disable ztp.service || true
 
 RUN /usr/sbin/update-pciids || true
 
@@ -131,4 +131,4 @@ RUN mkdir -p /boot/efi/EFI/ubuntu/; \
 
 RUN sed -i -e "s/signed/@IMAGE_TYPE@@CUSTOM_VERSION@/" /etc/mlnx-release
 
-CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1087-bluefield"]
+CMD ["/root/workspace/create_bfb", "-k", "5.4.0-1105-bluefield"]

@@ -39,19 +39,34 @@ if ! (which docker > /dev/null 2>&1); then
 	exit 1
 fi
 
-DISTRO="openEuler"
-DISTRO_VERSION="20.03-LTS"
-DOCA_VERSION="1.5.3"
-BSP_VERSION="3.9.8-13147"
+DISTRO="openeuler"
+DISTRO_VERSION="20.03sp1"
+ARCH=${ARCH:-"aarch64"}
+DOCA_VERSION="1.5.5"
+BSP_VERSION="3.9.10-13665"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 
 WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
 BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
 
 mkdir -p $WDIR
-
+echo "Downloading bootimages..."
 mkdir -p $WDIR/bootimages
-wget -P $WDIR/bootimages -r --no-verbose --no-directories -l1 --no-parent -A 'mlxbf-bootimages*.aarch64.rpm' ${BASE_URL}/bluefield/${BSP_VERSION}/bootimages/${IMAGE_TYPE}/
+
+case "$IMAGE_TYPE" in
+	prod)
+		bootimages="mlxbf-bootimages-signed-${BSP_VERSION}.aarch64.rpm"
+		;;
+	dev)
+		bootimages="mlxbf-bootimages-devsigned-${BSP_VERSION}.aarch64.rpm"
+		;;
+	unsigned)
+		bootimages="mlxbf-bootimages-${BSP_VERSION}.aarch64.rpm"
+		;;
+esac
+
+wget -q -P $WDIR/bootimages/ ${BASE_URL}/doca/${DOCA_VERSION}/${DISTRO}${DISTRO_VERSION}/${ARCH}/$bootimages
+mv $WDIR/bootimages/mlxbf-bootimages*aarch64.rpm $WDIR/bootimages/mlxbf-bootimages.rpm
 
 cp	Dockerfile \
 	create_bfb \

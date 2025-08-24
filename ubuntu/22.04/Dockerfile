@@ -21,7 +21,7 @@ ADD mlxbf-bootimages.deb .
 ADD 10-mlx-console-messages.conf /etc/sysctl.d/
 ADD repos/ /etc/apt/sources.list.d/
 ADD apt-preferences /etc/apt/preferences.d/99doca
-ADD --chown=0:0 --chmod=644 https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key /etc/apt/keyrings/kubernetes.asc
+ADD --chown=0:0 --chmod=644 https://prod-cdn.packages.k8s.io/repositories/isv:/kubernetes:/core:/stable:/v1.33/deb/Release.key /etc/apt/keyrings/kubernetes.asc
 
 RUN apt update
 RUN dpkg -i /root/workspace/mlxbf-bootimages*.deb
@@ -31,19 +31,19 @@ RUN apt remove -y --purge $(dpkg --list "*openipmi*" | grep openipmi | awk '{pri
 RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
 
 RUN apt install -y -f \
-	linux-bluefield=5.15.0.1065.67 \
-	linux-bluefield-cloud-tools-common=5.15.0-1065.67 \
-	linux-bluefield-headers-5.15.0-1065=5.15.0-1065.67 \
-	linux-bluefield-tools-5.15.0-1065=5.15.0-1065.67 \
-	linux-buildinfo-5.15.0-1065-bluefield=5.15.0-1065.67 \
-	linux-headers-5.15.0-1065-bluefield=5.15.0-1065.67 \
-	linux-headers-bluefield=5.15.0.1065.67 \
-	linux-image-5.15.0-1065-bluefield=5.15.0-1065.67 \
-	linux-image-bluefield=5.15.0.1065.67 \
-	linux-modules-5.15.0-1065-bluefield=5.15.0-1065.67 \
-	linux-modules-extra-5.15.0-1065-bluefield=5.15.0-1065.67 \
-	linux-tools-5.15.0-1065-bluefield=5.15.0-1065.67 \
-	linux-tools-bluefield=5.15.0.1065.67
+	linux-bluefield=5.15.0.1074.76 \
+	linux-bluefield-cloud-tools-common=5.15.0-1074.76 \
+	linux-bluefield-headers-5.15.0-1074=5.15.0-1074.76 \
+	linux-bluefield-tools-5.15.0-1074=5.15.0-1074.76 \
+	linux-buildinfo-5.15.0-1074-bluefield=5.15.0-1074.76 \
+	linux-headers-5.15.0-1074-bluefield=5.15.0-1074.76 \
+	linux-headers-bluefield=5.15.0.1074.76 \
+	linux-image-5.15.0-1074-bluefield=5.15.0-1074.76 \
+	linux-image-bluefield=5.15.0.1074.76 \
+	linux-modules-5.15.0-1074-bluefield=5.15.0-1074.76 \
+	linux-modules-extra-5.15.0-1074-bluefield=5.15.0-1074.76 \
+	linux-tools-5.15.0-1074-bluefield=5.15.0-1074.76 \
+	linux-tools-bluefield=5.15.0.1074.76
 
 RUN apt-get clean -y && \
     apt-get update -o "Acquire::https::Verify-Peer=false" -y && \
@@ -57,7 +57,6 @@ RUN apt-get clean -y && \
         plymouth \
     && \
     apt-get upgrade -y && \
-    apt-get install -y grub-efi-arm64-signed=1.187.6+2.06-2ubuntu14.4 && \
     apt-get install -y \
         acpid \
         bash-completion \
@@ -150,7 +149,7 @@ RUN apt-get clean -y && \
         ${BMC_FW_PACKAGES} \
         ${CEC_FW_PACKAGES} \
     && \
-    rm -rf /var/lib/apt/lists/* /root/workspace/doca-repo.deb /etc/default/grub.d/50-cloudimg-settings.cfg /etc/ssh/sshd_config.d/60-cloudimg-settings.conf /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf && \
+    rm -rf /etc/default/grub.d/50-cloudimg-settings.cfg /etc/ssh/sshd_config.d/60-cloudimg-settings.conf /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf && \
     truncate -s0 /etc/machine-id && \
     printf 'set superusers="admin"\n' >> /etc/grub.d/40_custom && \
     printf 'password_pbkdf2 admin grub.pbkdf2.sha512.10000.5EB1FF92FDD89BDAF3395174282C77430656A6DBEC1F9289D5F5DAD17811AD0E2196D0E49B49EF31C21972669D180713E265BB2D1D4452B2EA9C7413C3471C53.F533423479EE7465785CC2C79B637BDF77004B5CC16C1DDE806BCEA50BF411DE04DFCCE42279E2E1F605459F1ABA3A0928CE9271F2C84E7FE7BF575DC22935B1\n' >> /etc/grub.d/40_custom && \
@@ -192,11 +191,6 @@ RUN sed -i -e "s/FORCE_MODE=.*/FORCE_MODE=yes/" /etc/infiniband/openib.conf
 
 # Copy boot bits from rootfs to EFI partition
 RUN mkdir -p /boot/efi/EFI/ubuntu/; \
-# BUG: SW #4252041: [Hitachi][BF2] When BF2 is set to a time beyond 2038 and the bootloader is updated, the OS does not boot
-	# FIX: Use fixed and signed by Nvidia /usr/lib/grub/arm64-efi/monolithic/grubaa64.efi
-	cp /usr/lib/grub/arm64-efi/monolithic/grubaa64.efi \
-	/usr/lib/grub/arm64-efi-signed/grubaa64.efi.signed; \
-	# from now /usr/lib/grub/arm64-efi/monolithic/grubaa64.efi will be actually installed
 	cp /usr/lib/grub/arm64-efi-signed/grubaa64.efi.signed \
 	/boot/efi/EFI/ubuntu/grubaa64.efi; \
 	cp /usr/lib/grub/arm64-efi-signed/grubnetaa64.efi.signed \

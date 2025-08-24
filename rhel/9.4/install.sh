@@ -76,7 +76,7 @@ update_efi_bootmgr()
 		efivars_mount=1
 	fi
 
-	ilog "$(efibootmgr -c -d $device -p 1 -l '\EFI\redhat\grubaa64.efi' -L $distro 2>&1)"
+	ilog "$(efibootmgr -c -d $device -p 1 -l '\EFI\redhat\shimaa64.efi' -L $distro 2>&1)"
 
 	if [ $efivars_mount -eq 1 ]; then
 		umount /sys/firmware/efi/efivars

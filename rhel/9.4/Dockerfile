@@ -51,6 +51,8 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
         iperf3 \
         ipmitool \
         iproute-tc \
+        iptables-nft \
+        iptables-nft-services \
         jq \
         kexec-tools \
         kubeadm \

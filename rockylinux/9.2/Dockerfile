@@ -58,6 +58,10 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
         bind-utils \
         chrony \
         containerd.io \
+        cpp \
+        gcc \
+        libgcc \
+        libgomp \
         cri-tools \
         cryptsetup \
         curl \
@@ -137,6 +141,7 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
         mft-autocomplete \
         mstflint \
         strongswan \
+        kmod-gpio-mlxbf3 \
         ${MLNX_FW_UPDATER} \
         ${BMC_FW_PACKAGES} \
         ${CEC_FW_PACKAGES} \

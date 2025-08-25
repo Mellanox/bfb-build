@@ -24,12 +24,12 @@ gpgcheck=1 \n\
 enabled=1' > /etc/yum.repos.d/oracle-epel-ol8.repo
 
 #Kublet
-RUN echo -e '[kubernetes-1.30] \n\
+RUN echo -e '[kubernetes-1.33] \n\
 name=Kubernetes \n\
-baseurl=https://pkgs.k8s.io/core:/stable:/v1.30/rpm/ \n\
+baseurl=https://pkgs.k8s.io/core:/stable:/v1.33/rpm/ \n\
 gpgcheck=1 \n\
 enabled=1 \n\
-gpgkey=https://pkgs.k8s.io/core:/stable:/v1.30/rpm/repodata/repomd.xml.key \n' > /etc/yum.repos.d/kubernetes.repo
+gpgkey=https://pkgs.k8s.io/core:/stable:/v1.33/rpm/repodata/repomd.xml.key \n' > /etc/yum.repos.d/kubernetes.repo
 
 ADD docker-ce.repo /etc/yum.repos.d/docker-ce.repo
 

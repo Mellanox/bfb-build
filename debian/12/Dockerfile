@@ -16,7 +16,7 @@ ENV DEBIAN_FRONTEND="noninteractive" FLASH_KERNEL_SKIP="yes" RUN_FW_UPDATER="no"
 ADD repos/ /etc/apt/sources.list.d/
 ADD apt-preferences /etc/apt/preferences.d/99doca
 ADD --chown=0:0 --chmod=644 https://download.docker.com/linux/debian/gpg /etc/apt/keyrings/docker.asc
-ADD --chown=0:0 --chmod=644 https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key /etc/apt/keyrings/kubernetes.asc
+ADD --chown=0:0 --chmod=644 https://prod-cdn.packages.k8s.io/repositories/isv:/kubernetes:/core:/stable:/v1.33/deb/Release.key /etc/apt/keyrings/kubernetes.asc
 
 # Avoid running flash-kernel post install
 RUN mkdir -p /run/systemd; echo docker > /run/systemd/container

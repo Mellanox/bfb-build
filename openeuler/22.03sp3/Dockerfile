@@ -18,7 +18,7 @@ ADD repos/ /etc/yum.repos.d/
 
 RUN rpm -ihv --force bootimages/mlxbf-bootimages-*.aarch64.rpm || true
 
-RUN dnf install -y kernel-5.10.0-250.0.0.153.oe2203sp3.aarch64 kernel-devel-5.10.0-250.0.0.153.oe2203sp3.aarch64 kernel-headers-5.10.0-250.0.0.153.oe2203sp3.aarch64
+RUN dnf install -y kernel-5.10.0-266.0.0.168.oe2203sp3 kernel-devel-5.10.0-266.0.0.168.oe2203sp3 kernel-headers-5.10.0-266.0.0.168.oe2203sp3
 
 RUN echo 'excludepkgs=OpenIPMI network-scripts-openvswitch' >> /etc/dnf/dnf.conf && \
     dnf -y clean all && \

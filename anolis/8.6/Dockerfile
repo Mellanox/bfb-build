@@ -27,8 +27,8 @@ RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
     dnf --exclude='mlxbf-bootimages*,kernel*' -y install http://mirrors.openanolis.cn/anolis/8.6/BaseOS/aarch64/os/Packages/rasdaemon-0.6.1-12.0.2.an8.aarch64.rpm && \
     dnf -y install python3-dnf-plugin-versionlock && \
     dnf --exclude='mlxbf-bootimages*' -y install kernel-5.10.134-13.1.an8 kernel-devel-5.10.134-13.1.an8 kernel-headers-5.10.134-13.1.an8 && \
-    dnf versionlock add kernel-5.10.134-13.1.an8 kernel-devel-5.10.134-13.1.an8 kernel-headers-5.10.134-13.1.an8 && \
-    dnf --exclude='mlxbf-bootimages*,rasdaemon*,libtraceevent*' -y install \
+    dnf versionlock add kernel-5.10.134-13.1.an8 kernel-devel-5.10.134-13.1.an8 kernel-headers-5.10.134-13.1.an8 rasdaemon-0.6.1-12.0.2.an8 && \
+    dnf --exclude='mlxbf-bootimages*' -y install \
         acpid \
         audit \
         chkconfig \

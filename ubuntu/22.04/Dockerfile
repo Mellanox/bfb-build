@@ -31,19 +31,19 @@ RUN apt remove -y --purge $(dpkg --list "*openipmi*" | grep openipmi | awk '{pri
 RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
 
 RUN apt install -y -f \
-    linux-bluefield=5.15.0.1070.72 \
-    linux-bluefield-cloud-tools-common=5.15.0-1070.72 \
-    linux-bluefield-headers-5.15.0-1070=5.15.0-1070.72 \
-    linux-bluefield-tools-5.15.0-1070=5.15.0-1070.72 \
-    linux-buildinfo-5.15.0-1070-bluefield=5.15.0-1070.72 \
-    linux-headers-5.15.0-1070-bluefield=5.15.0-1070.72 \
-    linux-headers-bluefield=5.15.0.1070.72 \
-    linux-image-5.15.0-1070-bluefield=5.15.0-1070.72 \
-    linux-image-bluefield=5.15.0.1070.72 \
-    linux-modules-5.15.0-1070-bluefield=5.15.0-1070.72 \
-    linux-modules-extra-5.15.0-1070-bluefield=5.15.0-1070.72 \
-    linux-tools-5.15.0-1070-bluefield=5.15.0-1070.72 \
-    linux-tools-bluefield=5.15.0.1070.72
+    linux-bluefield=5.15.0.1074.76 \
+    linux-bluefield-cloud-tools-common=5.15.0-1074.76 \
+    linux-bluefield-headers-5.15.0-1074=5.15.0-1074.76 \
+    linux-bluefield-tools-5.15.0-1074=5.15.0-1074.76 \
+    linux-buildinfo-5.15.0-1074-bluefield=5.15.0-1074.76 \
+    linux-headers-5.15.0-1074-bluefield=5.15.0-1074.76 \
+    linux-headers-bluefield=5.15.0.1074.76 \
+    linux-image-5.15.0-1074-bluefield=5.15.0-1074.76 \
+    linux-image-bluefield=5.15.0.1074.76 \
+    linux-modules-5.15.0-1074-bluefield=5.15.0-1074.76 \
+    linux-modules-extra-5.15.0-1074-bluefield=5.15.0-1074.76 \
+    linux-tools-5.15.0-1074-bluefield=5.15.0-1074.76 \
+    linux-tools-bluefield=5.15.0.1074.76
 
 RUN apt-get clean -y && \
     apt-get update -o "Acquire::https::Verify-Peer=false" -y && \
@@ -57,7 +57,6 @@ RUN apt-get clean -y && \
         plymouth \
     && \
     apt-get upgrade -y && \
-    apt-get install -y grub-efi-arm64-signed=1.187.6+2.06-2ubuntu14.4 && \
     apt-get install -y \
         acpid \
         bash-completion \

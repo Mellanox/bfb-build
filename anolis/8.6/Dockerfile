@@ -15,7 +15,7 @@ ENV RUN_FW_UPDATER="no"
 
 ADD repos/ /etc/yum.repos.d/
 
-RUN dnf install --nogpgcheck -y mmc-utils || dnf install --nogpgcheck -y $BASE_URL/bluefield/$BSP_VERSION/extras/mmc-utils/mmc-utils-0.1+git.20230209-1.1.aarch64.rpm || true
+RUN dnf install --nogpgcheck -y mmc-utils || dnf install --nogpgcheck -y $BASE_URL/bluefield/4.9.1-13484/extras/mmc-utils/mmc-utils-0.1+git.20230209-1.1.aarch64.rpm || true
 
 RUN rpm -ihv --force bootimages/mlxbf-bootimages-*.aarch64.rpm || true
 

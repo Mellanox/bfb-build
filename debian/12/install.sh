@@ -143,22 +143,30 @@ mount_target_partition()
 
 configure_target_os()
 {
+       if [ "${FSTAB_USE_DEV_NAME}" == "yes" ]; then
+               cat > /mnt/etc/fstab << EOF
+${device}p2  /           ${ROOTFS}     defaults 0 1
+${device}p1  /boot/efi   vfat    umask=0077 0 2
+EOF
+       else
+               cat > /mnt/etc/fstab << EOF
 	cat > /mnt/etc/fstab << EOF
 $(get_part_id ${device}p2) / ${ROOTFS} defaults 0 1
 $(get_part_id ${device}p1) /boot/efi vfat umask=0077 0 2
 EOF
+	fi
 
 	memtotal=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
 	if [ $memtotal -gt 16000000 ]; then
 		sed -i -r -e "s/(net.netfilter.nf_conntrack_max).*/\1 = 1000000/" /mnt/usr/lib/sysctl.d/90-bluefield.conf
 	fi
 
-	configure_snap
-
 	update_default_bfb
 
-	# Disable SELINUX
-	sed -i -e "s/^SELINUX=.*/SELINUX=disabled/" /mnt/etc/selinux/config
+	if [ -e /mnt/etc/selinux/config ]; then
+		# Disable SELINUX
+		sed -i -e "s/^SELINUX=.*/SELINUX=disabled/" /mnt/etc/selinux/config
+	fi
 
 	/bin/rm -f /mnt/etc/hostname
 
@@ -188,8 +196,12 @@ EOF
 		packages_to_remove=$(chroot /mnt env PATH=$CHROOT_PATH dpkg -S /lib/firmware/mellanox/{bmc,cec}/* | grep "bf3" | cut -d: -f1 | tr -s '\n' ' ')
 	elif (lspci -n -d 15b3: | grep -wq 'a2dc'); then
 		# BlueField-3
-		chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge mlnx-snap || true
+		chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge mlnx-snap mlnx-libsnap spdk spdk-rpc spdk-dev || true
 		packages_to_remove=$(chroot /mnt env PATH=$CHROOT_PATH dpkg -S /lib/firmware/mellanox/{bmc,cec}/* | grep -viE "bf3-cec-fw|bf3-bmc-fw|bf3-bmc-gi|${dpu_part_number//_/-}" | cut -d: -f1 | tr -s '\n' ' ')
+	elif (lspci -n -d 15b3: | grep -wq 'a2df'); then
+		# BlueField-4
+		chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge mlnx-snap || true
+		packages_to_remove=$(chroot /mnt env PATH=$CHROOT_PATH dpkg -S /lib/firmware/mellanox/{bmc,cec}/* | grep -E "bf2|bf3" | cut -d: -f1 | tr -s '\n' ' ')
 	fi
 
 	if [ -n "$packages_to_remove" ]; then
@@ -211,10 +223,10 @@ update_efi_bootmgr()
 		efivars_mount=1
 	fi
 
-	if efibootmgr | grep buster; then
-		efibootmgr -b "$(efibootmgr | grep buster | cut -c 5-8)" -B
+	if efibootmgr | grep debian; then
+		efibootmgr -b "$(efibootmgr | grep debian | cut -c 5-8)" -B
 	fi
-	ilog "$(efibootmgr -c -d $device -p 1 -L buster -l '\EFI\debian\shimaa64.efi')"
+	ilog "$(efibootmgr -c -d $device -p 1 -L debian -l '\EFI\debian\shimaa64.efi')"
 
 	if [ $efivars_mount -eq 1 ]; then
 		umount /sys/firmware/efi/efivars
@@ -241,9 +253,11 @@ EOF
 configure_grub()
 {
 	ilog "Configure grub:"
-	if (grep -q MLNXBF33 /sys/firmware/acpi/tables/SSDT*); then
-	    # BlueField-3
-	    sed -i -e "s/0x01000000/0x13010000/g" /mnt/etc/default/grub
+	if (lscpu 2>&1 | grep -wq Grace); then
+		sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=1024M $bootarg keep_bootcon earlycon modprobe.blacklist=mlx5_core,mlx5_ib selinux=0 net.ifnames=0 biosdevname=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
+	elif (grep -q MLNXBF33 /sys/firmware/acpi/tables/SSDT*); then
+		# BlueField-3
+		sed -i -e "s/0x01000000/0x13010000/g" /mnt/etc/default/grub
 	fi
 
 	if (lspci -vv | grep -wq SimX); then

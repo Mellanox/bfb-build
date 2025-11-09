@@ -43,12 +43,13 @@ DISTRO="debian"
 DISTRO_VERSION="12"
 DISTRO_KERNEL=${DISTRO_KERNEL:-"-5.15"} # 6.10
 ARCH=${ARCH:-"arm64-dpu"}
-DOCA_VERSION="3.1.0"
-BSP_VERSION="4.12.0-13720"
-MLNX_OFED_VERSION="25.07-0.9.7.0"
+DOCA_VERSION="3.2.0"
+BSP_VERSION="4.13.0-13799"
+MLNX_OFED_VERSION="25.10-1.2.0.0"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-""}
 BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
+DOCA_REPO_URL=${DOCA_REPO_URL:-""}
 LEAVE_CONTAINER=${LEAVE_CONTAINER:-"no"}
 
 WDIR=/tmp/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}.$$
@@ -68,7 +69,11 @@ case "$IMAGE_TYPE" in
 		;;
 esac
 
-wget -q -P $WDIR ${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/${ARCH}/$bootimages
+if [[ -n "$DOCA_REPO_URL" ]]; then
+	wget -q -P $WDIR ${DOCA_REPO_URL}/$bootimages
+else
+	wget -q -P $WDIR ${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/${ARCH}/$bootimages
+fi
 mv $WDIR/mlxbf-bootimages*arm64.deb $WDIR/mlxbf-bootimages.deb
 
 cp -a \
@@ -81,7 +86,11 @@ cp -a \
 	../../common/tools/qemu-aarch64-static \
 	$WDIR
 
-echo "deb [trusted=yes] ${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/arm64-dpu/ /" | tee $WDIR/repos/doca.base.list
+if [[ -n "$DOCA_REPO_URL" ]]; then
+	echo "deb [trusted=yes] ${DOCA_REPO_URL} /" | tee $WDIR/repos/doca.base.list
+else
+	echo "deb [trusted=yes] ${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/arm64-dpu/ /" | tee $WDIR/repos/doca.base.list
+fi
 
 if [ -d install.env ]; then
 	cp -a install.env \

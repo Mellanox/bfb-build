@@ -11,3 +11,9 @@ URIs: http://deb.debian.org/debian-security
 Suites: bookworm-security
 Components: main
 Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+
+Types: deb
+URIs: https://snapshot.debian.org/archive/debian/20250219T000851Z/
+Suites: bookworm
+Components: main
+

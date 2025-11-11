@@ -74,9 +74,10 @@ esac
 mkdir -p $WDIR/bootimages
 wget --no-verbose -P $WDIR/bootimages ${BASE_URL}/doca/${DOCA_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/${ARCH}/$bootimages
 
+mkdir -p $WDIR/dependencies
 echo "Downloading doca-openvswitch-ipsec..."
 OPENVSWITCH_IPSEC_PATTERN="doca-openvswitch-ipsec.*rpm$"
-download_files_by_pattern "${BASE_URL}/doca/${DOCA_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/${ARCH}" "$OPENVSWITCH_IPSEC_PATTERN"
+download_files_by_pattern "${BASE_URL}/doca/${DOCA_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/${ARCH}" "$OPENVSWITCH_IPSEC_PATTERN" "$WDIR/dependencies"
 
 cp -a \
 	Dockerfile \

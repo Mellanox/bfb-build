@@ -129,6 +129,7 @@ RUN sed -i '/mirrorlist=.*/d;s/#baseurl/baseurl/g;s/$releasever/8.6/g' /etc/yum.
         doca-runtime \
         doca-devel \
         mlnx-snap \
+        mlnx-libsnap \
         mft-autocomplete \
         mstflint \
         strongswan \

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -x
 
 ###############################################################################
 #
@@ -29,45 +29,11 @@ LANG=C
 SDIR="/root/workspace"
 BFB="${BFB:-/lib/firmware/mellanox/boot/default.bfb}"
 CAPSULE="${CAPSULE:-/lib/firmware/mellanox/boot/capsule/boot_update2.cap}"
-verbose=0
+kernel=$(/bin/ls -1 /lib/modules/ | head -1)
 
-usage() {
-cat << EOF
-Usage: $(basename $0) [ OPTIONS ]
-OPTIONS:
--k, -kernel,    --kernel <kernel version>  Kernel version for the SmartNIC. Default: $kernel
--v, -verbose,   --verbose                       Run script in verbose mode. Will print out each step of execution.
--h, -help,      --help                          Display help
+bootctl_module="mlxbf-bootctl"
 
-
-EOF
-}
-
-options=$(getopt -l "kernel:,help,verbose" -o "k:hv" -a -- "$@")
-
-eval set -- "$options"
-
-while true
-do
-        case $1 in
-                -h|--help)
-                    usage
-                    exit 0
-                    ;;
-				-k|--kernel)
-					shift
-					kernel=$1
-					;;
-				-v|--verbose)
-					verbose=1
-					set -xv
-					;;
-				--)
-                    shift
-                    break;;
-        esac
-        shift
-done
+modinfo -n -k $kernel "mlx-bootctl" > /dev/null 2>&1 && bootctl_module="mlx-bootctl"
 
 SCRIPTS_DIR=$(dirname $0)
 
@@ -75,8 +41,7 @@ WDIR=${WDIR:-/root/workspace/bfb}
 
 echo "Work directory: $WDIR"
 
-OL_IMAGE=$(cat /etc/mlnx-release)
-OL_BFB=${OL_IMAGE}.bfb
+BFB_FILENAME="$(cat /etc/mlnx-release).bfb"
 
 PATH=$PATH:/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/opt/mellanox/scripts:/opt/mellanox/scripts/bin
 mkbfb=$(which mlx-mkbfb)
@@ -91,27 +56,12 @@ if [[ ! -n "${BFB}" || ! -e "${BFB}" ]]; then
 	exit 1
 fi
 
-# Execute command w/ echo and exit if it fail
-ex()
-{
-        echo "$@"
-        if ! "$@"; then
-                printf "\nFailed executing $@\n\n"
-                exit 1
-        fi
-}
-
-ex /bin/rm -rf ${WDIR}
-ex mkdir -p ${WDIR}
-ex cd ${WDIR}
-ex /bin/rm -rf initramfs
+/bin/rm -rf ${WDIR}
+mkdir -p ${WDIR}
+cd ${WDIR}
+/bin/rm -rf initramfs
 
 initramfs=$WDIR/dump-initramfs-v0
-
-if ! ( rpm -q dracut-tools > /dev/null 2>&1 ); then
-	yum install -y dracut-tools
-fi
-
 kmods=""
 for kmod in dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block mlxbf-bootctl \
 			virtio_net virtio_console sdhci dw_mmc-pltfm sdhci-of-dwcmshc \
@@ -127,7 +77,6 @@ do
         kmods="$kmods $kmod"
     fi
 done
-
 # Create ssh keys
 yes | /usr/bin/ssh-keygen -A  -N ""
 mkdir -p /root/.ssh
@@ -135,7 +84,7 @@ chmod 0700 /root/.ssh
 touch /root/.ssh/authorized_keys
 chmod 600 /root/.ssh/authorized_keys
 echo "Building BFB's initramfs with: $kmods"
-dracut --no-hostonly -m "bash network base systemd systemd-initrd dracut-systemd shutdown ssh-client udev-rules" \
+dracut --no-hostonly -m "bash network base systemd systemd-initrd dracut-systemd shutdown sshd ssh-client udev-rules" \
 		--install "/usr/lib/udev/rules.d/91-tmfifo_net.rules /lib/udev/rules.d/92-oob_net.rules" \
 		--force-drivers "$kmods" --gzip $initramfs ${kernel}
 if [ $? -ne 0 ]; then
@@ -159,115 +108,105 @@ EOF
 
 
 case "$(file --brief --mime-type "$initramfs")" in
-	"application/x-lzma")
-		cat_initrd="lzcat" ;;
-	"application/x-lz4")
-		cat_initrd="lz4cat" ;;
-	*)
-		cat_initrd="zcat" ;;
+    "application/x-lzma")
+        cat_initrd="lzcat" ;;
+    "application/x-lz4")
+        cat_initrd="lz4cat" ;;
+    *)
+        cat_initrd="zcat" ;;
 esac
 
 echo "Rebuilding $initramfs"
 
 mkdir -p ${WDIR}/initramfs
 cd initramfs
-$cat_initrd "$initramfs" | sudo cpio -i
-
-# if (file init | grep -q systemd); then
-# 	if [ -x /usr/lib/dracut/modules.d/99base/init.sh ]; then
-# 		echo "Replacing systemd init by script"
-# 		rm -f init
-# 		cp /usr/lib/dracut/modules.d/99base/init.sh init
-# 	fi
-# fi
+$cat_initrd "$initramfs" | cpio -i
 
 copy_bin()
 {
-	if [ -e $1 ]; then
-		bin=$1
-	else
-		bin=$(which $1 2> /dev/null)
-	fi
-	if [ -z "$bin" ]; then
-		echo "WARNING: Cannot find $1"
-		return 1
-	fi
-	sudo mkdir -p .$(dirname $bin)
-	if [ -e .${bin} ]; then
-		/bin/rm -f .${bin}
-	fi
-	sudo cp -a $bin .${bin}
+    if [ -e $1 ]; then
+        bin=$1
+    else
+        bin=$(which $1 2> /dev/null)
+    fi
+    if [ -z "$bin" ]; then
+        echo "ERROR: Cannot find $1"
+        return 1
+    fi
+    mkdir -p .$(dirname $bin)
+    if [ -e .${bin} ]; then
+        /bin/rm -f .${bin}
+    fi
+    cp -a $bin .${bin}
 
-	# Copy dependencies
-	for lib in $(ldd $bin 2> /dev/null | grep '=>' | awk '{print $3}' | grep -v '(0x0')
-	do
-		if [ -e .$lib ]; then
-			continue
-		fi
-		sudo mkdir -p .$(dirname $lib)
-		sudo cp -a $lib .$lib
-		if [ -h $lib ]; then
-			tlib=$(readlink -f $lib)
-			if [ ! -e .$tlib ]; then
-				sudo mkdir -p .$(dirname $tlib)
-				sudo cp $tlib .$tlib
-			fi
-		fi
-	done
+    # Copy dependencies
+    for lib in $(ldd $bin 2> /dev/null | grep '=>' | awk '{print $3}' | grep -v '(0x0')
+    do
+        if [ -e .$lib ]; then
+            continue
+        fi
+        mkdir -p .$(dirname $lib)
+        cp -a $lib .$lib
+        if [ -h $lib ]; then
+            tlib=$(readlink -f $lib)
+            if [ ! -e .$tlib ]; then
+                mkdir -p .$(dirname $tlib)
+                cp $tlib .$tlib
+            fi
+        fi
+    done
 }
 
 copy_rpm()
 {
-	package=$1
+    package=$1
 
-	if ! (rpm -q $package); then
-		echo "Did not find $package, attempting to download"
-		yum install -y $package || return
-	fi
+    if ! (rpm -q $package); then
+        yum install -y $package || return
+    fi
 
-	case $package in
-		chkconfig)
-			for f in $(rpm -ql $package | grep -v share)
-			do
-				if [ -d $f ]; then
-					mkdir -p .${f}
-				else
-					copy_bin $f
-				fi
-			done
-			;;
-		*mft*|mstflint)
-			for f in $(rpm -ql $package | grep -v man)
-			do
-				if [ -d $f ]; then
-					continue
-				fi
-				copy_bin $f
-			done
-			;;
-		*)
-			for f in $(rpm -ql $package | grep -vE 'share|build-id')
-			do
-				if [ -d $f ]; then
-					continue
-				fi
-				copy_bin $f
-			done
-			;;
-	esac
+    case $package in
+        chkconfig)
+            for f in $(rpm -ql $package | grep -v share)
+            do
+                if [ -d $f ]; then
+                    mkdir -p .${f}
+                else
+                    copy_bin $f
+                fi
+            done
+            ;;
+        *mft*|mstflint)
+            for f in $(rpm -ql $package | grep -vw man)
+            do
+                if [ -d $f ]; then
+                    continue
+                fi
+                copy_bin $f
+            done
+            ;;
+        *)
+            for f in $(rpm -ql $package | grep -vE 'share|build-id')
+            do
+                if [ -d $f ]; then
+                    continue
+                fi
+                copy_bin $f
+            done
+            ;;
+    esac
 }
 
 # Copy the content of RPM packages
-			   #  openssh-server
-for package in gawk mlxbf-bfscripts mlxbf-bootctl util-linux util-linux-core dosfstools \
-			   e2fsprogs kmod pciutils usbutils chkconfig mstflint \
-			   tar xfsprogs coreutils parted which curl \
+for package in gawk mlxbf-bfscripts mlxbf-bootctl util-linux dosfstools \
+			   e2fsprogs kmod pciutils usbutils chkconfig mstflint mft \
+			   mft-oem mft-mlx5 mft-nvredfish $kernel_mft tar xfsprogs coreutils parted which curl \
 			   openssl net-tools wget dhcp-client ipcalc iputils dbus-tools \
 			   systemd-udev initscripts shadow-utils crypto-policies \
 			   openssh openssh-server rng-tools passwd dmidecode \
-			   python3 jq sshpass $ADDON_RPMS
+			   python36 jq sshpass $ADDON_RPMS
 do
-	copy_rpm $package || true
+    copy_rpm $package || true
 done
 
 # Copy tools
@@ -275,34 +214,44 @@ for tool in	xz efibootmgr bash getopt hexdump lspci perl \
 		lsblk shutdown systemctl strings \
 		id grep hostnamectl $ADDON_TOOLS
 do
-	if [ -d $tool ]; then
-		continue
-	fi
-	copy_bin $tool
+    if [ -d $tool ]; then
+        continue
+    fi
+    copy_bin $tool
 done
 
-sudo depmod -a -b ./ $kernel
-sudo ldconfig -r ./
-sudo mkdir -p usr/share/hwdata/ bin/
-sudo cp /usr/share/hwdata/pci.ids ./usr/share/hwdata/
-sudo mkdir -p ./lib/firmware/mellanox/boot/
-sudo cp /lib/firmware/mellanox/boot/default.bfb ./lib/firmware/mellanox/boot/default.bfb
-sudo cp -a /lib/firmware/mellanox/boot/capsule ./lib/firmware/mellanox/boot/
-sudo cp $CAPSULE ./lib/firmware/mellanox/boot/capsule/
-sudo mkdir -p mnt
-if [ ! -f usr/bin/flint ]; then
-    sudo ln -s mstflint usr/bin/flint
-fi
+depmod -a -b ./ $kernel
+ldconfig -r ./
+mkdir -p usr/share/hwdata/ bin/
+cp /usr/share/hwdata/pci.ids ./usr/share/hwdata/
+mkdir -p ./lib/firmware/mellanox/boot/
+cp /lib/firmware/mellanox/boot/default.bfb ./lib/firmware/mellanox/boot/default.bfb
+cp -a /lib/firmware/mellanox/boot/capsule ./lib/firmware/mellanox/boot/
+cp $CAPSULE ./lib/firmware/mellanox/boot/capsule/
+rpm -qf --queryformat "[%{VERSION}].[%{RELEASE}]" $CAPSULE > ./lib/firmware/mellanox/boot/atf_uefi.version
+
+[ -d /lib/firmware/swissbit/ ] && cp -a /lib/firmware/swissbit/ ./lib/firmware/
+
+mkdir -p mnt
 
 if [ -e /usr/bin/pkexec ]; then
     # CVE-2021-4034 workaround
     chmod 0755 /usr/bin/pkexec
 fi
 
-ex mkdir -p ol
+# Remove hostname that includes docker container's id
+/bin/rm -f ./etc/hostname
+echo localhost > /etc/hostname
+
+
+
+mkdir -p ol
 # Tar the image
-XZ_OPT="--threads=0 -9 --verbose" tar -cJp --exclude='./workspace' --exclude='./signing-local' --exclude='./signing-shared' --exclude='./var/run/docker.sock' --exclude='./root/workspace' --exclude='./tmp/*' --exclude='./run/*' --exclude='./sys/*' --exclude='./proc/*' --exclude='./dev/*' --exclude='./.dockerenv' --exclude='./root/rpmbuild' --exclude='./root/.rpmmacros' --exclude='./root/.bash_history' --exclude='./var/tmp/*rpm' --exclude='./bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-arm-static' --exclude='./var/lib/yum/*' --exclude='./var/cache/yum/*' -f ./ol/image.tar.xz -C / .
-ex install -m 0755 ${SDIR}/install.sh ./ol/install.sh
+XZ_OPT="--threads=0 -9 --verbose" tar -cJp --exclude='./workspace' --exclude='./signing-local' --exclude='./signing-shared' --exclude='./var/run/docker.sock' \
+ --exclude='./root/workspace' --exclude='./tmp/*' --exclude='./run/*' --exclude='./sys/*' --exclude='./proc/*' --exclude='./dev/*' --exclude='./.dockerenv' \
+ --exclude='./root/rpmbuild' --exclude='./root/.rpmmacros' --exclude='./root/.bash_history' --exclude='./var/tmp/*rpm' --exclude='./bin/qemu-aarch64-static' \
+ --exclude='./usr/bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-arm-static' --exclude='./var/lib/yum/*' --exclude='./var/cache/yum/*' -f "./ol/image.tar.xz" -C / .
+install -m 0755 ${SDIR}/install.sh ./ol/install.sh
 cp -a ${SDIR}/install.env ./ol/
 
 mkdir scripts
@@ -311,8 +260,9 @@ cat > scripts/initrd-install << EOF
 
 echo
 echo "=================================" | tee /dev/kmsg
-echo "Installing OL. Please wait..." | tee /dev/kmsg
+echo "Installing OL Linux. Please wait..." | tee /dev/kmsg
 echo "=================================" | tee /dev/kmsg
+
 
 for kmod in $kmods
 do
@@ -327,19 +277,22 @@ if [ \$? -eq 0 ]; then
         echo "Installation finished. Rebooting..." | tee /dev/kmsg
         echo "===================================" | tee /dev/kmsg
         echo
+        sleep 3
         reboot -f
 else
         echo "========================" | tee /dev/kmsg
-        echo "  Failed to install OL  " | tee /dev/kmsg
+        echo "Failed to install OL Linux" | tee /dev/kmsg
         echo "========================" | tee /dev/kmsg
 fi
 EOF
 
 chmod +x scripts/initrd-install
 
+ln -s /usr/lib/systemd/system/sshd.service etc/systemd/system/initrd.target.wants/sshd.service
+
 cat > usr/lib/systemd/system/install-ol.service << EOF
 [Unit]
-Description=Install OL
+Description=Install OL Linux
 After=initrd-root-fs.target initrd-parse-etc.service
 After=dracut-initqueue.service dracut-mount.service
 
@@ -353,14 +306,268 @@ EOF
 
 ln -s /usr/lib/systemd/system/install-ol.service etc/systemd/system/initrd.target.wants/install-ol.service
 
-# Make initramfs with new ol
+# Make initramfs
 find . | cpio -H newc -o | gzip -9 > $initramfs
+
+ATF_UEFI_VERSION="$(cat ./lib/firmware/mellanox/boot/atf_uefi.version 2> /dev/null)"
+
+bfver_out="$( bfver --file ${BFB} )"
+
+ATF_VERSION=$( echo "$bfver_out" | grep -m 1 "ATF" | cut -d':' -f 3 | \
+    sed -e 's/[[:space:]]//' )
+UEFI_VERSION=$( echo "$bfver_out" | grep -m 1 "UEFI" | cut -d':' -f 2 | \
+    sed -e 's/[[:space:]]//' )
+
+# Create JSON using jq
+json_output=$(jq -n \
+  --arg bf3_bsp_version "$ATF_UEFI_VERSION" \
+  --arg bf3_bsp_source "${CAPSULE##*/}" \
+  --arg bf2_bsp_version "$ATF_UEFI_VERSION" \
+  --arg bf2_bsp_source "${CAPSULE##*/}" \
+  --arg bf3_atf_version "$ATF_VERSION" \
+  --arg bf3_atf_source "${CAPSULE##*/}" \
+  --arg bf2_atf_version "$ATF_VERSION" \
+  --arg bf2_atf_source "${CAPSULE##*/}" \
+  --arg bf3_uefi_version "$UEFI_VERSION" \
+  --arg bf3_uefi_source "${CAPSULE##*/}" \
+  --arg bf2_uefi_version "$UEFI_VERSION" \
+  --arg bf2_uefi_source "${CAPSULE##*/}" \
+'{
+	"//": "This JSON represents a Redfish Software Inventory collection containing multiple software components.",
+	"@odata.type": "#SoftwareInventoryCollection.SoftwareInventoryCollection",
+	"@odata.id": "/redfish/v1/UpdateService/SoftwareInventory",
+	"Name": "BFB File Content",
+	"Members": [
+		{
+		"@odata.id": "/redfish/v1/UpdateService/SoftwareInventory/1",
+		"Id": "1",
+		"Name": "BF3_BSP",
+		"Version": $bf3_bsp_version,
+		"SoftwareId": $bf3_bsp_source,
+		},
+		{
+		"@odata.id": "/redfish/v1/UpdateService/SoftwareInventory/2",
+		"Id": "2",
+		"Name": "BF2_BSP",
+		"Version": $bf2_bsp_version,
+		"SoftwareId": $bf2_bsp_source,
+		},
+		{
+		"@odata.id": "/redfish/v1/UpdateService/SoftwareInventory/3",
+		"Id": "3",
+		"Name": "BF3_ATF",
+		"Version": $bf3_atf_version,
+		"SoftwareId": $bf3_atf_source,
+		},
+		{
+		"@odata.id": "/redfish/v1/UpdateService/SoftwareInventory/4",
+		"Id": "4",
+		"Name": "BF2_ATF",
+		"Version": $bf2_atf_version,
+		"SoftwareId": $bf2_atf_source,
+		},
+		{
+		"@odata.id": "/redfish/v1/UpdateService/SoftwareInventory/5",
+		"Id": "5",
+		"Name": "BF3_UEFI",
+		"Version": $bf3_uefi_version,
+		"SoftwareId": $bf3_uefi_source,
+		},
+		{
+		"@odata.id": "/redfish/v1/UpdateService/SoftwareInventory/6",
+		"Id": "6",
+		"Name": "BF2_UEFI",
+		"Version": $bf2_uefi_version,
+		"SoftwareId": $bf2_uefi_source,
+		}
+	],
+	"Members@odata.count": 6
+}')
+
+odata_count=6
+
+if [ -e "/opt/mellanox/mlnx-fw-updater/firmware/mlxfwmanager_sriov_dis_aarch64_41686" ]; then
+	let odata_count++
+	BF2_NIC_FW_VERSION=$(/opt/mellanox/mlnx-fw-updater/firmware/mlxfwmanager_sriov_dis_aarch64_41686 --list 2> /dev/null | grep FW | head -1 | awk '{print $4}')
+	BF2_NIC_FW="mlxfwmanager_sriov_dis_aarch64_41686"
+	json_output=$( echo $json_output | jq \
+		--arg odata_count "$odata_count" \
+		--arg odata_id "/redfish/v1/UpdateService/SoftwareInventory/$odata_count" \
+		--arg bf2_nic_fw_version "${BF2_NIC_FW_VERSION}" \
+		--arg bf2_nic_fw_source "${BF2_NIC_FW##*/}" \
+		'.Members += [{
+			"@odata.id": $odata_id,
+			"Id": $odata_count,
+			"Name": "BF2_NIC_FW",
+			"Version": $bf2_nic_fw_version,
+			"SoftwareId": $bf2_nic_fw_source,
+			}] | .["Members@odata.count"] += 1')
+fi
+
+if [ -e "/usr/lib/firmware/mellanox/bmc/bf2-bmc-fw.tar" ]; then
+	let odata_count++
+	BF2_BMC_FW="/usr/lib/firmware/mellanox/bmc/bf2-bmc-fw.tar"
+	BF2_BMC_FW_VERSION=$(cat /usr/lib/firmware/mellanox/bmc/bf2-bmc-fw.version 2> /dev/null)
+	json_output=$( echo $json_output | jq \
+		--arg odata_count "$odata_count" \
+		--arg odata_id "/redfish/v1/UpdateService/SoftwareInventory/$odata_count" \
+		--arg bf2_bmc_fw_version "${BF2_BMC_FW_VERSION}" \
+		--arg bf2_bmc_fw_source "${BF2_BMC_FW##*/}" \
+		'.Members += [{
+			"@odata.id": $odata_id,
+			"Id": $odata_count,
+			"Name": "BF2_BMC_FW",
+			"Version": $bf2_bmc_fw_version,
+			"SoftwareId": $bf2_bmc_fw_source,
+			}] | .["Members@odata.count"] += 1')
+fi
+
+if [ -e "/usr/lib/firmware/mellanox/cec/bf2-cec-fw.bin" ]; then
+	let odata_count++
+	BF2_CEC_FW="/usr/lib/firmware/mellanox/cec/bf2-cec-fw.bin"
+	BF2_CEC_FW_VERSION=$(cat /usr/lib/firmware/mellanox/cec/bf2-cec-fw.version 2> /dev/null)
+	json_output=$( echo $json_output | jq \
+		--arg odata_count "$odata_count" \
+		--arg odata_id "/redfish/v1/UpdateService/SoftwareInventory/$odata_count" \
+		--arg bf2_cec_fw_version "${BF2_CEC_FW_VERSION}" \
+		--arg bf2_cec_fw_source "${BF2_CEC_FW##*/}" \
+		'.Members += [{
+			"@odata.id": $odata_id,
+			"Id": $odata_count,
+			"Name": "BF2_CEC_FW",
+			"Version": $bf2_cec_fw_version,
+			"SoftwareId": $bf2_cec_fw_source,
+		}] | .["Members@odata.count"] += 1')
+fi
+
+if [ -e "/opt/mellanox/mlnx-fw-updater/firmware/mlxfwmanager_sriov_dis_aarch64_41692" ]; then
+	let odata_count++
+	BF3_NIC_FW_VERSION=$(/opt/mellanox/mlnx-fw-updater/firmware/mlxfwmanager_sriov_dis_aarch64_41692 --list 2> /dev/null | grep FW | head -1 | awk '{print $4}')
+	BF3_NIC_FW="mlxfwmanager_sriov_dis_aarch64_41692"
+    json_output=$( echo $json_output | jq \
+		--arg odata_count "$odata_count" \
+		--arg odata_id "/redfish/v1/UpdateService/SoftwareInventory/$odata_count" \
+		--arg bf3_nic_fw_version "${BF3_NIC_FW_VERSION}" \
+		--arg bf3_nic_fw_source "${BF3_NIC_FW##*/}" \
+		'.Members += [{
+			"@odata.id": $odata_id,
+			"Id": $odata_count,
+			"Name": "BF3_NIC_FW",
+			"Version": $bf3_nic_fw_version,
+			"SoftwareId": $bf3_nic_fw_source,
+			}] | .["Members@odata.count"] += 1')
+fi
+
+if [ -e "/usr/lib/firmware/mellanox/bmc/bf3-bmc-fw.fwpkg" ]; then
+	let odata_count++
+	BF3_BMC_FW="/usr/lib/firmware/mellanox/bmc/bf3-bmc-fw.fwpkg"
+	BF3_BMC_FW_VERSION=$(cat /usr/lib/firmware/mellanox/bmc/bf3-bmc-fw.version 2> /dev/null)
+	json_output=$( echo $json_output | jq \
+		--arg odata_count "$odata_count" \
+		--arg odata_id "/redfish/v1/UpdateService/SoftwareInventory/$odata_count" \
+		--arg bf3_bmc_fw_version "${BF3_BMC_FW_VERSION}" \
+		--arg bf3_bmc_fw_source "${BF3_BMC_FW##*/}" \
+		'.Members += [{
+			"@odata.id": $odata_id,
+			"Id": $odata_count,
+			"Name": "BF3_BMC_FW",
+			"Version": $bf3_bmc_fw_version,
+			"SoftwareId": $bf3_bmc_fw_source,
+			}] | .["Members@odata.count"] += 1')
+fi
+
+if [ -e "/usr/lib/firmware/mellanox/cec/bf3-cec-fw.fwpkg" ]; then
+	let odata_count++
+	BF3_CEC_FW="/usr/lib/firmware/mellanox/cec/bf3-cec-fw.fwpkg"
+	BF3_CEC_FW_VERSION=$(cat /usr/lib/firmware/mellanox/cec/bf3-cec-fw.version 2> /dev/null)
+	json_output=$( echo $json_output | jq \
+		--arg odata_count "$odata_count" \
+		--arg odata_id "/redfish/v1/UpdateService/SoftwareInventory/$odata_count" \
+		--arg bf3_cec_fw_version "${BF3_CEC_FW_VERSION}" \
+		--arg bf3_cec_fw_source "${BF3_CEC_FW##*/}" \
+		'.Members += [{
+			"@odata.id": $odata_id,
+			"Id": $odata_count,
+			"Name": "BF3_CEC_FW",
+			"Version": $bf3_cec_fw_version,
+			"SoftwareId": $bf3_cec_fw_source,
+			}] | .["Members@odata.count"] += 1')
+fi
+
+BF3_DPU_GI=""
+if [ -e "/usr/lib/firmware/mellanox/bmc/bf3-bmc-preboot-install.pldm" ]; then
+	BF3_DPU_GI="/usr/lib/firmware/mellanox/bmc/bf3-bmc-preboot-install.pldm"
+elif [ -e "/usr/lib/firmware/mellanox/bmc/bf3-bmc-preboot-install.bfb" ]; then
+	BF3_DPU_GI="/usr/lib/firmware/mellanox/bmc/bf3-bmc-preboot-install.bfb"
+fi
+
+if [ -n "$BF3_DPU_GI" ]; then
+	let odata_count++
+	BF3_DPU_GI_VERSION=$(cat /usr/lib/firmware/mellanox/bmc/bf3-bmc-preboot-install.version 2> /dev/null)
+	json_output=$( echo $json_output | jq \
+		--arg odata_count "$odata_count" \
+		--arg odata_id "/redfish/v1/UpdateService/SoftwareInventory/$odata_count" \
+		--arg bf3_dpu_gi_version "${BF3_DPU_GI_VERSION}" \
+		--arg bf3_dpu_gi_source "${BF3_DPU_GI##*/}" \
+		'.Members += [{
+			"@odata.id": $odata_id,
+			"Id": $odata_count,
+			"Name": "BF3_DPU_GI",
+			"Version": $bf3_dpu_gi_version,
+			"SoftwareId": $bf3_dpu_gi_source,
+			}] | .["Members@odata.count"] += 1')
+fi
+
+BF3_NIC_FW_GI_VERSION=""
+if (/bin/ls -1 /usr/lib/firmware/mellanox/bmc/fw-BlueField-3-rel-*.pldm > /dev/null 2>&1); then
+	BF3_NIC_FW_GI_VERSION=$(/bin/ls -1 /usr/lib/firmware/mellanox/bmc/fw-BlueField-3-rel-*.pldm 2> /dev/null | head -1 | grep -oP '(?<=BlueField-3-rel-)\d+_\d+_\d+')
+elif (/bin/ls -1 /usr/lib/firmware/mellanox/bmc/fw-BlueField-3-rel-*.bfb > /dev/null 2>&1); then
+	BF3_NIC_FW_GI_VERSION=$(/bin/ls -1 /usr/lib/firmware/mellanox/bmc/fw-BlueField-3-rel-*.bfb 2> /dev/null | head -1 | grep -oP '(?<=BlueField-3-rel-)\d+_\d+_\d+')
+fi
+
+if [ -n "$BF3_NIC_FW_GI_VERSION" ]; then
+	let odata_count++
+	BF3_NIC_FW_GI=""
+	json_output=$( echo $json_output | jq \
+		--arg odata_count "$odata_count" \
+		--arg odata_id "/redfish/v1/UpdateService/SoftwareInventory/$odata_count" \
+		--arg bf3_nic_fw_gi_version "${BF3_NIC_FW_GI_VERSION}" \
+		--arg bf3_nic_fw_gi_source "${BF3_NIC_FW_GI##*/}" \
+		'.Members += [{
+			"@odata.id": $odata_id,
+			"Id": $odata_count,
+			"Name": "BF3_NIC_FW_GI",
+			"Version": $bf3_nic_fw_gi_version,
+			"SoftwareId": $bf3_nic_fw_gi_source,
+			}] | .["Members@odata.count"] += 1')
+fi
+
+if (rpm -q doca-runtime > /dev/null 2>&1); then
+	DOCA_VERSION=$(rpm -q --queryformat "[%{VERSION}-%{RELEASE}]" doca-runtime)
+	let odata_count++
+	DOCA_SOURCE=$(rpm -q --queryformat "[%{NAME}-%{VERSION}-%{RELEASE}]" doca-runtime)
+
+	json_output=$( echo $json_output | jq \
+		--arg odata_count "$odata_count" \
+		--arg odata_id "/redfish/v1/UpdateService/SoftwareInventory/$odata_count" \
+		--arg doca_version "${DOCA_VERSION}" \
+		--arg doca_source "${DOCA_SOURCE}" \
+		'.Members += [{
+			"@odata.id": $odata_id,
+			"Id": $odata_count,
+			"Name": "DOCA",
+			"Version": $doca_version,
+			"SoftwareId": $doca_source,
+			}] | .["Members@odata.count"] += 1')
+fi
+
+echo "$json_output" > ${WDIR}/info.json
 
 # Make bfb
 cd ..
 if [ ! -e $CAPSULE ]; then
-	echo "ERROR: Capsule file $CAPSULE does not exist"
-	exit 1
+    echo "ERROR: Capsule file $CAPSULE does not exist"
+    exit 1
 fi
 
 boot_args=$(mktemp)
@@ -368,7 +575,7 @@ boot_args2=$(mktemp)
 boot_path=$(mktemp)
 boot_desc=$(mktemp)
 printf "console=ttyAMA1 console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 earlycon=pl011,0x01800000 initrd=initramfs" > \
-	"$boot_args"
+    "$boot_args"
 printf "console=hvc0 selinux=0 console=ttyAMA0 earlycon=pl011,0x13010000 initrd=initramfs" > \
 	"$boot_args2"
 
@@ -376,23 +583,24 @@ printf "VenHw(F019E406-8C9C-11E5-8797-001ACA00BFC4)/Image" > "$boot_path"
 printf "Linux from rshim" > "$boot_desc"
 vmlinuz=$WDIR/vmlinuz
 if [ -e $SDIR/vmlinuz ]; then
-	sudo zcat $SDIR/vmlinuz > "$vmlinuz"
+    zcat $SDIR/vmlinuz > "$vmlinuz"
 elif [ -e /boot/vmlinuz-$kernel ]; then
-	sudo zcat /boot/vmlinuz-$kernel > "$vmlinuz"
+    zcat /boot/vmlinuz-$kernel > "$vmlinuz"
 else
-    sudo zcat /lib/modules/$kernel/vmlinuz > "$vmlinuz"
+    zcat /lib/modules/$kernel/vmlinuz > "$vmlinuz"
 fi
 
 mkdir -p /workspace
 
-ex $mkbfb \
-	--image "$vmlinuz" --initramfs "$initramfs" \
-	--capsule "$CAPSULE" \
-	--boot-args-v0 "$boot_args" \
-	--boot-args-v2 "$boot_args2" \
-	--boot-path "$boot_path" \
-	--boot-desc "$boot_desc" \
-	${BFB} /workspace/${OL_BFB}
+$mkbfb \
+    --image "$vmlinuz" --initramfs "$initramfs" \
+    --capsule "$CAPSULE" \
+    --boot-args-v0 "$boot_args" \
+    --boot-args-v2 "$boot_args2" \
+    --boot-path "$boot_path" \
+    --boot-desc "$boot_desc" \
+    --info "${WDIR}/info.json" \
+    ${BFB} /workspace/${BFB_FILENAME}
 cd ..
 
-echo "BFB is ready: $(readlink -f /workspace/${OL_BFB})"
+echo "BFB is ready: $(readlink -f /workspace/${BFB_FILENAME})"

@@ -8,13 +8,14 @@ LOG=/tmp/$logfile
 
 fspath=$(readlink -f "$(dirname $0)")
 
-cx_pcidev=$(lspci -nD 2> /dev/null | grep 15b3:a2d[26c] | awk '{print $1}' | head -1)
+cx_pcidev=$(lspci -nD 2> /dev/null | grep 15b3:a2d[26cf] | awk '{print $1}' | head -1)
 cx_dev_id=$(lspci -nD -s ${cx_pcidev} 2> /dev/null | awk -F ':' '{print strtonum("0x" $NF)}')
-pciids=$(lspci -nD 2> /dev/null | grep 15b3:a2d[26c] | awk '{print $1}')
+pciids=$(lspci -nD 2> /dev/null | grep 15b3:a2d[26cf] | awk '{print $1}')
 dpu_part_number=$(mstflint -d $cx_pcidev q full | grep "Part Number:" | awk '{print $NF}')
 PSID=$(mstflint -d $cx_pcidev q | grep PSID | awk '{print $NF}')
 BD_PSIDS=${BD_PSIDS:-"BD_0000000004 BD_0000000005"}
 DEVICE_TIMEOUT=${DEVICE_TIMEOUT:-30}
+FSTAB_USE_DEV_NAME=${FSTAB_USE_DEV_NAME:-"no"}
 
 rlog()
 {
@@ -41,7 +42,7 @@ log()
 fail()
 {
 	log "$@"
-	log "Installation failed"
+	log "ERR Installation failed"
 	sleep 3
 	reboot -f
 }
@@ -220,6 +221,24 @@ upgrade_emmc_fw()
 		return
 	fi
 
+	ilog "Unmount any partitions on mmcblk0"
+	for p in /dev/mmcblk0p*i
+	do
+		[ -e "$p" ] || continue
+		if findmnt -rn "$p" >/dev/null 2>&1; then
+			ilog "Unmounting $p"
+			umount -R "$p" || ilog "WARN: umount $p failed"
+		fi
+	done
+	sync
+
+	ilog "Setting /dev/mmcblk0 read-only"
+	blockdev --setro /dev/mmcblk0 || ilog "WARN: setro failed"
+
+	ilog "Pausing udev rule execution"
+	udevadm control --stop-exec-queue || true
+	trap 'udevadm control --start-exec-queue || true' EXIT
+
 	# Update eMMC Firmware
 	cmd="mmc ffu $EMMC_SWISSBIT_FIRMWARE /dev/mmcblk0"
 	ilog "Runnning: $cmd"
@@ -228,7 +247,9 @@ upgrade_emmc_fw()
 	ilog "$output"
 	if [ $rc -eq 0 ]; then
 		ilog "eMMC Firmware was updated successfully"
-		ilog "A system power cycle is required to apply the new eMMC firmware"
+		sync
+		rmmod sdhci_of_dwcmshc
+		modprobe sdhci_of_dwcmshc
 	else
 		ilog "ERROR: Failed to update eMMC Firmware. Status: $rc"
 	fi
@@ -251,7 +272,7 @@ configure_sfs()
 {
 	: > /mnt/etc/mellanox/mlnx-sf.conf
 
-	for pciid in $(lspci -nD 2> /dev/null | grep 15b3:a2d[26c] | awk '{print $1}')
+	for pciid in $(lspci -nD 2> /dev/null | grep 15b3:a2d[26cf] | awk '{print $1}')
 	do
 		cat >> /mnt/etc/mellanox/mlnx-sf.conf << EOF
 /sbin/mlnx-sf --action create --device $pciid --sfnum 0 --hwaddr $(uuidgen | sed -e 's/-//;s/^\(..\)\(..\)\(..\)\(..\)\(..\).*$/02:\1:\2:\3:\4:\5/')
@@ -291,10 +312,12 @@ BOOT1_DESC='debian0'
 BOOT1_DEVPATH='\\EFI\\debian\\grubaa64.efi'
 BOOT2=NET-NIC_P0-IPV6
 BOOT3=NET-NIC_P1-IPV6
-BOOT4=NET-NIC_P0-IPV4
-BOOT5=NET-NIC_P1-IPV4
-BOOT6=UEFI_SHELL
-BOOT6_ARGS='ATTR=INACTIVE'
+BOOT4=NET-OOB-IPV6
+BOOT5=NET-NIC_P0-IPV4
+BOOT6=NET-NIC_P1-IPV4
+BOOT7=NET-OOB-IPV4
+BOOT8=UEFI_SHELL
+BOOT8_ARGS='ATTR=INACTIVE'
 PXE_DHCP_CLASS_ID=$DHCP_CLASS_ID
 EOF
 	else
@@ -475,11 +498,19 @@ configure_target_os()
 	BOOT_LABEL=${device}p2
 	BOOT_EFI_LABEL=${device}p1
 
-	cat > /mnt/etc/fstab << EOF
+	if [ "${FSTAB_USE_DEV_NAME}" == "yes" ]; then
+		cat > /mnt/etc/fstab << EOF
+$ROOT_LABEL  /           ${ROOTFS}     defaults                   0 1
+$BOOT_LABEL  /boot       ${ROOTFS}     defaults                   0 2
+$BOOT_EFI_LABEL  /boot/efi   vfat    umask=0077,shortname=winnt 0 2
+EOF
+	else
+		cat > /mnt/etc/fstab << EOF
 $(get_part_id $ROOT_LABEL)  /           ${ROOTFS}     defaults                   0 1
 $(get_part_id $BOOT_LABEL)  /boot       ${ROOTFS}     defaults                   0 2
 $(get_part_id $BOOT_EFI_LABEL)  /boot/efi   vfat    umask=0077,shortname=winnt 0 2
 EOF
+	fi
 
 	memtotal=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
 	if [ $memtotal -gt 16000000 ]; then
@@ -527,8 +558,12 @@ EOF
 			packages_to_remove=$(chroot /mnt env PATH=$CHROOT_PATH dpkg -S /lib/firmware/mellanox/{bmc,cec}/* | grep "bf3" | cut -d: -f1 | tr -s '\n' ' ')
 		elif (lspci -n -d 15b3: | grep -wq 'a2dc'); then
 			# BlueField-3
-			chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge mlnx-snap || true
+			chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge mlnx-snap mlnx-libsnap spdk spdk-rpc spdk-dev || true
 			packages_to_remove=$(chroot /mnt env PATH=$CHROOT_PATH dpkg -S /lib/firmware/mellanox/{bmc,cec}/* | grep -viE "bf3-cec-fw|bf3-bmc-fw|bf3-bmc-gi|${dpu_part_number//_/-}" | cut -d: -f1 | tr -s '\n' ' ')
+		elif (lspci -n -d 15b3: | grep -wq 'a2df'); then
+			# BlueField-4
+			chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge mlnx-snap || true
+			packages_to_remove=$(chroot /mnt env PATH=$CHROOT_PATH dpkg -S /lib/firmware/mellanox/{bmc,cec}/* | grep -E "bf2|bf3" | cut -d: -f1 | tr -s '\n' ' ')
 		fi
 		if [ -n "$packages_to_remove" ]; then
 			ilog "Removing packages: $packages_to_remove"
@@ -548,8 +583,12 @@ EOF
 			packages_to_remove=$(chroot /mnt /bin/bash -c "/usr/bin/rpm -qf /lib/firmware/mellanox/{bmc,cec}/* 2>&1" | grep "bf3" | tr -s '\n' ' ')
 		elif (lspci -n -d 15b3: | grep -wq 'a2dc'); then
 			# BlueField-3
-			chroot /mnt rpm -e mlnx-snap || true
+			chroot /mnt rpm -e mlnx-snap mlnx-libsnap spdk || true
 			packages_to_remove=$(chroot /mnt /bin/bash -c "/usr/bin/rpm -qf /lib/firmware/mellanox/{bmc,cec}/* 2>&1" | grep -viE "bf3-cec-fw|bf3-bmc-fw|bf3-bmc-gi|${dpu_part_number//_/-}" | tr -s '\n' ' ')
+		elif (lspci -n -d 15b3: | grep -wq 'a2df'); then
+			# BlueField-4
+			chroot /mnt rpm -e mlnx-snap || true
+			packages_to_remove=$(chroot /mnt /bin/bash -c "/usr/bin/rpm -qf /lib/firmware/mellanox/{bmc,cec}/* 2>&1" | grep -E "bf2|bf3" | tr -s '\n' ' ')
 		fi
 		if [ -n "$packages_to_remove" ]; then
 			ilog "Removing packages: $packages_to_remove"
@@ -561,8 +600,10 @@ EOF
 
 	update_default_bfb
 
-	# Disable SELINUX
-	sed -i -e "s/^SELINUX=.*/SELINUX=disabled/" /mnt/etc/selinux/config
+	if [ "$distro" != "RedHat" ]; then
+		# Disable SELINUX
+		sed -i -e "s/^SELINUX=.*/SELINUX=disabled/" /mnt/etc/selinux/config
+	fi
 
 	/bin/rm -f /mnt/etc/hostname
 
@@ -647,7 +688,11 @@ configure_default_grub()
 	if [ -n "$redfish_osarg" ]; then
 		bootarg="$bootarg $redfish_osarg"
 	fi
-	sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=1024M $bootarg console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 modprobe.blacklist=mlx5_core,mlx5_ib selinux=0 net.ifnames=0 biosdevname=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
+	if (lscpu 2>&1 | grep -wq Grace); then
+		sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=1024M $bootarg keep_bootcon earlycon modprobe.blacklist=mlx5_core,mlx5_ib selinux=0 net.ifnames=0 biosdevname=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
+	else
+		sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=1024M $bootarg console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 modprobe.blacklist=mlx5_core,mlx5_ib selinux=0 net.ifnames=0 biosdevname=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
+	fi
 	if (grep -q MLNXBF33 /sys/firmware/acpi/tables/SSDT*); then
 		# BlueField-3
 		sed -i -e "s/0x01000000/0x13010000/g" /mnt/etc/default/grub

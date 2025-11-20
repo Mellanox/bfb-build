@@ -1,6 +1,7 @@
 NIC_FW_UPDATE_DONE=0
 FORCE_NIC_FW_UPDATE=${FORCE_NIC_FW_UPDATE:-"no"}
 NIC_FW_RESET=${NIC_FW_RESET:-"yes"}
+FORCE_NIC_FW_RESET=${FORCE_NIC_FW_RESET:-"no"}
 NIC_FW_RESET_REQUIRED=0
 NIC_FW_FOUND=0
 FW_UPDATER=/opt/mellanox/mlnx-fw-updater/mlnx_fw_updater.pl
@@ -13,6 +14,10 @@ CHROOT=
 FLINT=mstflint
 if [ -x /usr/bin/flint ]; then
 	FLINT=/usr/bin/flint
+fi
+
+if [ "$FORCE_NIC_FW_RESET" == "yes" ]; then
+	NIC_FW_RESET="yes"
 fi
 
 running_nic_fw()
@@ -36,6 +41,20 @@ extract_nic_fw()
 	ilog "Extracting NIC Firmware files from $fspath/image.tar.xz"
 	ilog "$(tar Jxf $fspath/image.tar.xz --warning=no-timestamp ./opt/mellanox/mlnx-fw-updater 2>&1)"
 	NIC_FW_EXTRACTION_DONE=1
+}
+
+is_nic_fw_update_required()
+{
+	if [ "${FORCE_NIC_FW_UPDATE}" == "yes" ]; then
+		log "INFO: FORCE_NIC_FW_UPDATE is set."
+		return 0
+	fi
+
+	if [ "$(running_nic_fw)" == "$(provided_nic_fw)" ]; then
+		log "INFO: Installed NIC Firmware is the same as provided. Skipping NIC Firmware update."
+		return 1
+	fi
+	return 0
 }
 
 fw_update()
@@ -62,13 +81,14 @@ fw_update()
 	fi
 
 	if [ $NIC_FW_FOUND -eq 1 ]; then
-		if [ "$(running_nic_fw)" == "$(provided_nic_fw)" ]; then
-			if [ "${FORCE_NIC_FW_UPDATE}" == "yes" ]; then
-				log "INFO: Installed NIC Firmware is the same as provided. FORCE_NIC_FW_UPDATE is set."
-			else
-				log "INFO: Installed NIC Firmware is the same as provided. Skipping NIC Firmware update."
-				return
-			fi
+		# Check if firmware image was already updated on flash
+		if ($FLINT -d $cx_pcidev q 2>&1 | grep -q 'FW Version(Running)'); then
+			log "INFO: Reactivating previous firmware image on the NIC"
+			ilog "$($FLINT -d $cx_pcidev ir)"
+		fi
+
+		if ! is_nic_fw_update_required; then
+			return
 		fi
 
 		log "INFO: Updating NIC firmware..."
@@ -90,7 +110,7 @@ fw_update()
 		NIC_FW_UPDATE_DONE=1
 		if [ $rc -ne 0 ] || (grep -q '\-E- Failed' /tmp/mlnx_fw_update.log); then
 			NIC_FW_UPDATE_PASSED=0
-			log "INFO: NIC firmware update failed"
+			log "ERR NIC firmware update failed"
 			return 1
 		else
 			NIC_FW_UPDATE_PASSED=1
@@ -110,6 +130,28 @@ fw_reset()
 		return
 	fi
 
+	if ($CHROOT mlxfwreset -d /dev/mst/mt*_pciconf0 q | grep live-Patch | grep -qw "\-Supported"); then
+		log "INFO: Live Patch NIC Firmware reset is supported."
+		msg=$($CHROOT mlxfwreset -d /dev/mst/mt*_pciconf0 -y -l 0 r 2>&1)
+		if [ $? -ne 0 ]; then
+			log "ERR Live Patch NIC Firmware reset failed."
+			log "INFO: $msg"
+			if [ "$FORCE_NIC_FW_RESET" != "yes" ]; then
+				return
+			fi
+		else
+			log "INFO: Live Patch NIC Firmware reset done"
+			return
+		fi
+	else
+		if [ "$LFWP" == "yes" ]; then
+			log "INFO: Live Patch NIC Firmware reset is not supported."
+			if [ "$FORCE_NIC_FW_RESET" != "yes" ]; then
+				return
+			fi
+		fi
+	fi
+
 	/sbin/modprobe -a mlx5_core ib_umad
 	run_mlnx_bf_configure=0
 	if [ -x /mnt/sbin/mlnx_bf_configure ]; then
@@ -124,18 +166,6 @@ fw_reset()
 	if [ $run_mlnx_bf_configure -eq 1 ]; then
 		ilog "Running mlnx_bf_configure:"
 		ilog "$($CHROOT /sbin/mlnx_bf_configure 2>&1)"
-	fi
-
-	if ($CHROOT mlxfwreset -d /dev/mst/mt*_pciconf0 q | grep live-Patch | grep -qw "\-Supported"); then
-		log "INFO: Live Patch NIC Firmware reset is supported."
-		msg=$($CHROOT mlxfwreset -d /dev/mst/mt*_pciconf0 -y -l 0 r 2>&1)
-		if [ $? -ne 0 ]; then
-			log "INFO: Live Patch NIC Firmware reset failed."
-			log "INFO: $msg"
-		else
-			log "INFO: Live Patch NIC Firmware reset done"
-			return
-		fi
 	fi
 
 	MLXFWRESET_TIMEOUT=${MLXFWRESET_TIMEOUT:-180}
@@ -165,14 +195,14 @@ fw_reset()
 
 	msg=$($CHROOT mlxfwreset -d /dev/mst/mt*_pciconf0 -y -l 3 --sync 1 r 2>&1)
 	if [ $? -ne 0 ]; then
-		log "INFO: NIC Firmware reset failed. Host power cycle is required"
+		log "ERR NIC Firmware reset failed. Host power cycle is required"
 		log "INFO: $msg"
 	else
 		log "INFO: NIC Firmware reset done"
 		if [ "$(running_nic_fw)" == "${PROVIDED_NIC_FW_VERSION}" ]; then
 			log "INFO: NIC Firmware reset passed. Running NIC FW: ${PROVIDED_NIC_FW_VERSION}"
 		else
-			log "INFO: NIC Firmware reset failed. Host power cycle is required"
+			log "ERR NIC Firmware reset failed. Host power cycle is required"
 		fi
 	fi
 }

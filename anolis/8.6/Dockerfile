@@ -93,6 +93,7 @@ RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
         rsyslog \
         sg3_utils \
         shim \
+        spdk \
         sshpass \
         sudo \
         sysstat \

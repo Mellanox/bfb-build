@@ -22,10 +22,12 @@ FIELD_MODE_SET=0
 UPDATE_CEC_FW=${UPDATE_CEC_FW:-"yes"}
 BMC_INSTALLED_VERSION=""
 BMC_MIN_MULTIPART_VERSION="24.04"
+BMC_MIN_MULTIPART_VERSION_PLDM="25.10"
 CEC_MIN_RESET_VERSION="00.02.0180.0000"
 UPDATE_DPU_GOLDEN_IMAGE=${UPDATE_DPU_GOLDEN_IMAGE:-"yes"}
 UPDATE_NIC_FW_GOLDEN_IMAGE=${UPDATE_NIC_FW_GOLDEN_IMAGE:-"yes"}
 UPDATE_CERTIFICATES=${UPDATE_CERTIFICATES:-"yes"}
+RESET_BMC_RSHIM_LOG=${RESET_BMC_RSHIM_LOG:-"yes"}
 bmc_pref=""
 cec_sfx=""
 if (lspci -n -d 15b3: | grep -wq 'a2dc'); then
@@ -37,10 +39,10 @@ if (lspci -n -d 15b3: | grep -wq 'a2dc'); then
 		BMC_PATH=${BMC_PATH:-"/BF3BMC/bmc"}
 		CEC_PATH=${CEC_PATH:-"/BF3BMC/cec"}
 	else
-		NIC_FW_GI_PATH=${NIC_FW_GI_PATH:-"/lib/firmware/mellanox/bmc"}
-		DPU_GI_PATH=${DPU_GI_PATH:-"/lib/firmware/mellanox/bmc"}
-		BMC_PATH=${BMC_PATH:-"/lib/firmware/mellanox/bmc"}
-		CEC_PATH=${CEC_PATH:-"/lib/firmware/mellanox/cec"}
+		NIC_FW_GI_PATH=${NIC_FW_GI_PATH:-"/usr/lib/firmware/mellanox/bmc"}
+		DPU_GI_PATH=${DPU_GI_PATH:-"/usr/lib/firmware/mellanox/bmc"}
+		BMC_PATH=${BMC_PATH:-"/usr/lib/firmware/mellanox/bmc"}
+		CEC_PATH=${CEC_PATH:-"/usr/lib/firmware/mellanox/cec"}
 	fi
 elif (lspci -n -d 15b3: | grep -wq 'a2d6'); then
 	bmc_pref="bf2"
@@ -52,8 +54,8 @@ elif (lspci -n -d 15b3: | grep -wq 'a2d6'); then
 		BMC_PATH=${BMC_PATH:-"/BF2BMC/bmc"}
 		CEC_PATH=${CEC_PATH:-"/BF2BMC/cec"}
 	else
-		BMC_PATH=${BMC_PATH:-"/lib/firmware/mellanox/bmc"}
-		CEC_PATH=${CEC_PATH:-"/lib/firmware/mellanox/cec"}
+		BMC_PATH=${BMC_PATH:-"/usr/lib/firmware/mellanox/bmc"}
+		CEC_PATH=${CEC_PATH:-"/usr/lib/firmware/mellanox/cec"}
 	fi
 fi
 
@@ -71,9 +73,10 @@ conf_partition_size=${conf_partition_size:-50}
 CONFIG_IMAGE=${CONFIG_IMAGE:-"config-image.bfb"}
 CONFIG_CAP_DIR=${CONFIG_CAP_DIR:-"EFI/DefaultConfig"}
 CONFIG_CAP=${CONFIG_CAP:-"efi_bfcfg_defaults.cap"}
+export BMC_BASE_DIR=${BMC_BASE_DIR:-"/mnt"}
 
-L1_CERT=${L1_CERT:-"/lib/firmware/mellanox/boot/capsule/profile/keys/NV_NPGS_L1-certificate.pem"}
-L2_CERT=${L2_CERT:-"/lib/firmware/mellanox/boot/capsule/profile/keys/NV_NPGS_L2-certificate.pem"}
+L1_CERT=${L1_CERT:-"/usr/lib/firmware/mellanox/boot/capsule/profile/keys/NV_NPGS_L1-certificate.pem"}
+L2_CERT=${L2_CERT:-"/usr/lib/firmware/mellanox/boot/capsule/profile/keys/NV_NPGS_L2-certificate.pem"}
 CA_CHAIN_JSON=${CA_CHAIN_JSON:-"${DPU_TMP_DIR}/CA-chain.json"}
 
 export NIC_FW_GI_PATH
@@ -94,6 +97,23 @@ SSH="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel
 SCP="scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
 
 mlx_mkcap="/usr/lib/firmware/mellanox/boot/capsule/scripts/mlx-mkcap"
+
+reset_bmc_rshim_log()
+{
+	ilog "Resetting BMC Rshim log"
+	is_bmc_rshim=$(sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} 'test -e /dev/rshim0/misc && echo "yes" || echo "no"')
+	if [ "$is_bmc_rshim" == "no" ]; then
+		ilog "BMC Rshim is not found"
+		return
+	fi
+	ilog "$(sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} 'echo "CLEAR_ON_READ 1" > /dev/rshim0/misc')"
+	log "Resetting BMC Rshim log"
+	# Wait for the misc to flush
+	sleep 10
+	ilog "$(sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} 'cat /dev/rshim0/misc')"
+	ilog "$(sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} 'echo "CLEAR_ON_READ 0" > /dev/rshim0/misc')"
+	log "Rshim log cleared"
+}
 
 skip_bmc()
 {
@@ -356,6 +376,10 @@ wait_bmc_task_complete()
 			ilog "- ERROR: BMC task $task_id exception"
 			RC=$((RC+1))
 			break
+		elif [ "$task_state" == "Cancelled" ]; then
+			ilog "- ERROR: BMC task $task_id cancelled"
+			RC=$((RC+1))
+			break
 		elif [ "$task_state" == "Aborted" ]; then
 			ilog "- ERROR: BMC task $task_id aborted"
 			RC=$((RC+1))
@@ -379,9 +403,46 @@ extract_images()
 	if [ $BMC_EXTRACTION_DONE -eq 1 ]; then
 		return
 	fi
+
+	if [ -d ./usr/lib/firmware/mellanox/bmc ]; then
+		ilog "BMC and CEC files are already extracted"
+		BMC_EXTRACTION_DONE=1
+		return
+	fi
+
+	if [ "$distro" == "Debian" ]; then
+		ilog "Extracting BMC files to /tmp"
+		BMC_BASE_DIR=/tmp
+		cd $BMC_BASE_DIR
+	fi
+
+	if [ ! -f $fspath/image.tar.xz ]; then
+		# No image.tar.xz file found (bf-fwbindl case)
+		BMC_EXTRACTION_DONE=1
+		return
+	fi
+
 	ilog "Extracting BMC files from $fspath/image.tar.xz"
 	ilog "$(tar Jxf $fspath/image.tar.xz --warning=no-timestamp ./usr/lib/firmware/mellanox/{bmc,cec}/ 2>&1)"
+	ilog "Extracted BMC files to $(readlink -f ./usr/lib/firmware/mellanox/ 2>&1)"
 	BMC_EXTRACTION_DONE=1
+	if [ "$distro" == "Debian" ]; then
+		cd -
+	fi
+}
+
+get_bmc_firmware_version()
+{
+	get_bmc_token
+	BMC_FIRMWARE_URL=$(curl -sSk -H "X-Auth-Token: $BMC_TOKEN" -X GET https://${BMC_IP}/redfish/v1/UpdateService/FirmwareInventory | grep BMC_Firmware | awk '{print $NF}' | tr -d \")
+	ilog "- INFO: BMC_FIRMWARE_URL: $BMC_FIRMWARE_URL"
+	BMC_INSTALLED_VERSION="$(curl -sSk -H "X-Auth-Token: $BMC_TOKEN" -X GET https://${BMC_IP}${BMC_FIRMWARE_URL} | jq -r ' .Version' | grep -o "\([0-9]\+\).\([0-9]\+\)-\([0-9]\+\)")"
+	if [ -z "$BMC_INSTALLED_VERSION" ]; then
+		ilog "- ERROR: Cannot detect running BMC firmware version"
+		RC=$((RC+1))
+		return 1
+	fi
+	ilog "Running BMC firmware version: $BMC_INSTALLED_VERSION"
 }
 
 update_bmc_fw()
@@ -389,10 +450,10 @@ update_bmc_fw()
 	rc=0
 	wait_bmc_task_complete
 	log "Updating BMC firmware"
-	image=$(/bin/ls -1 {/mnt,/}${BMC_PATH}/${bmc_pref}*bmc*{fwpkg,tar} 2> /dev/null | grep -v preboot | tail -1)
+	extract_images
+	image=$(/bin/ls -1 {${BMC_BASE_DIR},/}${BMC_PATH}/${bmc_pref}*bmc*{fwpkg,tar} 2> /dev/null | grep -v preboot | tail -1)
 	if [ -z "$image" ]; then
-		extract_images
-		image=$(/bin/ls -1 {/mnt,/}${BMC_PATH}/${bmc_pref}*bmc*{fwpkg,tar} 2> /dev/null | tail -1)
+		image=$(/bin/ls -1 {${BMC_BASE_DIR},/}${BMC_PATH}/${bmc_pref}*bmc*{fwpkg,tar} 2> /dev/null | tail -1)
 		if [ -z "$image" ]; then
 			ilog "- ERROR: Cannot find BMC firmware image"
 			RC=$((RC+1))
@@ -401,7 +462,7 @@ update_bmc_fw()
 	fi
 	ilog "Found BMC firmware image: $image"
 
-	BMC_IMAGE_VERSION=$(cat {/mnt,/}${BMC_PATH}/${bmc_pref}-bmc-fw.version 2> /dev/null | head -1)
+	BMC_IMAGE_VERSION=$(cat {${BMC_BASE_DIR},/}${BMC_PATH}/${bmc_pref}-bmc-fw.version 2> /dev/null | head -1)
 	if [ -z "$BMC_IMAGE_VERSION" ]; then
 		if [[ "$image" =~ tar ]]; then
 			# BlueField-2
@@ -417,17 +478,9 @@ update_bmc_fw()
 	fi
 	ilog "Provided BMC firmware version: $BMC_IMAGE_VERSION"
 
-	get_bmc_token
-
-	BMC_FIRMWARE_URL=$(curl -sSk -H "X-Auth-Token: $BMC_TOKEN" -X GET https://${BMC_IP}/redfish/v1/UpdateService/FirmwareInventory | grep BMC_Firmware | awk '{print $NF}' | tr -d \")
-	ilog "- INFO: BMC_FIRMWARE_URL: $BMC_FIRMWARE_URL"
-	BMC_INSTALLED_VERSION="$(curl -sSk -H "X-Auth-Token: $BMC_TOKEN" -X GET https://${BMC_IP}${BMC_FIRMWARE_URL} | jq -r ' .Version' | grep -o "\([0-9]\+\).\([0-9]\+\)-\([0-9]\+\)")"
 	if [ -z "$BMC_INSTALLED_VERSION" ]; then
-		ilog "- ERROR: Cannot detect running BMC firmware version"
-		RC=$((RC+1))
-		return 1
+		get_bmc_firmware_version
 	fi
-	ilog "Running BMC firmware version: $BMC_INSTALLED_VERSION"
 
 	if [ "${BMC_IMAGE_VERSION}" == "${BMC_INSTALLED_VERSION}" ]; then
 		if [ "X${FORCE_BMC_FW_INSTALL}" == "Xyes" ]; then
@@ -448,6 +501,12 @@ update_bmc_fw()
 		output=$(curl -sSk -u $BMC_USER:$BMC_PASSWORD -H "Content-Type: application/octet-stream" -X POST -T ${image} https://${BMC_IP}/redfish/v1/UpdateService 2>&1)
 	fi
 	ilog "BMC Firmware update: $output"
+	if (echo $output | grep -q "internal service error"); then
+		rc=1
+		RC=$((RC+1))
+		log "ERR Failed to update BMC firmware"
+		return $rc
+	fi
 
 	BMC_FIRMWARE_UPDATED="yes"
 
@@ -469,11 +528,11 @@ update_cec_fw()
 	rc=0
 	wait_bmc_task_complete
 	log "Updating CEC firmware"
-	image=$(/bin/ls -1 {/mnt,/}${CEC_PATH}/${bmc_pref}*cec*${cec_sfx} 2> /dev/null | tail -1)
+	extract_images
+	image=$(/bin/ls -1 {${BMC_BASE_DIR},/}${CEC_PATH}/${bmc_pref}*cec*${cec_sfx} 2> /dev/null | tail -1)
 
 	if [ -z "$image" ]; then
-		extract_images
-		image=$(/bin/ls -1 {/mnt,/}${CEC_PATH}/${bmc_pref}*cec*${cec_sfx} 2> /dev/null | tail -1)
+		image=$(/bin/ls -1 {${BMC_BASE_DIR},/}${CEC_PATH}/${bmc_pref}*cec*${cec_sfx} 2> /dev/null | tail -1)
 		if [ -z "$image" ]; then
 			ilog "- ERROR: Cannot find CEC firmware image"
 			RC=$((RC+1))
@@ -482,7 +541,7 @@ update_cec_fw()
 	fi
 	ilog "Found CEC firmware image: $image"
 
-	CEC_IMAGE_VERSION=$(cat {/mnt,/}${CEC_PATH}/${bmc_pref}-cec-fw.version 2> /dev/null | head -1)
+	CEC_IMAGE_VERSION=$(cat {${BMC_BASE_DIR},/}${CEC_PATH}/${bmc_pref}-cec-fw.version 2> /dev/null | head -1)
 	if [ -z "$CEC_IMAGE_VERSION" ]; then
 		CEC_IMAGE_VERSION="$(strings -a -t d $image | grep -m 1 cec | cut -d '-' -f 2- | sed -e 's/ //g;s/.n02//')"
 	fi
@@ -519,18 +578,8 @@ update_cec_fw()
 
 	ilog "Proceeding with the CEC firmware update..."
 
-	if [ -z "$BMC_FIRMWARE_URL" ]; then
-		BMC_FIRMWARE_URL=$(curl -sSk -H "X-Auth-Token: $BMC_TOKEN" -X GET https://${BMC_IP}/redfish/v1/UpdateService/FirmwareInventory | grep BMC_Firmware | awk '{print $NF}' | tr -d \")
-		ilog "- INFO: BMC_FIRMWARE_URL: $BMC_FIRMWARE_URL"
-	fi
-
 	if [ -z "$BMC_INSTALLED_VERSION" ]; then
-		BMC_INSTALLED_VERSION="$(curl -sSk -H "X-Auth-Token: $BMC_TOKEN" -X GET https://${BMC_IP}${BMC_FIRMWARE_URL} | jq -r ' .Version' | grep -o "\([0-9]\+\).\([0-9]\+\)-\([0-9]\+\)")"
-		if [ -z "$BMC_INSTALLED_VERSION" ]; then
-			ilog "- ERROR: Cannot detect running BMC firmware version"
-			RC=$((RC+1))
-			return 1
-		fi
+		get_bmc_firmware_version
 	fi
 
 	if [[ $(echo -e "${BMC_MIN_MULTIPART_VERSION}\n${BMC_INSTALLED_VERSION}" | sort -V | head -n1) == "${BMC_MIN_MULTIPART_VERSION}" ]]; then
@@ -541,6 +590,12 @@ update_cec_fw()
 		output=$(curl -sSk -u $BMC_USER:$BMC_PASSWORD -H "Content-Type: application/octet-stream" -X POST -T ${image} https://${BMC_IP}/redfish/v1/UpdateService 2>&1)
 	fi
 	ilog "CEC Firmware update: $output"
+	if (echo $output | grep -q "internal service error"); then
+		rc=1
+		RC=$((RC+1))
+		log "ERR Failed to update CEC firmware"
+		return $rc
+	fi
 
 	wait_bmc_task_complete
 	if [ "$CEC_REBOOT" == "yes" ]; then
@@ -650,14 +705,14 @@ generate_config_image()
 		ilog "bfcfg --cfg2bin ${DPU_TMP_DIR}/bf.cfg --skip-mfg"
 		ilog "$(bfcfg --cfg2bin ${DPU_TMP_DIR}/bf.cfg --skip-mfg)"
 		if [ ! -e bf.cfg.bin ]; then
-			log "Failed to create bf.cfg.bin"
+			log "ERR Failed to create bf.cfg.bin"
 			RC=$((RC+1))
 			return 1
 		fi
 		ilog "$mlx_mkcap --cfg-data ${DPU_TMP_DIR}/bf.cfg.bin ${DPU_TMP_DIR}/bf.cfg.cap"
 		ilog "$($mlx_mkcap --cfg-data ${DPU_TMP_DIR}/bf.cfg.bin ${DPU_TMP_DIR}/bf.cfg.cap 2>&1)"
 		if [ ! -e ${DPU_TMP_DIR}/bf.cfg.cap ]; then
-			log "Failed to create capsule: ${DPU_TMP_DIR}/bf.cfg.cap"
+			log "ERR Failed to create capsule: ${DPU_TMP_DIR}/bf.cfg.cap"
 			RC=$((RC+1))
 			return 1
 		fi
@@ -665,7 +720,7 @@ generate_config_image()
 	ilog "mlx-mkbfb --capsule ${DPU_TMP_DIR}/bf.cfg.cap $1 ${DPU_TMP_DIR}/${CONFIG_IMAGE}"
 	ilog "$(mlx-mkbfb --capsule ${DPU_TMP_DIR}/bf.cfg.cap $1 ${DPU_TMP_DIR}/${CONFIG_IMAGE} 2>&1)"
 	if [ ! -e ${DPU_TMP_DIR}/${CONFIG_IMAGE} ]; then
-		log "Failed to create BFB: ${DPU_TMP_DIR}/${CONFIG_IMAGE}"
+		log "ERR Failed to create BFB: ${DPU_TMP_DIR}/${CONFIG_IMAGE}"
 		RC=$((RC+1))
 		return 1
 	fi
@@ -678,43 +733,74 @@ generate_config_image()
 update_dpu_golden_image()
 {
 	rc=0
+	image_type=""
 	log "Updating DPU Golden Image"
-	image=$(/bin/ls -1 {/mnt,/}${DPU_GI_PATH}/${bmc_pref}*preboot-install.bfb 2> /dev/null | tail -1)
+	extract_images
+	image=$(/bin/ls -1 {${BMC_BASE_DIR},/}${DPU_GI_PATH}/${bmc_pref}*preboot-install.bfb 2> /dev/null | tail -1)
 
 	if [ -z "$image" ]; then
-		extract_images
-		image=$(/bin/ls -1 {/mnt,/}${DPU_GI_PATH}/*preboot-install.bfb 2> /dev/null | tail -1)
+		image=$(/bin/ls -1 {${BMC_BASE_DIR},/}${DPU_GI_PATH}/*preboot-install.pldm 2> /dev/null | tail -1)
 		if [ -z "$image" ]; then
 			ilog "DPU golden image was not found"
 			RC=$((RC+1))
 			return 1
+		else
+			image_type="pldm"
 		fi
+	else
+		image_type="bfb"
 	fi
 
-	prepare_sshpass_environment
+	if [ "$image_type" == "bfb" ]; then
+		prepare_sshpass_environment
 
-	ilog "Found DPU Golden Image: $image"
-	DPU_GI_IMAGE_VERSION="$(sha256sum $image | awk '{print $1}')"
-	ilog "Provided DPU Golden Image version: $DPU_GI_IMAGE_VERSION"
+		ilog "Found DPU Golden Image: $image"
+		DPU_GI_IMAGE_VERSION="$(sha256sum $image | awk '{print $1}')"
+		ilog "Provided DPU Golden Image version: $DPU_GI_IMAGE_VERSION"
 
-	DPU_GI_INSTALLED_VERSION="$(sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} dpu_golden_image golden_image_arm -V 2> /dev/null)"
-	ilog "Installed DPU Golden Image version: $DPU_GI_INSTALLED_VERSION"
+		DPU_GI_INSTALLED_VERSION="$(sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} dpu_golden_image golden_image_arm -V 2> /dev/null)"
+		ilog "Installed DPU Golden Image version: $DPU_GI_INSTALLED_VERSION"
 
-	if [ "$DPU_GI_IMAGE_VERSION" == "$DPU_GI_INSTALLED_VERSION" ]; then
-		ilog "Installed DPU Golden Image version is the same as provided. Skipping DPU Golden Image update."
-	else
-		sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} mkdir -p ${BMC_TMP_DIR}/golden-image-arm
-		ilog "Copying $image to ${BMC_SSH_USER}@${BMC_IP}:${BMC_TMP_DIR}/golden-image-arm"
-		sshpass -p $BMC_SSH_PASSWORD $SCP $image ${BMC_SSH_USER}@${BMC_IP}:${BMC_TMP_DIR}/golden-image-arm
-		ilog "Installing DPU Golden Image on the BMC by: dpu_golden_image golden_image_arm -w ${BMC_TMP_DIR}/golden-image-arm/$(basename $image)"
-		output=$(sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} dpu_golden_image golden_image_arm -w ${BMC_TMP_DIR}/golden-image-arm/$(basename $image) 2>&1)
-		if [ $? -eq 0 ]; then
-			log "DPU Golden Image installed successfully"
+		if [ "$DPU_GI_IMAGE_VERSION" == "$DPU_GI_INSTALLED_VERSION" ]; then
+			ilog "Installed DPU Golden Image version is the same as provided. Skipping DPU Golden Image update."
 		else
-			log "DPU Golden Image installed failed"
-			rc=1
+			sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} mkdir -p ${BMC_TMP_DIR}/golden-image-arm
+			ilog "Copying $image to ${BMC_SSH_USER}@${BMC_IP}:${BMC_TMP_DIR}/golden-image-arm"
+			sshpass -p $BMC_SSH_PASSWORD $SCP $image ${BMC_SSH_USER}@${BMC_IP}:${BMC_TMP_DIR}/golden-image-arm
+			ilog "Installing DPU Golden Image on the BMC by: dpu_golden_image golden_image_arm -w ${BMC_TMP_DIR}/golden-image-arm/$(basename $image)"
+			output=$(sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} dpu_golden_image golden_image_arm -w ${BMC_TMP_DIR}/golden-image-arm/$(basename $image) 2>&1)
+			if [ $? -eq 0 ]; then
+				log "DPU Golden Image installed successfully"
+			else
+				log "ERR DPU Golden Image installation failed"
+				rc=1
+			fi
+			ilog "$output"
 		fi
-		ilog "$output"
+	elif [ "$image_type" == "pldm" ]; then
+
+		wait_bmc_task_complete
+
+		if [ -z "$BMC_INSTALLED_VERSION" ]; then
+			get_bmc_firmware_version
+		fi
+
+		if [[ $(echo -e "${BMC_MIN_MULTIPART_VERSION_PLDM}\n${BMC_INSTALLED_VERSION}" | sort -V | head -n1) == "${BMC_MIN_MULTIPART_VERSION_PLDM}" ]]; then
+			ilog "curl -k -H \"X-Auth-Token: <BMC_TOKEN>\" -X POST https://${BMC_IP}/redfish/v1/UpdateService/update-multipart  -F 'UpdateParameters={};type=application/json'  -F \"UpdateFile=@${image};type=application/octet-stream\""
+			output=$(curl -sSk -H "X-Auth-Token: $BMC_TOKEN" -X POST https://${BMC_IP}/redfish/v1/UpdateService/update-multipart  -F 'UpdateParameters={};type=application/json'  -F "UpdateFile=@${image};type=application/octet-stream" 2>&1)
+			ilog "DPU Golden Image update: $output"
+			if (echo $output | grep -q "internal service error"); then
+				rc=1
+				RC=$((RC+1))
+				log "ERR Failed to update DPU Golden Image"
+				return $rc
+			fi
+		else
+			ilog "DPU Golden Image update is not supported for BMC firmware version $BMC_INSTALLED_VERSION"
+			ilog "Please update BMC firmware to version $BMC_MIN_MULTIPART_VERSION_PLDM or higher"
+			RC=$((RC+1))
+			return 1
+		fi
 	fi
 
 	if (echo "${BD_PSIDS}" | grep -qw "${PSID}"); then
@@ -737,12 +823,13 @@ update_dpu_golden_image()
 					log "Installed BMC config image"
 					BMC_CONFIG_UPDATED="yes"
 				else
-					log "Failed to install BMC config image"
+					log "ERR Failed to install BMC config image"
 				fi
 				ilog "$output"
 			fi
 		fi
 	fi
+
 	return $rc
 }
 
@@ -750,42 +837,73 @@ update_nic_firmware_golden_image()
 {
 	rc=0
 	log "Updating NIC firmware Golden Image"
-	image=$(/bin/ls -1 {/mnt,/}${NIC_FW_GI_PATH}/*${dpu_part_number}* 2> /dev/null | tail -1)
+	image_type=""
+	extract_images
+	image=$(/bin/ls -1 {${BMC_BASE_DIR},/}${NIC_FW_GI_PATH}/*${dpu_part_number}*bfb 2> /dev/null | tail -1)
 
 	if [ -z "$image" ]; then
-		extract_images
+		image=$(/bin/ls -1 {${BMC_BASE_DIR},/}${NIC_FW_GI_PATH}/*${dpu_part_number}*pldm 2> /dev/null | tail -1)
 		if [ -z "$image" ]; then
-			image=$(/bin/ls -1 {/mnt,/}${NIC_FW_GI_PATH}/*${dpu_part_number}* 2> /dev/null | tail -1)
 			ilog "NIC firmware Golden Image for $dpu_part_number was not found"
+			RC=$((RC+1))
+			return 1
+		else
+			image_type="pldm"
+		fi
+	else
+		image_type="bfb"
+	fi
+
+	if [ "$image_type" == "bfb" ]; then
+		prepare_sshpass_environment
+
+		ilog "Found NIC firmware Golden Image: $image"
+		NIC_GI_IMAGE_VERSION="$(sha256sum $image | awk '{print $1}')"
+		ilog "Provided NIC firmware Golden Image version: $NIC_GI_IMAGE_VERSION"
+
+		NIC_GI_INSTALLED_VERSION="$(sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} dpu_golden_image golden_image_nic -V 2> /dev/null)"
+		ilog "Installed NIC firmware Golden Image version: $NIC_GI_INSTALLED_VERSION"
+
+		if [ "$NIC_GI_IMAGE_VERSION" == "$NIC_GI_INSTALLED_VERSION" ]; then
+			ilog "Installed NIC firmware Golden Image version is the same as provided. Skipping NIC firmware Golden Image update."
+			return 0
+		fi
+
+		sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} mkdir -p ${BMC_TMP_DIR}/golden-image-nic
+		sshpass -p $BMC_SSH_PASSWORD $SCP $image ${BMC_SSH_USER}@${BMC_IP}:${BMC_TMP_DIR}/golden-image-nic
+		output=$(sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} dpu_golden_image golden_image_nic -w ${BMC_TMP_DIR}/golden-image-nic/$(basename $image) 2>&1)
+		if [ $? -eq 0 ]; then
+			log "NIC firmware Golden Image installed successfully"
+		else
+			log "ERR NIC firmware Golden Image installed failed"
+			rc=1
+		fi
+		ilog "$output"
+	elif [ "$image_type" == "pldm" ]; then
+
+		wait_bmc_task_complete
+
+		if [ -z "$BMC_INSTALLED_VERSION" ]; then
+			get_bmc_firmware_version
+		fi
+
+		if [[ $(echo -e "${BMC_MIN_MULTIPART_VERSION_PLDM}\n${BMC_INSTALLED_VERSION}" | sort -V | head -n1) == "${BMC_MIN_MULTIPART_VERSION_PLDM}" ]]; then
+			ilog "curl -k -H \"X-Auth-Token: <BMC_TOKEN>\" -X POST https://${BMC_IP}/redfish/v1/UpdateService/update-multipart  -F 'UpdateParameters={};type=application/json'  -F \"UpdateFile=@${image};type=application/octet-stream\""
+			output=$(curl -sSk -H "X-Auth-Token: $BMC_TOKEN" -X POST https://${BMC_IP}/redfish/v1/UpdateService/update-multipart  -F 'UpdateParameters={};type=application/json'  -F "UpdateFile=@${image};type=application/octet-stream" 2>&1)
+			ilog "NIC firmware Golden Image update: $output"
+			if (echo $output | grep -q "internal service error"); then
+				rc=1
+				RC=$((RC+1))
+				log "ERR Failed to update NIC firmware Golden Image"
+				return $rc
+			fi
+		else
+			ilog "NIC Firmware Golden Image update is not supported for BMC firmware version $BMC_INSTALLED_VERSION"
+			ilog "Please update BMC firmware to version $BMC_MIN_MULTIPART_VERSION_PLDM or higher"
 			RC=$((RC+1))
 			return 1
 		fi
 	fi
-
-	prepare_sshpass_environment
-
-	ilog "Found NIC firmware Golden Image: $image"
-	NIC_GI_IMAGE_VERSION="$(sha256sum $image | awk '{print $1}')"
-	ilog "Provided NIC firmware Golden Image version: $NIC_GI_IMAGE_VERSION"
-
-	NIC_GI_INSTALLED_VERSION="$(sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} dpu_golden_image golden_image_nic -V 2> /dev/null)"
-	ilog "Installed NIC firmware Golden Image version: $NIC_GI_INSTALLED_VERSION"
-
-	if [ "$NIC_GI_IMAGE_VERSION" == "$NIC_GI_INSTALLED_VERSION" ]; then
-		ilog "Installed NIC firmware Golden Image version is the same as provided. Skipping NIC firmware Golden Image update."
-		return 0
-	fi
-
-	sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} mkdir -p ${BMC_TMP_DIR}/golden-image-nic
-	sshpass -p $BMC_SSH_PASSWORD $SCP $image ${BMC_SSH_USER}@${BMC_IP}:${BMC_TMP_DIR}/golden-image-nic
-	output=$(sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} dpu_golden_image golden_image_nic -w ${BMC_TMP_DIR}/golden-image-nic/$(basename $image) 2>&1)
-	if [ $? -eq 0 ]; then
-		log "NIC firmware Golden Image installed successfully"
-	else
-		log "NIC firmware Golden Image installed failed"
-		rc=1
-	fi
-	ilog "$output"
 	return $rc
 }
 
@@ -796,6 +914,11 @@ update_certificates()
 
 	# Get the number of existing certificates
 	num_certs=$(curl -sSk -u $BMC_USER:$BMC_PASSWORD -X GET https://${BMC_IP}/redfish/v1/Systems/Bluefield/Oem/Nvidia/SystemConfigProfile/Truststore/NvidiaCertificates | jq '."Members@odata.count"')
+	# Validate num_certs is a valid integer
+	if [[ -z "$num_certs" || "$num_certs" == "null" || ! "$num_certs" =~ ^[0-9]+$ ]]; then
+		ilog "WARNING: Could not get valid certificate count (got: '$num_certs'), assuming 0"
+		num_certs=0
+	fi
 	ilog "Number of existing certificates: $num_certs"
 	if [ $num_certs -gt 0 ]; then
 		ilog "Checking if certificates are already uploaded"
@@ -900,6 +1023,10 @@ bmc_components_update()
 
 	else
 		return
+	fi
+
+	if [ "$RESET_BMC_RSHIM_LOG" == "yes" ]; then
+		reset_bmc_rshim_log
 	fi
 
 	if function_exists bmc_custom_action1; then

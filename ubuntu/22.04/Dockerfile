@@ -21,7 +21,7 @@ ADD mlxbf-bootimages.deb .
 ADD 10-mlx-console-messages.conf /etc/sysctl.d/
 ADD repos/ /etc/apt/sources.list.d/
 ADD apt-preferences /etc/apt/preferences.d/99doca
-ADD --chown=0:0 --chmod=644 https://prod-cdn.packages.k8s.io/repositories/isv:/kubernetes:/core:/stable:/v1.33/deb/Release.key /etc/apt/keyrings/kubernetes.asc
+ADD --chown=0:0 --chmod=644 https://prod-cdn.packages.k8s.io/repositories/isv:/kubernetes:/core:/stable:/v1.34/deb/Release.key /etc/apt/keyrings/kubernetes.asc
 
 RUN apt update
 RUN dpkg -i /root/workspace/mlxbf-bootimages*.deb
@@ -31,19 +31,19 @@ RUN apt remove -y --purge $(dpkg --list "*openipmi*" | grep openipmi | awk '{pri
 RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
 
 RUN apt install -y -f \
-	linux-bluefield=5.15.0.1074.76 \
-	linux-bluefield-cloud-tools-common=5.15.0-1074.76 \
-	linux-bluefield-headers-5.15.0-1074=5.15.0-1074.76 \
-	linux-bluefield-tools-5.15.0-1074=5.15.0-1074.76 \
-	linux-buildinfo-5.15.0-1074-bluefield=5.15.0-1074.76 \
-	linux-headers-5.15.0-1074-bluefield=5.15.0-1074.76 \
-	linux-headers-bluefield=5.15.0.1074.76 \
-	linux-image-5.15.0-1074-bluefield=5.15.0-1074.76 \
-	linux-image-bluefield=5.15.0.1074.76 \
-	linux-modules-5.15.0-1074-bluefield=5.15.0-1074.76 \
-	linux-modules-extra-5.15.0-1074-bluefield=5.15.0-1074.76 \
-	linux-tools-5.15.0-1074-bluefield=5.15.0-1074.76 \
-	linux-tools-bluefield=5.15.0.1074.76
+	linux-bluefield=5.15.0.1081.83 \
+	linux-bluefield-cloud-tools-common=5.15.0-1081.83 \
+	linux-bluefield-headers-5.15.0-1081=5.15.0-1081.83 \
+	linux-bluefield-tools-5.15.0-1081=5.15.0-1081.83 \
+	linux-buildinfo-5.15.0-1081-bluefield=5.15.0-1081.83 \
+	linux-headers-5.15.0-1081-bluefield=5.15.0-1081.83 \
+	linux-headers-bluefield=5.15.0.1081.83 \
+	linux-image-5.15.0-1081-bluefield=5.15.0-1081.83 \
+	linux-image-bluefield=5.15.0.1081.83 \
+	linux-modules-5.15.0-1081-bluefield=5.15.0-1081.83 \
+	linux-modules-extra-5.15.0-1081-bluefield=5.15.0-1081.83 \
+	linux-tools-5.15.0-1081-bluefield=5.15.0-1081.83 \
+	linux-tools-bluefield=5.15.0.1081.83
 
 RUN apt-get clean -y && \
     apt-get update -o "Acquire::https::Verify-Peer=false" -y && \
@@ -123,6 +123,9 @@ RUN apt-get clean -y && \
         rsyslog \
         shim-signed \
         software-properties-common \
+        spdk \
+        spdk-rpc \
+        spdk-dev \
         ssh \
         sshpass \
         sudo \
@@ -144,6 +147,7 @@ RUN apt-get clean -y && \
         libxlio-dev \
         libxlio-utils \
         mlnx-snap \
+        mlnx-libsnap \
         strongswan \
         ${MLNX_FW_UPDATER} \
         ${BMC_FW_PACKAGES} \

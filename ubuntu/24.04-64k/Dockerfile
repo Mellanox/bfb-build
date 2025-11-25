@@ -2,7 +2,7 @@ FROM scratch
 
 ENV DEBIAN_FRONTEND="noninteractive" FLASH_KERNEL_SKIP="yes" RUN_FW_UPDATER="no"
 
-ADD jammy-server-cloudimg-arm64-root.tar.xz /
+ADD noble-server-cloudimg-arm64-root.tar.xz /
 ADD qemu-aarch64-static /usr/bin/
 RUN mkdir -p /opt/mellanox/doca/services/
 ADD telemetry-agent /opt/mellanox/doca/services/telemetry
@@ -31,19 +31,14 @@ RUN apt remove -y --purge $(dpkg --list "*openipmi*" | grep openipmi | awk '{pri
 RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
 
 RUN apt install -y -f \
-    linux-bluefield=5.15.0.1081.83 \
-    linux-bluefield-cloud-tools-common=5.15.0-1081.83 \
-    linux-bluefield-headers-5.15.0-1081=5.15.0-1081.83 \
-    linux-bluefield-tools-5.15.0-1081=5.15.0-1081.83 \
-    linux-buildinfo-5.15.0-1081-bluefield=5.15.0-1081.83 \
-    linux-headers-5.15.0-1081-bluefield=5.15.0-1081.83 \
-    linux-headers-bluefield=5.15.0.1081.83 \
-    linux-image-5.15.0-1081-bluefield=5.15.0-1081.83 \
-    linux-image-bluefield=5.15.0.1081.83 \
-    linux-modules-5.15.0-1081-bluefield=5.15.0-1081.83 \
-    linux-modules-extra-5.15.0-1081-bluefield=5.15.0-1081.83 \
-    linux-tools-5.15.0-1081-bluefield=5.15.0-1081.83 \
-    linux-tools-bluefield=5.15.0.1081.83
+    linux-bluefield-headers-6.8.0-1012=6.8.0-1012.16 \
+    linux-bluefield-tools-6.8.0-1012=6.8.0-1012.16 \
+    linux-buildinfo-6.8.0-1012-bluefield-64k=6.8.0-1012.16 \
+    linux-headers-6.8.0-1012-bluefield-64k=6.8.0-1012.16 \
+    linux-image-6.8.0-1012-bluefield-64k=6.8.0-1012.16 \
+    linux-modules-6.8.0-1012-bluefield-64k=6.8.0-1012.16 \
+    linux-modules-extra-6.8.0-1012-bluefield-64k=6.8.0-1012.16 \
+    linux-tools-6.8.0-1012-bluefield-64k=6.8.0-1012.16
 
 RUN apt-get clean -y && \
     apt-get update -o "Acquire::https::Verify-Peer=false" -y && \
@@ -104,6 +99,7 @@ RUN apt-get clean -y && \
         libpam-pwquality \
         lldpd \
         lm-sensors \
+        lzma \
         mmc-utils \
         mstflint \
         net-tools \
@@ -116,8 +112,8 @@ RUN apt-get clean -y && \
         pciutils \
         pkexec \
         python3-pip \
+        python-is-python3 \
         python3-pyinotify \
-        python3.10 \
         rasdaemon \
         rsync \
         rsyslog \
@@ -130,8 +126,10 @@ RUN apt-get clean -y && \
         sshpass \
         sudo \
         sysstat \
+        systemd-boot \
         tcpdump \
         unzip \
+        util-linux-extra \
         usbutils \
         uuid \
         uuid-runtime \
@@ -164,8 +162,7 @@ RUN apt-get clean -y && \
     sed -i -e "s/FORCE_MODE=.*/FORCE_MODE=yes/" /etc/infiniband/openib.conf && \
     sed -i -r -e "s/^(MACAddressPolicy.*)/# \1/" /usr/lib/systemd/network/99-default.link && \
     update-pciids && \
-    update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1 && \
-    wget -qO - https://linux.mellanox.com/public/repo/doca/latest/ubuntu22.04/aarch64/GPG-KEY-Mellanox.pub | apt-key add -
+    wget -qO - https://linux.mellanox.com/public/repo/doca/3.2.0/ubuntu24.04-64k/aarch64/GPG-KEY-Mellanox.pub | apt-key add -
 
 # Manage system services
 RUN systemctl enable NetworkManager.service || true

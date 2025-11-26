@@ -36,27 +36,19 @@ fi
 
 DISTRO="oraclelinux"
 DISTRO_VERSION="9.4"
-ARCH=${ARCH:-"aarch64"}
-DOCA_VERSION="3.1.0"
-BSP_VERSION="4.12.0-13720"
-BF_VERSION=${BSP_VERSION%-*}
+DISTRO_KERNEL=${DISTRO_KERNEL:-""}
+RELEASE_DIR_SUFFIX=${RELEASE_DIR_SUFFIX:-""}
+ARCH=${ARCH:-"arm64-dpu"}
+DOCA_VERSION="3.2.0"
+BSP_VERSION="4.13.0-13799"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
-RELTARGET="25.07"
-BUILDVER=${BUILDVER:-"139"}
-
-WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
 BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
 LEAVE_CONTAINER=${LEAVE_CONTAINER:-"no"}
 
+WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
+
 mkdir -p $WDIR
 
-# Add select env variables that will be passed into container during run phase
-cat > ${WDIR}/envfile << EOF
-BSP_VERSION=${BSP_VERSION}
-BF3_NIC_FW_VERSION=${BF3_NIC_FW_VERSION}
-EOF
-
-echo "Downloading mlxbf-bootimages..."
 case "$IMAGE_TYPE" in
 	prod)
 		bootimages="mlxbf-bootimages-signed-${BSP_VERSION}.aarch64.rpm"
@@ -69,79 +61,42 @@ case "$IMAGE_TYPE" in
 		;;
 esac
 
+echo "Downloading mlxbf-bootimages..."
 mkdir -p $WDIR/bootimages
 wget --no-verbose -P $WDIR/bootimages ${BASE_URL}/doca/${DOCA_VERSION}/OracleLinux9/${ARCH}/$bootimages
 
-mkdir -p $WDIR/uek
-if [ -d uek ]; then
-	cp -a uek $WDIR
-else
-	wget -P $WDIR/uek -r --no-verbose --no-directories -l1 --no-parent -A 'kernel*aarch64.rpm' ${BASE_URL}/doca/${DOCA_VERSION}/OracleLinux9/uek7/aarch64/
-fi
-
-cp	Dockerfile.* \
+cp -a \
+	Dockerfile \
 	create_bfb \
 	install.sh \
-	build_ol_bfb \
-	run_create_bfb \
-	docker-ce.repo \
+	repos \
+	10-mlx-console-messages.conf \
 	../../common/tools/qemu-aarch64-static \
 	$WDIR
 
-cp -a ../install.env \
-	$WDIR
-
-if [ -d uek ]; then
-	cp -a uek $WDIR
+if [ -d install.env ]; then
+	cp -a install.env \
+		$WDIR
+else
+	cp -a ../../common/install.env \
+		$WDIR
 fi
 
-build_rpms=${build_rpms:-0}
-BUILDNUM=${BUILDNUM:-"1.inbox"}
-
 cd $WDIR
+
+echo -e "[doca] \n\
+name=Nvidia DOCA repository \n\
+baseurl=$BASE_URL/doca/${DOCA_VERSION}-${BSP_VERSION}${RELEASE_DIR_SUFFIX}/OracleLinux9/arm64-dpu/ \n\
+gpgcheck=0 \n\
+enabled=1" > $WDIR/repos/doca.repo
 
 docker_image=bfb_runtime_${DISTRO,,}${DISTRO_VERSION,,}
 
 docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION} 2> /dev/null || true
 
-if [ $build_rpms -eq 1 ]; then
-	sed -e "s/@DISTRO_VERSION@/${DISTRO_VERSION}/g" \
-		-e "s/@IMAGE_TYPE@/${IMAGE_TYPE}/g" \
-		-e "s/@CUSTOM_VERSION@/$CUSTOM_VERSION/" \
-		-e "s/@BF_VERSION@/${BF_VERSION}/g" \
-		-e "s/@BSP_VERSION@/${BSP_VERSION}/g" \
-		-e "s/@BUILDVER@/${BUILDVER}/g" \
-		Dockerfile.build > $WDIR/Dockerfile
-
-	docker build -t bfb_build_${DISTRO}${DISTRO_VERSION} -f Dockerfile .
-	docker run -t --rm --privileged -e container=docker \
-		-v $PWD:/workspace \
-		--name BlueField_OS_${DISTRO}_${DISTRO_VERSION} \
-		--mount type=bind,source=/dev,target=/dev \
-		--mount type=bind,source=/sys,target=/sys \
-		--mount type=bind,source=/proc,target=/proc \
-		bfb_build_${DISTRO}${DISTRO_VERSION}
-
-    /bin/rm -f *debug*.rpm
-
-    mkdir -p $WDIR/SoC
-    mv *.rpm $WDIR/SoC
-fi
-
-sed -e "s/@DISTRO_VERSION@/${DISTRO_VERSION}/g" \
-	-e "s/@IMAGE_TYPE@/${IMAGE_TYPE}/g" \
-	-e "s/@CUSTOM_VERSION@/${CUSTOM_VERSION}/g" \
-	-e "s/@BSP_VERSION@/${BSP_VERSION}/g" \
-	-e "s/@DOCA_VERSION@/${DOCA_VERSION}/g" \
-	-e "s/@BF_VERSION@/${BF_VERSION}/g" \
-	-e "s|@BASE_URL@|${BASE_URL}|g" \
-	-e "s/@BUILDVER@/${BUILDVER}/g" \
-	-e "s/@RELTARGET@/${RELTARGET}/g" \
-	Dockerfile.run > $WDIR/Dockerfile
+sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/g;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/g" Dockerfile
 
 docker build -t ${docker_image} \
-	--progress=plain \
-	--no-cache \
 	--build-arg BASE_URL=$BASE_URL \
 	--build-arg DOCA_VERSION=$DOCA_VERSION \
 	--build-arg BSP_VERSION=$BSP_VERSION \
@@ -149,24 +104,23 @@ docker build -t ${docker_image} \
 
 DOCKER_RUN_PARAMS="--privileged -e container=docker \
 	-v $PWD:/workspace \
-	--name BlueField_OS_${DISTRO}_${DISTRO_VERSION} \
+	--name BlueField_OS_${DISTRO}_${DISTRO_VERSION}${DISTRO_KERNEL} \
 	--mount type=bind,source=/dev,target=/dev \
 	--mount type=bind,source=/sys,target=/sys \
-	--mount type=bind,source=/proc,target=/proc \
-	--env-file envfile"
+	--mount type=bind,source=/proc,target=/proc"
 
 if [ "X${LEAVE_CONTAINER}" == "Xyes" ]; then
 	DOCKER_RUN_PARAMS="-d -it ${DOCKER_RUN_PARAMS}"
 	docker_id=$(docker run ${DOCKER_RUN_PARAMS} \
 		${docker_image} /bin/bash)
-	docker exec -it ${docker_id} /bin/bash -x /root/workspace/run_create_bfb
+	docker exec -it ${docker_id} /bin/bash -x /root/workspace/create_bfb
 else
 	DOCKER_RUN_PARAMS="-t --rm ${DOCKER_RUN_PARAMS}"
 	docker run ${DOCKER_RUN_PARAMS} \
-		${docker_image} /bin/bash -x /root/workspace/run_create_bfb
+		${docker_image} /bin/bash -x /root/workspace/create_bfb
 fi
 
-readlink -f *.bfb
+readlink -f bf-bundle*.bfb
 
 echo "Default root password is: oracle"
 

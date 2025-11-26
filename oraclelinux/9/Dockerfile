@@ -1,4 +1,4 @@
-FROM oraclelinux:9
+FROM --platform=linux/arm64 oraclelinux:9
 
 ADD qemu-aarch64-static /usr/bin/
 

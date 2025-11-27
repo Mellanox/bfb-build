@@ -87,14 +87,29 @@ prepare_target_partitions()
 
 	# Generate some entropy
 	mke2fs -O 64bit -O extents -F ${device}p2
+
+	ilog "Creating file systems:"
+	(
+	mkfs.fat -F32 -n system-boot ${device}p1
+	mkfs.${ROOTFS} -f ${device}p2 -L writable
+	) >> $LOG 2>&1
+	sync
+	sleep 1
+
+	fsck.vfat -a ${device}p1
+
+	if [ "${ROOTFS}" == "xfs" ]; then
+		ilog "xfs_repair"
+		ilog "$(xfs_repair -L ${device}p2 2>&1)"
+	fi
 }
 
 mount_target_partition()
 {
         ilog "Creating file systems:"
         (
-        mkfs.fat -F32 -n system-boot ${device}p1
-        mkfs.${ROOTFS} -f ${device}p2 -L "writable"
+        mkdosfs ${device}p1 -n "system-boot"
+        mkfs.${ROOTFS} -F ${device}p2 -L "writable"
         ) >> $LOG 2>&1
         sync
         sleep 1
@@ -132,14 +147,17 @@ $(lsblk -o NAME,LABEL,UUID,PARTUUID)
 
 EOF
 
-	cat > /mnt/etc/fstab << EOF
-#
-# /etc/fstab
-#
-#
+	if [ "${FSTAB_USE_DEV_NAME}" == "yes" ]; then
+		cat > /mnt/etc/fstab << EOF
+${device}p2  /           ${ROOTFS}     defaults                   0 1
+${device}p1  /boot/efi   vfat    umask=0077,shortname=winnt 0 2
+EOF
+	else
+		cat > /mnt/etc/fstab << EOF
 $(get_part_id ${device}p2)  /           ${ROOTFS}     defaults                   0 1
 $(get_part_id ${device}p1)  /boot/efi   vfat    umask=0077,shortname=winnt 0 2
 EOF
+	fi
 
 	/bin/rm -f /mnt/etc/hostname
 
@@ -168,6 +186,13 @@ if (lspci -n -d 15b3: | grep -wq 'a2dc'); then
 	# BlueField-3 - remove mlnx-snap
 	chroot /mnt rpm -e mlnx-snap || true
 	packages_to_remove=$(chroot /mnt /bin/bash -c "/usr/bin/rpm -qf /lib/firmware/mellanox/{bmc,cec}/* 2>&1" | grep -viE "bf3-cec-fw|bf3-bmc-fw|bf3-bmc-gi|${dpu_part_number//_/-}" | tr -s '\n' ' ')
+elif (lspci -n -d 15b3: | grep -wq 'a2df'); then
+	# BlueField-4
+	chroot /mnt rpm -e mlnx-snap mlnx-libsnap spdk || true
+	packages_to_remove=$(chroot /mnt /bin/bash -c "/usr/bin/rpm -qf /lib/firmware/mellanox/{bmc,cec}/* 2>&1" | grep -E "bf2|bf3" | tr -s '\n' ' ')
+fi
+
+if [ -n "$packages_to_remove" ]; then
 	ilog "Removing packages: $packages_to_remove"
 	ilog "$(chroot /mnt bash -c "/usr/bin/yum remove -y $packages_to_remove" || true)"
 fi
@@ -207,7 +232,11 @@ EOF
 	if [ -n "$redfish_osarg" ]; then
 		bootarg="$bootarg $redfish_osarg"
 	fi
-	sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"crashkernel=auto $bootarg console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 net.ifnames=0 biosdevname=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
+	if (lscpu 2>&1 | grep -wq Grace); then
+		sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=1024M $bootarg keep_bootcon earlycon modprobe.blacklist=mlx5_core,mlx5_ib selinux=0 net.ifnames=0 biosdevname=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
+	else
+		sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"crashkernel=auto $bootarg console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 net.ifnames=0 biosdevname=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
+	fi
 	if (grep -q MLNXBF33 /sys/firmware/acpi/tables/SSDT*); then
 		# BlueField-3
 		sed -i -e "s/0x01000000/0x13010000/g" /mnt/etc/default/grub

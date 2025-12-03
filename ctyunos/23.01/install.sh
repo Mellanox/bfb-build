@@ -87,7 +87,6 @@ configure_grub()
 {
 	ilog "Configure grub:"
 	configure_default_grub
-
 	ilog "$(chroot /mnt grub2-mkconfig -o /boot/efi/EFI/ctyunos/grub.cfg 2>&1)"
 }
 

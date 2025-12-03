@@ -1,0 +1,11 @@
+[everything]
+name=CTyunOS-23.01 - everything
+baseurl=https://repo.ctyun.cn/hostos/ctyunos-23.01/everything/aarch64/
+enabled=1
+gpgcheck=0
+
+[update]
+name=CTyunOS-23.01 - update
+baseurl=https://repo.ctyun.cn/hostos/ctyunos-23.01/update/aarch64/
+enabled=1
+gpgcheck=0

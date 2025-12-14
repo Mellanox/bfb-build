@@ -136,6 +136,7 @@ RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
         mlnx-libsnap \
         ${MLNX_FW_UPDATER} \
         ${BMC_FW_PACKAGES} \
+        ${CEC_FW_PACKAGES} \
         https://linux.mellanox.com/public/repo/doca/2.2.1/extras/addons/dracut-sshd-0.6.5-1.el8.noarch.rpm \
     && \
     dnf -y clean all && \

@@ -35,7 +35,8 @@ if ! (which docker > /dev/null 2>&1); then
 fi
 
 DISTRO="oraclelinux"
-DISTRO_VERSION="9.4"
+DISTRO_DISPLAY_NAME="OracleLinux"
+DISTRO_VERSION="9"
 DISTRO_KERNEL=${DISTRO_KERNEL:-""}
 RELEASE_DIR_SUFFIX=${RELEASE_DIR_SUFFIX:-""}
 ARCH=${ARCH:-"arm64-dpu"}
@@ -63,7 +64,7 @@ esac
 
 echo "Downloading mlxbf-bootimages..."
 mkdir -p $WDIR/bootimages
-wget --no-verbose -P $WDIR/bootimages ${BASE_URL}/doca/${DOCA_VERSION}/OracleLinux9/${ARCH}/$bootimages
+wget --no-verbose -P $WDIR/bootimages ${BASE_URL}/doca/${DOCA_VERSION}/${DISTRO_DISPLAY_NAME}${DISTRO_VERSION}/${ARCH}/$bootimages
 
 cp -a \
 	Dockerfile \
@@ -86,7 +87,7 @@ cd $WDIR
 
 echo -e "[doca] \n\
 name=Nvidia DOCA repository \n\
-baseurl=$BASE_URL/doca/${DOCA_VERSION}-${BSP_VERSION}${RELEASE_DIR_SUFFIX}/OracleLinux9/arm64-dpu/ \n\
+baseurl=$BASE_URL/doca/${DOCA_VERSION}-${BSP_VERSION}${RELEASE_DIR_SUFFIX}/${DISTRO_DISPLAY_NAME}${DISTRO_VERSION}/arm64-dpu/ \n\
 gpgcheck=0 \n\
 enabled=1" > $WDIR/repos/doca.repo
 

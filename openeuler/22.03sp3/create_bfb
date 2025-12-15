@@ -187,7 +187,7 @@ copy_rpm()
 
 # Copy the content of RPM packages
 for package in mlxbf-bfscripts util-linux dosfstools e2fsprogs kmod pciutils \
-			   usbutils chkconfig mft mft-oem kernel-mft kmod-kernel-mft-mlnx \
+			   usbutils chkconfig mft mft-oem mft-nvredfish mft-mlx5 kernel-mft kmod-kernel-mft-mlnx \
 			   tar xfsprogs coreutils nvme-cli mmc-utils parted which curl \
 			   openssl gawk device-mapper lvm2 iputils sshpass openssh-clients findutils mokutil net-tools wget dhcp zip $ADDON_RPMS
 do
@@ -475,9 +475,15 @@ if [ -e "/usr/lib/firmware/mellanox/cec/bf3-cec-fw.fwpkg" ]; then
 			}] | .["Members@odata.count"] += 1')
 fi
 
-if [ -e "/usr/lib/firmware/mellanox/bmc/bf3-bmc-preboot-install.bfb" ]; then
-	let odata_count++
+BF3_DPU_GI=""
+if [ -e "/usr/lib/firmware/mellanox/bmc/bf3-bmc-preboot-install.pldm" ]; then
+	BF3_DPU_GI="/usr/lib/firmware/mellanox/bmc/bf3-bmc-preboot-install.pldm"
+elif [ -e "/usr/lib/firmware/mellanox/bmc/bf3-bmc-preboot-install.bfb" ]; then
 	BF3_DPU_GI="/usr/lib/firmware/mellanox/bmc/bf3-bmc-preboot-install.bfb"
+fi
+
+if [ -n "$BF3_DPU_GI" ]; then
+	let odata_count++
 	BF3_DPU_GI_VERSION=$(cat /usr/lib/firmware/mellanox/bmc/bf3-bmc-preboot-install.version 2> /dev/null)
 	json_output=$( echo $json_output | jq \
 		--arg odata_count "$odata_count" \
@@ -493,10 +499,16 @@ if [ -e "/usr/lib/firmware/mellanox/bmc/bf3-bmc-preboot-install.bfb" ]; then
 			}] | .["Members@odata.count"] += 1')
 fi
 
-if (/bin/ls -1 /usr/lib/firmware/mellanox/bmc/fw-BlueField-3-rel-*.bfb > /dev/null 2>&1); then
+BF3_NIC_FW_GI_VERSION=""
+if (/bin/ls -1 /usr/lib/firmware/mellanox/bmc/fw-BlueField-3-rel-*.pldm > /dev/null 2>&1); then
+	BF3_NIC_FW_GI_VERSION=$(/bin/ls -1 /usr/lib/firmware/mellanox/bmc/fw-BlueField-3-rel-*.pldm 2> /dev/null | head -1 | grep -oP '(?<=BlueField-3-rel-)\d+_\d+_\d+')
+elif (/bin/ls -1 /usr/lib/firmware/mellanox/bmc/fw-BlueField-3-rel-*.bfb > /dev/null 2>&1); then
+	BF3_NIC_FW_GI_VERSION=$(/bin/ls -1 /usr/lib/firmware/mellanox/bmc/fw-BlueField-3-rel-*.bfb 2> /dev/null | head -1 | grep -oP '(?<=BlueField-3-rel-)\d+_\d+_\d+')
+fi
+
+if [ -n "$BF3_NIC_FW_GI_VERSION" ]; then
 	let odata_count++
 	BF3_NIC_FW_GI=""
-	BF3_NIC_FW_GI_VERSION=$(/bin/ls -1 /usr/lib/firmware/mellanox/bmc/fw-BlueField-3-rel-*.bfb 2> /dev/null | head -1 | grep -oP '(?<=BlueField-3-rel-)\d+_\d+_\d+')
 	json_output=$( echo $json_output | jq \
 		--arg odata_count "$odata_count" \
 		--arg odata_id "/redfish/v1/UpdateService/SoftwareInventory/$odata_count" \

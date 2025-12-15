@@ -89,6 +89,7 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
         sg3_utils \
         shim \
         sshpass \
+        spdk \
         sudo \
         sysstat \
         systemd-timesyncd \
@@ -107,6 +108,7 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
         doca-runtime \
         doca-devel \
         mlnx-snap \
+        mlnx-libsnap \
         mft-autocomplete \
         mstflint \
         strongswan \

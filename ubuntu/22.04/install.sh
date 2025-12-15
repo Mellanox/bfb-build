@@ -38,7 +38,7 @@ load_module()
 
 # Check NIC mode
 is_nic_mode=0
-cx_pcidev=$(lspci -nD 2> /dev/null | grep 15b3:a2d[26c] | awk '{print $1}' | head -1)
+cx_pcidev=$(lspci -nD 2> /dev/null | grep 15b3:a2d[26cf] | awk '{print $1}' | head -1)
 str=`mlxconfig -d $cx_pcidev -e q INTERNAL_CPU_OFFLOAD_ENGINE 2>/dev/null | grep INTERNAL_CPU_OFFLOAD_ENGINE | awk '{print $(NF-1)}'`
 if [ ."$str" = ."DISABLED(1)" ]; then
     is_nic_mode=1
@@ -142,7 +142,7 @@ prepare_target_partitions()
 	disk_size=$(fdisk -l $device 2> /dev/null | grep "Disk $device:" | awk '{print $5}')
 	disk_end=$((disk_sectors - reserved))
 
-	pciids=$(lspci -nD 2> /dev/null | grep 15b3:a2d[26c] | awk '{print $1}')
+	pciids=$(lspci -nD 2> /dev/null | grep 15b3:a2d[26cf] | awk '{print $1}')
 
 	set -- $pciids
 	pciid=$1
@@ -254,15 +254,28 @@ mount_target_partition()
 
 configure_target_os()
 {
-	cat > /mnt/etc/fstab << EOF
+	if [ "${FSTAB_USE_DEV_NAME}" == "yes" ]; then
+		cat > /mnt/etc/fstab << EOF
+$ROOT_PARTITION / auto defaults 0 1
+$BOOT_PARTITION /boot/efi vfat umask=0077 0 2
+EOF
+	else
+		cat > /mnt/etc/fstab << EOF
 $(get_part_id $ROOT_PARTITION) / auto defaults 0 1
 $(get_part_id $BOOT_PARTITION) /boot/efi vfat umask=0077 0 2
 EOF
+	fi
 
 	if [ "X$DUAL_BOOT" == "Xyes" ]; then
-		cat >> /mnt/etc/fstab << EOF
+		if [ "${FSTAB_USE_DEV_NAME}" == "yes" ]; then
+			cat >> /mnt/etc/fstab << EOF
+$COMMON_PARTITION /common auto defaults 0 2
+EOF
+		else
+			cat >> /mnt/etc/fstab << EOF
 $(get_part_id $COMMON_PARTITION) /common auto defaults 0 2
 EOF
+		fi
 		mkdir -p /mnt/common
 		mkdir -p /tmp/common
 		mount $COMMON_PARTITION /tmp/common
@@ -329,8 +342,12 @@ EOF
 		packages_to_remove=$(chroot /mnt env PATH=$CHROOT_PATH dpkg -S /lib/firmware/mellanox/{bmc,cec}/* | grep "bf3" | cut -d: -f1 | tr -s '\n' ' ')
 	elif (lspci -n -d 15b3: | grep -wq 'a2dc'); then
 		# BlueField-3
-		chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge mlnx-snap || true
+		chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge mlnx-snap mlnx-libsnap spdk spdk-rpc spdk-dev || true
 		packages_to_remove=$(chroot /mnt env PATH=$CHROOT_PATH dpkg -S /lib/firmware/mellanox/{bmc,cec}/* | grep -viE "bf3-cec-fw|bf3-bmc-fw|bf3-bmc-gi|${dpu_part_number//_/-}" | cut -d: -f1 | tr -s '\n' ' ')
+	elif (lspci -n -d 15b3: | grep -wq 'a2df'); then
+		# BlueField-4
+		chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge mlnx-snap || true
+		packages_to_remove=$(chroot /mnt env PATH=$CHROOT_PATH dpkg -S /lib/firmware/mellanox/{bmc,cec}/* | grep -E "bf2|bf3" | cut -d: -f1 | tr -s '\n' ' ')
 	fi
 
 	if [ -n "$packages_to_remove" ]; then
@@ -401,13 +418,13 @@ update_efi_bootmgr()
 	ilog "$(efibootmgr -c -d $device -p $((1 + 2*$NEXT_OS_IMAGE)) -L ${UBUNTU_CODENAME}${NEXT_OS_IMAGE} -l '\EFI\ubuntu\shimaa64.efi')"
 
 	if ! (efibootmgr | grep ${UBUNTU_CODENAME}); then
-		log "ERROR: Failed to add ${UBUNTU_CODENAME}${NEXT_OS_IMAGE} boot entry. Retrying..."
+		log "ERR Failed to add ${UBUNTU_CODENAME}${NEXT_OS_IMAGE} boot entry. Retrying..."
 		ilog "efibootmgr -c -d $device -p $((1 + 2*$NEXT_OS_IMAGE)) -L ${UBUNTU_CODENAME}${NEXT_OS_IMAGE} -l '\EFI\ubuntu\shimaa64.efi'"
 		if ! (efibootmgr | grep ${UBUNTU_CODENAME}); then
 			bfbootmgr --cleanall > /dev/null 2>&1
 			efibootmgr -c -d "$device" -p $((1 + 2*$NEXT_OS_IMAGE)) -L ${UBUNTU_CODENAME}${NEXT_OS_IMAGE} -l "\EFI\ubuntu\shimaa64.efi" > /dev/null 2>&1
 			if ! (efibootmgr | grep ${UBUNTU_CODENAME}); then
-				log "ERROR: Failed to add ${UBUNTU_CODENAME}${NEXT_OS_IMAGE} boot entry."
+				log "ERR Failed to add ${UBUNTU_CODENAME}${NEXT_OS_IMAGE} boot entry."
 			fi
 		fi
 	fi
@@ -484,7 +501,9 @@ configure_grub()
 		sed -i -r -e "s/(password_pbkdf2 admin).*/\1 ${grub_admin_PASSWORD}/" /mnt/etc/grub.d/40_custom
 	fi
 
-	if (grep -q MLNXBF33 /sys/firmware/acpi/tables/SSDT*); then
+	if (lscpu 2>&1 | grep -wq Grace); then
+		sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=1024M $bootarg keep_bootcon earlycon modprobe.blacklist=mlx5_core,mlx5_ib selinux=0 net.ifnames=0 biosdevname=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
+	elif (grep -q MLNXBF33 /sys/firmware/acpi/tables/SSDT*); then
 		# BlueField-3
 		sed -i -e "s/0x01000000/0x13010000/g" /mnt/etc/default/grub
 	fi

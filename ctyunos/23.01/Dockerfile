@@ -23,7 +23,7 @@ RUN echo 'excludepkgs=OpenIPMI libreswan' >> /etc/dnf/dnf.conf && \
     dnf -y clean all && \
 	dnf --setopt='tsflags=noscripts' -y autoremove 'kernel*' && rm -rf /lib/modules/* && \
     dnf -y install python3-dnf-plugin-versionlock && \
-    dnf -y install kernel-5.10.0-136.12.0.92.1.ctl3 && dnf versionlock kernel-5.10.0-136.12.0.92.1.ctl3 && \
+    dnf -y install kernel-5.10.0-136.12.0.94.ctl3 && dnf versionlock kernel-5.10.0-136.12.0.94.ctl3 && \
     dnf --exclude='mlxbf-bootimages*' -y update && \
     dnf --exclude='mlxbf-bootimages*' -y install \
         acpid \

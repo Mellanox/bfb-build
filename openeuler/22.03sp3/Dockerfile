@@ -18,12 +18,14 @@ ADD repos/ /etc/yum.repos.d/
 
 RUN rpm -ihv --force bootimages/mlxbf-bootimages-*.aarch64.rpm || true
 
-RUN dnf install -y kernel-5.10.0-280.0.0.182.oe2203sp3 kernel-devel-5.10.0-280.0.0.182.oe2203sp3 kernel-headers-5.10.0-280.0.0.182.oe2203sp3
+RUN dnf -y install python3-dnf-plugin-versionlock && \
+    dnf install -y --nogpgcheck kernel-5.10.0-288.0.0.190.oe2203sp3 kernel-devel-5.10.0-288.0.0.190.oe2203sp3 kernel-headers-5.10.0-288.0.0.190.oe2203sp3 && \
+    dnf versionlock add kernel-5.10.0-288.0.0.190.oe2203sp3 kernel-devel-5.10.0-288.0.0.190.oe2203sp3 kernel-headers-5.10.0-288.0.0.190.oe2203sp3
 
 RUN echo 'excludepkgs=OpenIPMI network-scripts-openvswitch' >> /etc/dnf/dnf.conf && \
     dnf -y clean all && \
     dnf --enablerepo='update,kubernetes,doca' --exclude='mlxbf-bootimages*' --exclude='kernel' --exclude='kernel-devel' -y update && \
-    dnf --enablerepo='update,kubernetes,doca' --exclude='mlxbf-bootimages*' --exclude='kernel' --exclude='kernel-devel' -y install \
+    dnf --enablerepo='update,kubernetes,doca' --exclude='mlxbf-bootimages*' -y install \
         acpid \
         audit \
         chrony \
@@ -111,11 +113,6 @@ RUN echo 'excludepkgs=OpenIPMI network-scripts-openvswitch' >> /etc/dnf/dnf.conf
     rm -rf /var/cache/* && \
     truncate -s0 /etc/machine-id && \
     update-pciids
-#Fix version kernel
-RUN dnf install -y dnf-plugin-versionlock
-RUN dnf versionlock add kernel-5.10.0-224.0.0.127.oe2203sp3.aarch64
-RUN dnf versionlock add kernel-devel-5.10.0-224.0.0.127.oe2203sp3.aarch64
-RUN dnf versionlock add kernel-headers-5.10.0-224.0.0.127.oe2203sp3.aarch64
 
 # Manage services
 RUN systemctl enable mlx_ipmid.service || true

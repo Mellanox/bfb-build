@@ -500,6 +500,7 @@ create_initramfs()
 		gpio-mlxbf2 gpio-mlxbf3 mlxbf-gige \
 		pinctrl-mlxbf3 8021q lan743x \
 		ipmi_devintf ipmb_host ipmi_ssif i2c-mlxbf \
+		cls_flower act_gact \
 		nls_iso8859-1 $ADDON_KERNEL_MODULES
 	do
 		if (chroot /mnt modinfo -k $kver $mod 2>/dev/null | grep "filename:" | grep -q builtin); then

@@ -1,59 +1,135 @@
-from --platform=linux/arm64 ctyunos3/ctyunos3:23.01
+FROM --platform=linux/arm64 ctyunos-aarch64:23.01
 ADD qemu-aarch64-static /usr/bin/
 
 ARG BASE_URL
-ARG DOCA_VERSION
 ARG BSP_VERSION
-ARG DISTRO
-ARG DISTRO_VERSION
-ARG DISTRO_KERNEL
 ARG MLNX_FW_UPDATER=mlnx-fw-updater-signed
-WORKDIR /root/workspace
-ADD install.sh .
-ADD install.env ./install.env
-ADD create_bfb .
+ARG BMC_FW_PACKAGES="bf2-bmc-fw-signed bf3-bmc-fw-signed bf3-bmc-gi-signed bf3-bmc-nic-fw*"
+ARG CEC_FW_PACKAGES="bf2-cec-fw-signed bf3-cec-fw-signed"
 ADD bootimages bootimages/
-ADD BF2BMC ./BF2BMC
-ADD BF3BMC ./BF3BMC
-ADD build_ctyunos_bfb .
+ADD 10-mlx-console-messages.conf /etc/sysctl.d/
+ADD install.env /root/workspace/install.env/
+ADD install.sh create_bfb /root/workspace/
 
-ENV RUN_FW_UPDATER=no
+RUN rm -rf /etc/yum.repos.d/*
 
-RUN dnf update -y
+ENV RUN_FW_UPDATER="no"
 
-RUN dnf install -y --disableexcludes=kubernetes \
-	rpm-build rpm-sign automake meson cmake gcc gcc-c++  make autoconf m4 \
-	bc bison flex pesign rsync patchutils git annobin intltool \
-	groff kernel-rpm-macros libtool desktop-file-utils jq wget \
-	systemd lm_sensors-sensord openssh-server acpid irqbalance unbound rasdaemon \
-	cryptsetup lvm2 device-mapper-persistent-data ltrace lsof unzip sysstat nvme-cli \
-	usbutils kexec-tools nfs-utils dracut-tools iproute-tc sudo parted passwd \
-	network-scripts tcpdump NetworkManager NetworkManager-ovs NetworkManager-config-server glib2-devel\
-	libarchive libreswan adobe-mappings-cmap-lang ImageMagick \
-	perl perl-Fedora-VSP perl-generators sg3_utils \
-	python3-Cython python3-sphinx python3-pyelftools python3-pip \
-	python3 python3-devel elfutils-devel binutils binutils-devel pciutils pciutils-devel openssl-devel \
-	libnl3 libnl3-devel selinux-policy-devel numactl-libs numactl-devel unbound-devel libpcap-devel tcl-devel \
-	valgrind-devel iptables-devel libdb-devel libmnl libmnl-devel libcap-ng-devel systemd-devel \
-	grub2-tools grub2 grubby grub2-tools-minimal grub2-efi-aa64 grub2-efi-aa64-modules grub2-common grub2-tools-extra shim \
-	python-netifaces libreswan sg3_utils \
-	device-mapper-persistent-data lvm2 acpid perf popt-devel bc edac-utils lm_sensors lm_sensors-sensord re2c ninja-build \
-	cryptsetup rasdaemon watchdog kexec-tools jq libnghttp2 wget sudo uriparser \
-	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libmd-1.0.4-2.el8.aarch64.rpm \
-	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libmd-devel-1.0.4-2.el8.aarch64.rpm \
-	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libbsd-devel-0.12.2-1.el8.aarch64.rpm \
-	https://download.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/l/libbsd-0.12.2-1.el8.aarch64.rpm \
-	https://download.fedoraproject.org/pub/epel/7/aarch64/Packages/l/lcov-1.13-1.el7.noarch.rpm \
-	https://download.fedoraproject.org/pub/epel/7/aarch64/Packages/r/re2c-0.14.3-2.el7.aarch64.rpm \
-	https://vault.centos.org/centos/8/BaseOS/aarch64/os/Packages/watchdog-5.15-2.el8.aarch64.rpm \
-	https://download-ib01.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/u/uriparser-0.9.7-1.el8.aarch64.rpm \
-	https://download-ib01.fedoraproject.org/pub/epel/8/Everything/aarch64/Packages/u/uriparser-devel-0.9.7-1.el8.aarch64.rpm
+ADD repos/ /etc/yum.repos.d/
 
-RUN dnf install -y dnf-plugins-core-4.0.17-1.ctl2.noarch
+RUN rpm -ihv --force bootimages/mlxbf-bootimages-*.aarch64.rpm || true
 
-# Reinstall broken RPMs
-RUN for ff in `rpm -qa`; do if ! (rpm --verify $ff > /dev/null 2>&1); then dnf reinstall --nogpgcheck -y $ff; fi; done
+RUN echo 'excludepkgs=OpenIPMI libreswan' >> /etc/dnf/dnf.conf && \
+    dnf -y clean all && \
+	dnf --setopt='tsflags=noscripts' -y autoremove 'kernel*' && rm -rf /lib/modules/* && \
+    dnf -y install python3-dnf-plugin-versionlock && \
+    dnf -y install kernel-5.10.0-136.12.0.94.ctl3 && dnf versionlock kernel-5.10.0-136.12.0.94.ctl3 && \
+    dnf --exclude='mlxbf-bootimages*' -y update && \
+    dnf --exclude='mlxbf-bootimages*' -y install \
+        acpid \
+        audit \
+        chrony \
+        containerd.io \
+        cri-tools \
+        cryptsetup \
+        ctyunos-lsb \
+        curl \
+        dosfstools \
+        dracut \
+        dracut-network \
+        dracut-tools \
+        e2fsprogs \
+        efibootmgr \
+        grub2 \
+        grubby \
+        glibc-langpack-en \
+        i2c-tools \
+        iperf3 \
+        ipmitool \
+        iproute-tc \
+        jq \
+        kexec-tools \
+        kubeadm \
+        kubelet \
+        kubernetes-cni \
+        libguestfs-tools \
+        libhugetlbfs-utils \
+        libvirt \
+        lm_sensors \
+        lm_sensors-sensord \
+        lsof \
+        ltrace \
+        lvm2 \
+        https://www.rpmfind.net/linux/opensuse/distribution/leap/15.5/repo/oss/aarch64/mmc-utils-0.1+git.20220208-bp155.1.12.aarch64.rpm \
+        mstflint \
+        net-tools \
+        NetworkManager \
+        NetworkManager-config-server \
+        NetworkManager-ovs \
+        network-scripts \
+        nfs-utils \
+        nvme-cli \
+        openssh-clients \
+        openssh-server \
+        parted \
+        pciutils \
+        perf \
+        python3-pip \
+        qemu-kvm \
+        rasdaemon \
+        sg3_utils \
+        shim \
+        spdk \
+        sshpass \
+        sudo \
+        sysstat \
+        systemd-timesyncd \
+        tcpdump \
+        unzip \
+        usbutils \
+        vim \
+        vim-common \
+        virt-install \
+        watchdog \
+        wget \
+        xfsprogs \
+		https://mirrors.aliyun.com/openeuler/openEuler-20.03-LTS-SP1/everything/aarch64/Packages/edac-utils-0.16-20.oe1.aarch64.rpm \
+		https://www.rpmfind.net/linux/epel/8/Everything/aarch64/Packages/l/libmd-1.1.0-1.el8.aarch64.rpm \
+        https://www.rpmfind.net/linux/epel/8/Everything/aarch64/Packages/l/libmd-devel-1.1.0-1.el8.aarch64.rpm \
+        https://www.rpmfind.net/linux/epel/8/Everything/aarch64/Packages/l/libbsd-0.12.2-1.el8.aarch64.rpm \
+        https://www.rpmfind.net/linux/epel/8/Everything/aarch64/Packages/l/libbsd-devel-0.12.2-1.el8.aarch64.rpm \
+        https://www.rpmfind.net/linux/epel/9/Everything/aarch64/Packages/p/python3-twisted-22.10.0-3.el9.noarch.rpm \
+        https://www.rpmfind.net/linux/epel/9/Everything/aarch64/Packages/p/python3-Automat-22.10.0-2.el9.noarch.rpm \
+        https://www.rpmfind.net/linux/epel/9/Everything/aarch64/Packages/p/python3-zope-interface-5.4.0-5.el9.1.aarch64.rpm \
+#DOCA Packages
+        doca-runtime \
+        doca-devel \
+        libxlio \
+        libxlio-devel \
+        libxlio-utils \
+        mlnx-snap \
+        mlnx-libsnap \
+        strongswan \
+        ${MLNX_FW_UPDATER} \
+        ${BMC_FW_PACKAGES} \
+        ${CEC_FW_PACKAGES} \
+    && \
+    dnf --exclude='mlxbf-bootimages*' -y reinstall bf-release grub2 grub2-common && \
+    dnf -y clean all && \
+    rm -rf /var/cache/* && \
+    truncate -s0 /etc/machine-id && \
+    update-pciids
 
-RUN dnf install -y kernel-5.10.0-136.12.0.88.ctl3.aarch64 kernel-devel-5.10.0-136.12.0.88.ctl3.aarch64
+# Manage services
+RUN systemctl enable mlx_ipmid.service || true
+RUN systemctl enable set_emu_param.service || true
+RUN systemctl enable mst || true
+RUN systemctl enable mlnx_snap.service || true
+RUN systemctl disable kubelet || true
+RUN systemctl disable containerd || true
 
-CMD ["/root/workspace/build_ctyunos_bfb"]
+ADD 10-mlx-console-messages.conf /etc/sysctl.d/
+ADD install.env /root/workspace/install.env/
+ADD install.sh create_bfb /root/workspace/
+
+RUN sed -i -E "s/(_unsigned|_prod|_dev)/_@IMAGE_TYPE@@CUSTOM_VERSION@/;" /etc/mlnx-release

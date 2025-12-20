@@ -68,8 +68,6 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
         kubernetes-cni \
         libguestfs-tools \
         libvirt \
-        libbsd \
-        libbsd-devel \
         lm_sensors \
         lm_sensors-sensord \
         lsof \
@@ -88,7 +86,6 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
         openssh-server \
         parted \
         pciutils \
-        perf \
         python3-pip \
         qemu-kvm \
         rasdaemon \
@@ -96,6 +93,7 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
         rsync \
         sg3_utils \
         shim \
+        spdk \
         sshpass \
         sudo \
         sysstat \
@@ -115,6 +113,7 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
         doca-runtime \
         doca-devel \
         mlnx-snap \
+        mlnx-libsnap \
         mft-autocomplete \
         mstflint \
         strongswan \

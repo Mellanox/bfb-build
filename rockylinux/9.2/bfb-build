@@ -1,4 +1,4 @@
-#!/bin/bash -e
+#!/bin/bash -ex
 ###############################################################################
 #
 # Copyright 2022 NVIDIA Corporation
@@ -43,9 +43,10 @@ DISTRO="rockylinux"
 DISTRO_VERSION="9.2"
 DISTRO_KERNEL=${DISTRO_KERNEL:-""}
 ARCH=${ARCH:-"arm64-dpu"}
-DOCA_VERSION="3.1.0"
-BSP_VERSION="4.12.0-13720"
-MLNX_OFED_VERSION="25.07-0.9.7.0"
+DOCA_VERSION="3.2.1"
+BSP_VERSION="4.13.1-13827"
+RELEASE_DIR_SUFFIX=${RELEASE_DIR_SUFFIX:-""}
+MLNX_OFED_VERSION="25.10-1.7.1.0"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-""}
 BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
@@ -69,7 +70,7 @@ case "$IMAGE_TYPE" in
 esac
 
 mkdir -p $WDIR/bootimages
-wget --no-verbose -P $WDIR/bootimages ${BASE_URL}/doca/${DOCA_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/${ARCH}/$bootimages
+wget --no-verbose -P $WDIR/bootimages ${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}${RELEASE_DIR_SUFFIX}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/${ARCH}/$bootimages
 
 cp -a \
 	Dockerfile \
@@ -77,7 +78,6 @@ cp -a \
 	install.sh \
 	repos \
 	10-mlx-console-messages.conf \
-	build_rockylinux_bfb \
 	../../common/tools/qemu-aarch64-static \
 	$WDIR
 
@@ -93,27 +93,21 @@ cd $WDIR
 
 echo -e "[doca] \n\
 name=Nvidia DOCA repository \n\
-baseurl=$BASE_URL/doca/$DOCA_VERSION/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/arm64-dpu/ \n\
+baseurl=$BASE_URL/doca/${DOCA_VERSION}-${BSP_VERSION}${RELEASE_DIR_SUFFIX}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/arm64-dpu/ \n\
 gpgcheck=0 \n\
 enabled=1" > $WDIR/repos/doca.repo
+
 
 docker_image=bfb_runtime_${DISTRO,,}${DISTRO_VERSION,,}
 
 docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION} 2> /dev/null || true
 
 sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/g;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/g" Dockerfile
-sed -i -e "s/@DOCA_VERSION@/$DOCA_VERSION/" \
-    -e "s/@BSP_VERSION@/$BSP_VERSION/" \
-    -e "s/@MLNX_OFED_VERSION@/$MLNX_OFED_VERSION/" \
-    -e "s|@BASE_URL@|$BASE_URL|" build_rockylinux_bfb
 
 docker build -t ${docker_image} \
 	--build-arg BASE_URL=$BASE_URL \
 	--build-arg DOCA_VERSION=$DOCA_VERSION \
 	--build-arg BSP_VERSION=$BSP_VERSION \
-	--build-arg DISTRO=$DISTRO \
-	--build-arg DISTRO_VERSION=$DISTRO_VERSION \
-	--build-arg DISTRO_KERNEL=$DISTRO_KERNEL \
 	-f Dockerfile .
 
 DOCKER_RUN_PARAMS="--privileged -e container=docker \

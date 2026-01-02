@@ -37,22 +37,24 @@ download_files_by_pattern() {
         return 1
     fi
     
-    # Extract filenames that match the pattern and download them
-    local download_count=0
-    while IFS= read -r filename; do
-        if [[ -n "$filename" ]]; then
-            echo "Downloading: $filename"
-            if wget -q -P "$target_dir" "${base_url}/${filename}"; then
-                ((download_count++))
-            else
-                echo "Warning: Failed to download $filename" >&2
-            fi
-        fi
-    done < <(grep -oP '(?<=href=")[^"]*' "$listing_file" | grep -E "$pattern")
+    # Find the single file matching the pattern
+    local filename
+    filename=$(grep -oP '(?<=href=")[^"]*' "$listing_file" | grep -E "$pattern" | head -1)
     
-    # Clean up listing file
+    # Clean up listing file immediately
     rm -f "$listing_file"
     
-    echo "Downloaded $download_count file(s) matching pattern '$pattern'"
-    return 0
+    if [[ -n "$filename" ]]; then
+        echo "Downloading: $filename"
+        if wget -q -P "$target_dir" "${base_url}/${filename}"; then
+            echo "Successfully downloaded $filename"
+            return 0
+        else
+            echo "Error: Failed to download $filename" >&2
+            return 1
+        fi
+    else
+        echo "Error: No file found matching pattern '$pattern'" >&2
+        return 1
+    fi
 }

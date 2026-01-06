@@ -72,17 +72,17 @@ RUN apt install -y -f $MLNX_FW_UPDATER
 
 RUN apt install -y -f \
 	linux-bluefield=5.15.0.1082.84 \
-	linux-bluefield-cloud-tools-common=5.15.0.1082.84 \
-	linux-bluefield-headers-5.15.0-1082=5.15.0.1082.84 \
-	linux-bluefield-tools-5.15.0-1082=5.15.0.1082.84 \
-	linux-buildinfo-5.15.0-1082-bluefield=5.15.0.1082.84 \
-	linux-headers-5.15.0-1082-bluefield=5.15.0.1082.84 \
+	linux-bluefield-cloud-tools-common=5.15.0-1082.84 \
+	linux-bluefield-headers-5.15.0-1082=5.15.0-1082.84 \
+	linux-bluefield-tools-5.15.0-1082=5.15.0-1082.84 \
+	linux-buildinfo-5.15.0-1082-bluefield=5.15.0-1082.84 \
+	linux-headers-5.15.0-1082-bluefield=5.15.0-1082.84 \
 	linux-headers-bluefield=5.15.0.1082.84 \
-	linux-image-5.15.0-1082-bluefield=5.15.0.1082.84 \
+	linux-image-5.15.0-1082-bluefield=5.15.0-1082.84 \
 	linux-image-bluefield=5.15.0.1082.84 \
-	linux-modules-5.15.0-1082-bluefield=5.15.0.1082.84 \
-	linux-modules-extra-5.15.0-1082-bluefield=5.15.0.1082.84 \
-	linux-tools-5.15.0-1082-bluefield=5.15.0.1082.84 \
+	linux-modules-5.15.0-1082-bluefield=5.15.0-1082.84 \
+	linux-modules-extra-5.15.0-1082-bluefield=5.15.0-1082.84 \
+	linux-tools-5.15.0-1082-bluefield=5.15.0-1082.84 \
 	linux-tools-bluefield=5.15.0.1082.84
 
 RUN apt install -y -f doca-runtime doca-sdk doca-tools mlx-openipmi || true

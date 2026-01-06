@@ -16,7 +16,11 @@ RUN dnf install --nogpgcheck -y mmc-utils || dnf install --nogpgcheck -y https:/
 
 RUN rpm -ihv --force bootimages/mlxbf-bootimages-*.aarch64.rpm || true
 
-RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
+# Rebuild RPM database after forced installation, then install packages
+RUN rm -f /var/lib/rpm/__db* && \
+    (rpm --rebuilddb --define '_db_backend bdb' || \
+     (mv /var/lib/rpm /var/lib/rpm.bak && mv /var/lib/rpmrebuilddb.* /var/lib/rpm)) && \
+    echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
     dnf -y clean all && \
     dnf install -y epel-release && \
     dnf --exclude='mlxbf-bootimages*,kernel*' -y update && \

@@ -71,19 +71,19 @@ RUN apt remove -y --purge $(dpkg --list "*openipmi*" | grep openipmi | awk '{pri
 RUN apt install -y -f $MLNX_FW_UPDATER
 
 RUN apt install -y -f \
-	linux-bluefield=5.15.0.1069.71 \
-	linux-bluefield-cloud-tools-common=5.15.0-1069.71 \
-	linux-bluefield-headers-5.15.0-1069=5.15.0-1069.71 \
-	linux-bluefield-tools-5.15.0-1069=5.15.0-1069.71 \
-	linux-buildinfo-5.15.0-1069-bluefield=5.15.0-1069.71 \
-	linux-headers-5.15.0-1069-bluefield=5.15.0-1069.71 \
-	linux-headers-bluefield=5.15.0.1069.71 \
-	linux-image-5.15.0-1069-bluefield=5.15.0-1069.71 \
-	linux-image-bluefield=5.15.0.1069.71 \
-	linux-modules-5.15.0-1069-bluefield=5.15.0-1069.71 \
-	linux-modules-extra-5.15.0-1069-bluefield=5.15.0-1069.71 \
-	linux-tools-5.15.0-1069-bluefield=5.15.0-1069.71 \
-	linux-tools-bluefield=5.15.0.1069.71
+	linux-bluefield=5.15.0.1082.84 \
+	linux-bluefield-cloud-tools-common=5.15.0.1082.84 \
+	linux-bluefield-headers-5.15.0-1082=5.15.0.1082.84 \
+	linux-bluefield-tools-5.15.0-1082=5.15.0.1082.84 \
+	linux-buildinfo-5.15.0-1082-bluefield=5.15.0.1082.84 \
+	linux-headers-5.15.0-1082-bluefield=5.15.0.1082.84 \
+	linux-headers-bluefield=5.15.0.1082.84 \
+	linux-image-5.15.0-1082-bluefield=5.15.0.1082.84 \
+	linux-image-bluefield=5.15.0.1082.84 \
+	linux-modules-5.15.0-1082-bluefield=5.15.0.1082.84 \
+	linux-modules-extra-5.15.0-1082-bluefield=5.15.0.1082.84 \
+	linux-tools-5.15.0-1082-bluefield=5.15.0.1082.84 \
+	linux-tools-bluefield=5.15.0.1082.84
 
 RUN apt install -y -f doca-runtime doca-sdk doca-tools mlx-openipmi || true
 RUN apt --fix-broken install -y || true

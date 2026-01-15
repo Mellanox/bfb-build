@@ -143,10 +143,18 @@ mount_target_partition()
 
 configure_target_os()
 {
+       if [ "${FSTAB_USE_DEV_NAME}" == "yes" ]; then
+               cat > /mnt/etc/fstab << EOF
+${device}p2  /           ${ROOTFS}     defaults 0 1
+${device}p1  /boot/efi   vfat    umask=0077 0 2
+EOF
+       else
+               cat > /mnt/etc/fstab << EOF
 	cat > /mnt/etc/fstab << EOF
 $(get_part_id ${device}p2) / ${ROOTFS} defaults 0 1
 $(get_part_id ${device}p1) /boot/efi vfat umask=0077 0 2
 EOF
+	fi
 
 	memtotal=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
 	if [ $memtotal -gt 16000000 ]; then

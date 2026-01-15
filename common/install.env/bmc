@@ -370,6 +370,10 @@ wait_bmc_task_complete()
 			ilog "- ERROR: BMC task $task_id exception"
 			RC=$((RC+1))
 			break
+		elif [ "$task_state" == "Cancelled" ]; then
+			ilog "- ERROR: BMC task $task_id cancelled"
+			RC=$((RC+1))
+			break
 		elif [ "$task_state" == "Aborted" ]; then
 			ilog "- ERROR: BMC task $task_id aborted"
 			RC=$((RC+1))
@@ -462,6 +466,12 @@ update_bmc_fw()
 		output=$(curl -sSk -u $BMC_USER:$BMC_PASSWORD -H "Content-Type: application/octet-stream" -X POST -T ${image} https://${BMC_IP}/redfish/v1/UpdateService 2>&1)
 	fi
 	ilog "BMC Firmware update: $output"
+	if (echo $output | grep -q "internal service error"); then
+		rc=1
+		RC=$((RC+1))
+		log "ERR Failed to update BMC firmware"
+		return $rc
+	fi
 
 	BMC_FIRMWARE_UPDATED="yes"
 
@@ -555,6 +565,12 @@ update_cec_fw()
 		output=$(curl -sSk -u $BMC_USER:$BMC_PASSWORD -H "Content-Type: application/octet-stream" -X POST -T ${image} https://${BMC_IP}/redfish/v1/UpdateService 2>&1)
 	fi
 	ilog "CEC Firmware update: $output"
+	if (echo $output | grep -q "internal service error"); then
+		rc=1
+		RC=$((RC+1))
+		log "ERR Failed to update CEC firmware"
+		return $rc
+	fi
 
 	wait_bmc_task_complete
 	if [ "$CEC_REBOOT" == "yes" ]; then
@@ -664,14 +680,14 @@ generate_config_image()
 		ilog "bfcfg --cfg2bin ${DPU_TMP_DIR}/bf.cfg --skip-mfg"
 		ilog "$(bfcfg --cfg2bin ${DPU_TMP_DIR}/bf.cfg --skip-mfg)"
 		if [ ! -e bf.cfg.bin ]; then
-			log "Failed to create bf.cfg.bin"
+			log "ERR Failed to create bf.cfg.bin"
 			RC=$((RC+1))
 			return 1
 		fi
 		ilog "$mlx_mkcap --cfg-data ${DPU_TMP_DIR}/bf.cfg.bin ${DPU_TMP_DIR}/bf.cfg.cap"
 		ilog "$($mlx_mkcap --cfg-data ${DPU_TMP_DIR}/bf.cfg.bin ${DPU_TMP_DIR}/bf.cfg.cap 2>&1)"
 		if [ ! -e ${DPU_TMP_DIR}/bf.cfg.cap ]; then
-			log "Failed to create capsule: ${DPU_TMP_DIR}/bf.cfg.cap"
+			log "ERR Failed to create capsule: ${DPU_TMP_DIR}/bf.cfg.cap"
 			RC=$((RC+1))
 			return 1
 		fi
@@ -679,7 +695,7 @@ generate_config_image()
 	ilog "mlx-mkbfb --capsule ${DPU_TMP_DIR}/bf.cfg.cap $1 ${DPU_TMP_DIR}/${CONFIG_IMAGE}"
 	ilog "$(mlx-mkbfb --capsule ${DPU_TMP_DIR}/bf.cfg.cap $1 ${DPU_TMP_DIR}/${CONFIG_IMAGE} 2>&1)"
 	if [ ! -e ${DPU_TMP_DIR}/${CONFIG_IMAGE} ]; then
-		log "Failed to create BFB: ${DPU_TMP_DIR}/${CONFIG_IMAGE}"
+		log "ERR Failed to create BFB: ${DPU_TMP_DIR}/${CONFIG_IMAGE}"
 		RC=$((RC+1))
 		return 1
 	fi
@@ -725,7 +741,7 @@ update_dpu_golden_image()
 		if [ $? -eq 0 ]; then
 			log "DPU Golden Image installed successfully"
 		else
-			log "DPU Golden Image installed failed"
+			log "ERR DPU Golden Image installed failed"
 			rc=1
 		fi
 		ilog "$output"
@@ -751,7 +767,7 @@ update_dpu_golden_image()
 					log "Installed BMC config image"
 					BMC_CONFIG_UPDATED="yes"
 				else
-					log "Failed to install BMC config image"
+					log "ERR Failed to install BMC config image"
 				fi
 				ilog "$output"
 			fi
@@ -796,7 +812,7 @@ update_nic_firmware_golden_image()
 	if [ $? -eq 0 ]; then
 		log "NIC firmware Golden Image installed successfully"
 	else
-		log "NIC firmware Golden Image installed failed"
+		log "ERR NIC firmware Golden Image installed failed"
 		rc=1
 	fi
 	ilog "$output"

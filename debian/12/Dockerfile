@@ -80,7 +80,6 @@ RUN apt-get clean -y && \
         libev4 \
         libgdbm-dev \
         libhugetlbfs-bin \
-        libiscsi7 \
         lldpad \
         lm-sensors \
         mmc-utils \

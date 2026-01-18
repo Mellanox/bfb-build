@@ -99,7 +99,6 @@ RUN sed -i '/mirrorlist=.*/d;s/#baseurl/baseurl/g;s/$releasever/8.6/g' /etc/yum.
         python3-pip \
         qemu-kvm \
         rasdaemon \
-        rsyslog \
         redhat-lsb-core \
         rrdtool \
         rsync \

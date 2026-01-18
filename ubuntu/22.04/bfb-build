@@ -43,11 +43,10 @@ DISTRO="ubuntu"
 DISTRO_VERSION="22.04"
 DISTRO_BASE_URL="https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-arm64-root.tar.xz"
 ARCH=${ARCH:-"arm64-dpu"}
-DOCA_VERSION="2.9.3"
-BSP_VERSION="4.9.3-13692"
-RELEASE_SUFFIX=${RELEASE_SUFFIX:-"-fur-62"}
+DOCA_VERSION="2.9.4"
+BSP_VERSION="4.9.4-13859"
+RELEASE_SUFFIX=${RELEASE_SUFFIX:-""}
 RELEASE_DIR_NAME="${DOCA_VERSION}-${BSP_VERSION}${RELEASE_SUFFIX}"  # this is the directory name under /doca at linux.mellanox.com
-MLNX_OFED_VERSION="24.10-3.2.5.0"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-""}
 INCLUDE_DOCA_SERVICES=${INCLUDE_DOCA_SERVICES:-"yes"}
@@ -56,7 +55,7 @@ LEAVE_CONTAINER=${LEAVE_CONTAINER:-"no"}
 
 WDIR=/tmp/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}.$$
 
-mkdir -p $WDIR
+mkdir -p "$WDIR"
 
 echo "Downloading mlxbf-bootimages..."
 case "$IMAGE_TYPE" in
@@ -71,8 +70,8 @@ case "$IMAGE_TYPE" in
 		;;
 esac
 
-wget -q -P $WDIR ${BASE_URL}/doca/${DOCA_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/${ARCH}/$bootimages
-mv $WDIR/mlxbf-bootimages*arm64.deb $WDIR/mlxbf-bootimages.deb
+wget -q -P "$WDIR" ${BASE_URL}/doca/${DOCA_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/${ARCH}/$bootimages
+mv "$WDIR"/mlxbf-bootimages*arm64.deb "$WDIR"/mlxbf-bootimages.deb
 
 cp -a \
 	Dockerfile \
@@ -83,23 +82,23 @@ cp -a \
 	10-mlx-console-messages.conf \
 	apt-preferences \
 	../../common/tools/qemu-aarch64-static \
-	$WDIR
+	"$WDIR"
 
-echo "deb [trusted=yes] ${BASE_URL}/doca/${RELEASE_DIR_NAME}/${DISTRO}${DISTRO_VERSION}/arm64-dpu/ /" | tee $WDIR/repos/doca.base.list
+echo "deb [trusted=yes] ${BASE_URL}/doca/${RELEASE_DIR_NAME}/${DISTRO}${DISTRO_VERSION}/arm64-dpu/ /" | tee "$WDIR"/repos/doca.base.list
 
 if [ -d install.env ]; then
 	cp -a install.env \
-		$WDIR
+		"$WDIR"
 else
 	cp -a ../../common/install.env \
-		$WDIR
+		"$WDIR"
 fi
 
-cd $WDIR
+cd "$WDIR"
 
 if [ "$INCLUDE_DOCA_SERVICES" == "yes" ]; then
 	echo "Downloading DOCA services..."
-	wget --quiet -r -np -nH --cut-dirs=5 -R "index.html*" ${BASE_URL}/doca/${RELEASE_DIR_NAME}/services/
+	wget --quiet -r -np -nH --cut-dirs=5 -R "index.html*" "${BASE_URL}"/doca/"${RELEASE_DIR_NAME}"/services/
 fi
 echo "Downloading $DISTRO base image..."
 wget -q --no-check-certificate $DISTRO_BASE_URL

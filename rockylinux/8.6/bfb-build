@@ -43,9 +43,8 @@ DISTRO="rockylinux"
 DISTRO_VERSION="8.6"
 DISTRO_KERNEL=${DISTRO_KERNEL:-""}
 ARCH=${ARCH:-"arm64-dpu"}
-DOCA_VERSION="2.9.3"
-BSP_VERSION="4.9.3-13692"
-MLNX_OFED_VERSION="24.10-3.2.5.0"
+DOCA_VERSION="2.9.4"
+BSP_VERSION="4.9.4-13859"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-""}
 BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
@@ -76,35 +75,30 @@ cp -a \
 	install.sh \
 	repos \
 	10-mlx-console-messages.conf \
-	build_rockylinux_bfb \
 	../../common/tools/qemu-aarch64-static \
-	$WDIR
+	"$WDIR"
 
 if [ -d install.env ]; then
 	cp -a install.env \
-		$WDIR
+		"$WDIR"
 else
 	cp -a ../../common/install.env \
-		$WDIR
+		"$WDIR"
 fi
 
-cd $WDIR
+cd "$WDIR"
 
 echo -e "[doca] \n\
 name=Nvidia DOCA repository \n\
 baseurl=$BASE_URL/doca/$DOCA_VERSION/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/arm64-dpu/ \n\
 gpgcheck=0 \n\
-enabled=1" > $WDIR/repos/doca.repo
+enabled=1" > "$WDIR"/repos/doca.repo
 
 docker_image=bfb_runtime_${DISTRO,,}${DISTRO_VERSION,,}
 
 docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION} 2> /dev/null || true
 
 sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/g;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/g" Dockerfile
-sed -i -e "s/@DOCA_VERSION@/$DOCA_VERSION/" \
-    -e "s/@BSP_VERSION@/$BSP_VERSION/" \
-    -e "s/@MLNX_OFED_VERSION@/$MLNX_OFED_VERSION/" \
-    -e "s|@BASE_URL@|$BASE_URL|" build_rockylinux_bfb
 
 docker build -t ${docker_image} \
 	--build-arg BASE_URL=$BASE_URL \
@@ -123,6 +117,6 @@ docker run -t --rm --privileged -e container=docker \
 	--mount type=bind,source=/proc,target=/proc \
 	${docker_image} /bin/bash -x /root/workspace/create_bfb
 
-readlink -f *.bfb
+readlink -f "*.bfb"
 
 echo "Default root password is: rocky"

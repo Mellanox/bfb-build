@@ -43,9 +43,8 @@ DISTRO="openeuler"
 DISTRO_VERSION="22.03sp3"
 DISTRO_KERNEL=${DISTRO_KERNEL:-""}
 ARCH=${ARCH:-"arm64-dpu"}
-DOCA_VERSION="2.9.3"
-BSP_VERSION="4.9.3-13692"
-MLNX_OFED_VERSION="24.10-3.2.5.0"
+DOCA_VERSION="2.9.4"
+BSP_VERSION="4.9.4-13859"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-""}
 BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
@@ -119,6 +118,6 @@ docker run -t --rm --privileged -e container=docker \
 	--mount type=bind,source=/proc,target=/proc \
 	${docker_image} /bin/bash -x /root/workspace/create_bfb
 
-readlink -f *.bfb
+readlink -f "*.bfb"
 
 echo "Default root password is: openeuler"

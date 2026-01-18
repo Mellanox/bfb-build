@@ -254,15 +254,28 @@ mount_target_partition()
 
 configure_target_os()
 {
-	cat > /mnt/etc/fstab << EOF
+	if [ "${FSTAB_USE_DEV_NAME}" == "yes" ]; then
+		cat > /mnt/etc/fstab << EOF
+$ROOT_PARTITION / auto defaults 0 1
+$BOOT_PARTITION /boot/efi vfat umask=0077 0 2
+EOF
+	else
+		cat > /mnt/etc/fstab << EOF
 $(get_part_id $ROOT_PARTITION) / auto defaults 0 1
 $(get_part_id $BOOT_PARTITION) /boot/efi vfat umask=0077 0 2
 EOF
+	fi
 
 	if [ "X$DUAL_BOOT" == "Xyes" ]; then
-		cat >> /mnt/etc/fstab << EOF
+		if [ "${FSTAB_USE_DEV_NAME}" == "yes" ]; then
+			cat >> /mnt/etc/fstab << EOF
+$COMMON_PARTITION /common auto defaults 0 2
+EOF
+		else
+			cat >> /mnt/etc/fstab << EOF
 $(get_part_id $COMMON_PARTITION) /common auto defaults 0 2
 EOF
+		fi
 		mkdir -p /mnt/common
 		mkdir -p /tmp/common
 		mount $COMMON_PARTITION /tmp/common
@@ -401,13 +414,13 @@ update_efi_bootmgr()
 	ilog "$(efibootmgr -c -d $device -p $((1 + 2*$NEXT_OS_IMAGE)) -L ${UBUNTU_CODENAME}${NEXT_OS_IMAGE} -l '\EFI\ubuntu\shimaa64.efi')"
 
 	if ! (efibootmgr | grep ${UBUNTU_CODENAME}); then
-		log "ERROR: Failed to add ${UBUNTU_CODENAME}${NEXT_OS_IMAGE} boot entry. Retrying..."
+		log "ERR Failed to add ${UBUNTU_CODENAME}${NEXT_OS_IMAGE} boot entry. Retrying..."
 		ilog "efibootmgr -c -d $device -p $((1 + 2*$NEXT_OS_IMAGE)) -L ${UBUNTU_CODENAME}${NEXT_OS_IMAGE} -l '\EFI\ubuntu\shimaa64.efi'"
 		if ! (efibootmgr | grep ${UBUNTU_CODENAME}); then
 			bfbootmgr --cleanall > /dev/null 2>&1
 			efibootmgr -c -d "$device" -p $((1 + 2*$NEXT_OS_IMAGE)) -L ${UBUNTU_CODENAME}${NEXT_OS_IMAGE} -l "\EFI\ubuntu\shimaa64.efi" > /dev/null 2>&1
 			if ! (efibootmgr | grep ${UBUNTU_CODENAME}); then
-				log "ERROR: Failed to add ${UBUNTU_CODENAME}${NEXT_OS_IMAGE} boot entry."
+				log "ERR Failed to add ${UBUNTU_CODENAME}${NEXT_OS_IMAGE} boot entry."
 			fi
 		fi
 	fi

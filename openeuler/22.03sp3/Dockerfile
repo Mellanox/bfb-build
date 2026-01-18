@@ -48,11 +48,9 @@ RUN echo 'excludepkgs=OpenIPMI network-scripts-openvswitch' >> /etc/dnf/dnf.conf
         iproute-tc \
         jq \
         kexec-tools \
-        kubeadm \
         kubelet \
         kubernetes-cni \
         libguestfs-tools \
-        libhugetlbfs-utils \
         libvirt \
         lm_sensors \
         lm_sensors-sensord \
@@ -78,7 +76,6 @@ RUN echo 'excludepkgs=OpenIPMI network-scripts-openvswitch' >> /etc/dnf/dnf.conf
         python3-pip \
         qemu-kvm \
         rasdaemon \
-        rsyslog \
         sg3_utils \
         shim \
         sshpass \
@@ -96,13 +93,12 @@ RUN echo 'excludepkgs=OpenIPMI network-scripts-openvswitch' >> /etc/dnf/dnf.conf
         xfsprogs \
         https://linux.mellanox.com/public/repo/bluefield/4.9.1-13442/extras/addons/libmd-1.1.0-1.el8.aarch64.rpm \
         https://linux.mellanox.com/public/repo/bluefield/4.9.1-13442/extras/addons/libmd-devel-1.1.0-1.el8.aarch64.rpm \
-        https://linux.mellanox.com/public/repo/bluefield/4.9.1-13442/extras/addons/libbsd-devel-0.12.2-1.el8.aarch64.rpm \
         https://linux.mellanox.com/public/repo/bluefield/4.9.1-13442/extras/addons/libbsd-0.12.2-1.el8.aarch64.rpm \
+        https://linux.mellanox.com/public/repo/bluefield/4.9.1-13442/extras/addons/libbsd-devel-0.12.2-1.el8.aarch64.rpm \
 #DOCA Packages
         doca-runtime \
         doca-devel \
         mlnx-snap \
-        strongswan \
         ${MLNX_FW_UPDATER} \
         ${BMC_FW_PACKAGES} \
         ${CEC_FW_PACKAGES} \

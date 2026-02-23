@@ -8,9 +8,11 @@ LOG=/tmp/$logfile
 
 fspath=$(readlink -f "$(dirname $0)")
 
-cx_pcidev=$(lspci -nD 2> /dev/null | grep 15b3:a2d[26cf] | awk '{print $1}' | head -1)
+SUPPORTED_DEVICES=${SUPPORTED_DEVICES:-"a2d[26cf]|1023|1025"}
+
+cx_pcidev=$(lspci -nD 2> /dev/null | grep -E "$SUPPORTED_DEVICES" | awk '{print $1}' | head -1)
 cx_dev_id=$(lspci -nD -s ${cx_pcidev} 2> /dev/null | awk -F ':' '{print strtonum("0x" $NF)}')
-pciids=$(lspci -nD 2> /dev/null | grep 15b3:a2d[26cf] | awk '{print $1}')
+pciids=$(lspci -nD 2> /dev/null | grep -E "$SUPPORTED_DEVICES" | awk '{print $1}')
 dpu_part_number=$(mstflint -d $cx_pcidev q full | grep "Part Number:" | awk '{print $NF}')
 PSID=$(mstflint -d $cx_pcidev q | grep PSID | awk '{print $NF}')
 BD_PSIDS=${BD_PSIDS:-"BD_0000000004 BD_0000000005"}
@@ -272,7 +274,7 @@ configure_sfs()
 {
 	: > /mnt/etc/mellanox/mlnx-sf.conf
 
-	for pciid in $(lspci -nD 2> /dev/null | grep 15b3:a2d[26cf] | awk '{print $1}')
+	for pciid in $(lspci -nD 2> /dev/null | grep -E "$SUPPORTED_DEVICES" | awk '{print $1}')
 	do
 		cat >> /mnt/etc/mellanox/mlnx-sf.conf << EOF
 /sbin/mlnx-sf --action create --device $pciid --sfnum 0 --hwaddr $(uuidgen | sed -e 's/-//;s/^\(..\)\(..\)\(..\)\(..\)\(..\).*$/02:\1:\2:\3:\4:\5/')
@@ -623,6 +625,79 @@ EOF
 	/bin/rm -f /mnt/boot/vmlinux-*.bz2
 }
 
+configure_network()
+{
+	ilog "Configure network for SF interfaces:"
+	num_ports=$(lspci -nD 2> /dev/null | grep -E "$SUPPORTED_DEVICES" | wc -l)
+	if [ $num_ports -lt 1 ]; then
+		ilog "No network interfaces found"
+		return
+	fi
+	for port in $(seq 1 $num_ports); do
+		p=$((port - 1))
+		interface="enp3s0f${p}s0"
+		ilog "Configuring network interface $port"
+		if [ -d /mnt/etc/sysconfig/network-scripts/ ]; then
+			cat > /mnt/etc/sysconfig/network-scripts/ifcfg-${interface} << EOF
+NAME="${interface}"
+DEVICE="${interface}"
+NM_CONTROLLED="no"
+DEVTIMEOUT=30
+PEERDNS="yes"
+ONBOOT="yes"
+BOOTPROTO="dhcp"
+TYPE=Ethernet
+EOF
+			chmod 600 /mnt/etc/sysconfig/network-scripts/ifcfg-${interface}
+			ilog "Created configuration for network interface ${interface}: /etc/sysconfig/network-scripts/ifcfg-${interface}"
+		elif [ -d /mnt/etc/netplan/ ]; then
+			cat > /mnt/etc/netplan/60-mlnx-${p}.yaml << EOF
+network:
+  version: 2
+  ethernets:
+    ${interface}:
+      renderer: networkd
+      dhcp4: 'true'
+EOF
+			chmod 600 /mnt/etc/netplan/60-mlnx-${p}.yaml
+			ilog "Created configuration for network interface ${interface}: /etc/netplan/60-mlnx-${p}.yaml"
+		elif [ -d /mnt/etc/network/interfaces.d/ ]; then
+			cat > /mnt/etc/network/interfaces.d/${interface} << EOF
+auto ${interface}
+iface ${interface} inet dhcp
+EOF
+			chmod 600 /mnt/etc/network/interfaces.d/${interface}
+			ilog "Created configuration for network interface ${interface}: /etc/network/interfaces.d/${interface}"
+		else
+			ilog "Unknown network configuration environment"
+			return 1
+		fi
+	done
+
+	if [ $num_ports -eq 1 ]; then
+		ilog "Removing configuration for the second network interface on one port devices"
+		if [ -f /mnt/etc/sysconfig/network-scripts/ifcfg-enp3s0f1s0 ]; then
+			/bin/rm -f /mnt/etc/sysconfig/network-scripts/ifcfg-enp3s0f1s0
+			ilog "Removed configuration for network interface enp3s0f1s0: /etc/sysconfig/network-scripts/ifcfg-enp3s0f1s0"
+		fi
+		if [ -f /mnt/etc/network/interfaces.d/enp3s0f1s0 ]; then
+			/bin/rm -f /mnt/etc/network/interfaces.d/enp3s0f1s0
+			ilog "Removed configuration for network interface enp3s0f1s0: /etc/network/interfaces.d/enp3s0f1s0"
+		fi
+		if [ -f /mnt/etc/netplan/60-mlnx-1.yaml ]; then
+			/bin/rm -f /mnt/etc/netplan/60-mlnx-1.yaml
+			ilog "Removed configuration for network interface enp3s0f1s0: /etc/netplan/60-mlnx-1.yaml"
+		fi
+	fi
+
+	if [ -f /mnt/etc/netplan/60-mlnx.yaml ]; then
+		/bin/rm -f /mnt/etc/netplan/60-mlnx.yaml
+		ilog "Removed deprectated configuration file: /etc/netplan/60-mlnx.yaml"
+	fi
+
+	return 0
+}
+
 configure_dhcp()
 {
 	ilog "Configure dhcp:"
@@ -721,6 +796,8 @@ os_installation_flow()
 	configure_target_os
 
 	configure_dhcp
+
+	configure_network
 
 	configure_sfs
 

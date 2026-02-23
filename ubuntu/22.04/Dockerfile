@@ -31,19 +31,19 @@ RUN apt remove -y --purge $(dpkg --list "*openipmi*" | grep openipmi | awk '{pri
 RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
 
 RUN apt install -y -f \
-	linux-bluefield=5.15.0.1082.84 \
-	linux-bluefield-cloud-tools-common=5.15.0-1082.84 \
-	linux-bluefield-headers-5.15.0-1082=5.15.0-1082.84 \
-	linux-bluefield-tools-5.15.0-1082=5.15.0-1082.84 \
-	linux-buildinfo-5.15.0-1082-bluefield=5.15.0-1082.84 \
-	linux-headers-5.15.0-1082-bluefield=5.15.0-1082.84 \
-	linux-headers-bluefield=5.15.0.1082.84 \
-	linux-image-5.15.0-1082-bluefield=5.15.0-1082.84 \
-	linux-image-bluefield=5.15.0.1082.84 \
-	linux-modules-5.15.0-1082-bluefield=5.15.0-1082.84 \
-	linux-modules-extra-5.15.0-1082-bluefield=5.15.0-1082.84 \
-	linux-tools-5.15.0-1082-bluefield=5.15.0-1082.84 \
-	linux-tools-bluefield=5.15.0.1082.84
+	linux-bluefield=5.15.0.1084.86 \
+	linux-bluefield-cloud-tools-common=5.15.0-1084.86 \
+	linux-bluefield-headers-5.15.0-1084=5.15.0-1084.86 \
+	linux-bluefield-tools-5.15.0-1084=5.15.0-1084.86 \
+	linux-buildinfo-5.15.0-1084-bluefield=5.15.0-1084.86 \
+	linux-headers-5.15.0-1084-bluefield=5.15.0-1084.86 \
+	linux-headers-bluefield=5.15.0.1084.86 \
+	linux-image-5.15.0-1084-bluefield=5.15.0-1084.86 \
+	linux-image-bluefield=5.15.0.1084.86 \
+	linux-modules-5.15.0-1084-bluefield=5.15.0-1084.86 \
+	linux-modules-extra-5.15.0-1084-bluefield=5.15.0-1084.86 \
+	linux-tools-5.15.0-1084-bluefield=5.15.0-1084.86 \
+	linux-tools-bluefield=5.15.0.1084.86
 
 RUN apt-get clean -y && \
     apt-get update -o "Acquire::https::Verify-Peer=false" -y && \
@@ -165,8 +165,7 @@ RUN apt-get clean -y && \
     sed -i -e "s/FORCE_MODE=.*/FORCE_MODE=yes/" /etc/infiniband/openib.conf && \
     sed -i -r -e "s/^(MACAddressPolicy.*)/# \1/" /usr/lib/systemd/network/99-default.link && \
     update-pciids && \
-    update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1 && \
-    wget -qO - https://linux.mellanox.com/public/repo/doca/latest/ubuntu22.04/aarch64/GPG-KEY-Mellanox.pub | apt-key add -
+    update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1
 
 # Manage system services
 RUN systemctl enable NetworkManager.service || true

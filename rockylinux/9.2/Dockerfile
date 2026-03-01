@@ -138,6 +138,7 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
         doca-runtime \
         doca-devel \
         mlnx-snap \
+        mlnx-libsnap \
         mft-autocomplete \
         mstflint \
         strongswan \

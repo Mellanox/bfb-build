@@ -31,18 +31,18 @@ RUN apt remove -y --purge $(dpkg --list "*openipmi*" | grep openipmi | awk '{pri
 RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
 
 RUN apt install -y -f \
-    linux-bluefield=6.8.0.1013.14 \
-    linux-bluefield-headers-6.8.0-1013=6.8.0-1013.17 \
-    linux-bluefield-tools-6.8.0-1013=6.8.0-1013.17 \
-    linux-buildinfo-6.8.0-1013-bluefield=6.8.0-1013.17 \
-    linux-headers-6.8.0-1013-bluefield=6.8.0-1013.17 \
-    linux-headers-bluefield=6.8.0.1013.14 \
-    linux-image-6.8.0-1013-bluefield=6.8.0-1013.17 \
-    linux-image-bluefield=6.8.0.1013.14 \
-    linux-modules-6.8.0-1013-bluefield=6.8.0-1013.17 \
-    linux-modules-extra-6.8.0-1013-bluefield=6.8.0-1013.17 \
-    linux-tools-6.8.0-1013-bluefield=6.8.0-1013.17 \
-    linux-tools-bluefield=6.8.0.1013.14
+    linux-bluefield=6.8.0.1016.17 \
+    linux-bluefield-headers-6.8.0-1016=6.8.0-1016.20 \
+    linux-bluefield-tools-6.8.0-1016=6.8.0-1016.20 \
+    linux-buildinfo-6.8.0-1016-bluefield=6.8.0-1016.20 \
+    linux-headers-6.8.0-1016-bluefield=6.8.0-1016.20 \
+    linux-headers-bluefield=6.8.0.1016.17 \
+    linux-image-6.8.0-1016-bluefield=6.8.0-1016.20 \
+    linux-image-bluefield=6.8.0.1016.17 \
+    linux-modules-6.8.0-1016-bluefield=6.8.0-1016.20 \
+    linux-modules-extra-6.8.0-1016-bluefield=6.8.0-1016.20 \
+    linux-tools-6.8.0-1016-bluefield=6.8.0-1016.20 \
+    linux-tools-bluefield=6.8.0.1016.17
 
 RUN apt-get clean -y && \
     apt-get update -o "Acquire::https::Verify-Peer=false" -y && \
@@ -116,6 +116,7 @@ RUN apt-get clean -y && \
         pciutils \
         pkexec \
         python3-pip \
+        python-is-python3 \
         python3-pyinotify \
         rasdaemon \
         rsync \
@@ -164,8 +165,7 @@ RUN apt-get clean -y && \
     sed -i -e "s@'gnulinux-simple-\$boot_device_id'@'gnulinux-simple-\$boot_device_id' --unrestricted@" -e "s@'gnulinux-\$version-\$type-\$boot_device_id'@'gnulinux-\$version-\$type-\$boot_device_id' --users ''@" /etc/grub.d/10_linux && \
     sed -i -e "s/FORCE_MODE=.*/FORCE_MODE=yes/" /etc/infiniband/openib.conf && \
     sed -i -r -e "s/^(MACAddressPolicy.*)/# \1/" /usr/lib/systemd/network/99-default.link && \
-    update-pciids && \
-    wget -qO - https://linux.mellanox.com/public/repo/doca/3.2.0/ubuntu24.04/aarch64/GPG-KEY-Mellanox.pub | apt-key add -
+    update-pciids
 
 # A workaround for the AppArmor issue with an incorrect path to nm-dhcp-helper is to update the profile to allow the correct path.
 # https://bugs.launchpad.net/ubuntu/+source/isc-dhcp/+bug/2064007

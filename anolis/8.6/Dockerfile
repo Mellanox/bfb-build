@@ -45,6 +45,7 @@ RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
         e2fsprogs \
         edac-utils \
         efibootmgr \
+        epel-release \
         findutils \
         gawk \
         glibc-langpack-en \
@@ -90,6 +91,7 @@ RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
         perf \
         python3-pip \
         qemu-kvm \
+        rasdaemon \
         rsyslog \
         sg3_utils \
         shim \

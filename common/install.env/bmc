@@ -993,6 +993,8 @@ EOF
 	ilog "Waiting for no BMC tasks..."
 	wait_no_bmc_tasks
 
+	wait_bmc_task_complete
+
 	# Upload certificates to BMC
 	ilog "curl -sSk -u <BMC_USER:BMC_PASSWORD> -X POST https://${BMC_IP}/redfish/v1/Systems/Bluefield/Oem/Nvidia/SystemConfigProfile/Truststore/NvidiaCertificates -d @${CA_CHAIN_JSON}"
 	output=$(curl -sSk -u $BMC_USER:$BMC_PASSWORD -X POST https://${BMC_IP}/redfish/v1/Systems/Bluefield/Oem/Nvidia/SystemConfigProfile/Truststore/NvidiaCertificates -d @${CA_CHAIN_JSON} 2>&1)

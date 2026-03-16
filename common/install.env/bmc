@@ -478,9 +478,7 @@ update_bmc_fw()
 	fi
 	ilog "Provided BMC firmware version: $BMC_IMAGE_VERSION"
 
-	if [ -z "$BMC_INSTALLED_VERSION" ]; then
-		get_bmc_firmware_version
-	fi
+	get_bmc_firmware_version
 
 	if [ "${BMC_IMAGE_VERSION}" == "${BMC_INSTALLED_VERSION}" ]; then
 		if [ "X${FORCE_BMC_FW_INSTALL}" == "Xyes" ]; then
@@ -578,9 +576,7 @@ update_cec_fw()
 
 	ilog "Proceeding with the CEC firmware update..."
 
-	if [ -z "$BMC_INSTALLED_VERSION" ]; then
-		get_bmc_firmware_version
-	fi
+	get_bmc_firmware_version
 
 	if [[ $(echo -e "${BMC_MIN_MULTIPART_VERSION}\n${BMC_INSTALLED_VERSION}" | sort -V | head -n1) == "${BMC_MIN_MULTIPART_VERSION}" ]]; then
 		ilog "curl -sSk -u <BMC_USER:BMC_PASSWORD> https://${BMC_IP}/redfish/v1/UpdateService/update-multipart -F 'UpdateParameters={\"ForceUpdate\":true};type=application/octet-stream' -F UpdateFile=@${image}"
@@ -751,6 +747,8 @@ update_dpu_golden_image()
 		image_type="bfb"
 	fi
 
+	wait_bmc_task_complete
+
 	if [ "$image_type" == "bfb" ]; then
 		prepare_sshpass_environment
 
@@ -781,9 +779,7 @@ update_dpu_golden_image()
 
 		wait_bmc_task_complete
 
-		if [ -z "$BMC_INSTALLED_VERSION" ]; then
-			get_bmc_firmware_version
-		fi
+		get_bmc_firmware_version
 
 		if [[ $(echo -e "${BMC_MIN_MULTIPART_VERSION_PLDM}\n${BMC_INSTALLED_VERSION}" | sort -V | head -n1) == "${BMC_MIN_MULTIPART_VERSION_PLDM}" ]]; then
 			ilog "curl -k -H \"X-Auth-Token: <BMC_TOKEN>\" -X POST https://${BMC_IP}/redfish/v1/UpdateService/update-multipart  -F 'UpdateParameters={};type=application/json'  -F \"UpdateFile=@${image};type=application/octet-stream\""
@@ -805,6 +801,9 @@ update_dpu_golden_image()
 
 	if (echo "${BD_PSIDS}" | grep -qw "${PSID}"); then
 		if [ "X${UPLOAD_CONFIG_IMAGE}" == "Xyes" ]; then
+
+			wait_bmc_task_complete
+
 			if [ "X${GENERATE_CONFIG_IMAGE}" == "Xyes" ]; then
 				generate_config_image $image
 			fi
@@ -854,6 +853,8 @@ update_nic_firmware_golden_image()
 		image_type="bfb"
 	fi
 
+	wait_bmc_task_complete
+
 	if [ "$image_type" == "bfb" ]; then
 		prepare_sshpass_environment
 
@@ -883,9 +884,7 @@ update_nic_firmware_golden_image()
 
 		wait_bmc_task_complete
 
-		if [ -z "$BMC_INSTALLED_VERSION" ]; then
-			get_bmc_firmware_version
-		fi
+		get_bmc_firmware_version
 
 		if [[ $(echo -e "${BMC_MIN_MULTIPART_VERSION_PLDM}\n${BMC_INSTALLED_VERSION}" | sort -V | head -n1) == "${BMC_MIN_MULTIPART_VERSION_PLDM}" ]]; then
 			ilog "curl -k -H \"X-Auth-Token: <BMC_TOKEN>\" -X POST https://${BMC_IP}/redfish/v1/UpdateService/update-multipart  -F 'UpdateParameters={};type=application/json'  -F \"UpdateFile=@${image};type=application/octet-stream\""
@@ -943,6 +942,8 @@ update_certificates()
 		"CertificateString": "$(cat ${L2_CERT} ${L1_CERT} | sed ':a;N;$!ba;s/\n/\\n/g')"
 	}
 EOF
+
+	wait_bmc_task_complete
 
 	# Upload certificates to BMC
 	ilog "curl -sSk -u <BMC_USER:BMC_PASSWORD> -X POST https://${BMC_IP}/redfish/v1/Systems/Bluefield/Oem/Nvidia/SystemConfigProfile/Truststore/NvidiaCertificates -d @${CA_CHAIN_JSON}"

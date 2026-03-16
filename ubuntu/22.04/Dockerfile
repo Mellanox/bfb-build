@@ -31,19 +31,19 @@ RUN apt remove -y --purge $(dpkg --list "*openipmi*" | grep openipmi | awk '{pri
 RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
 
 RUN apt install -y -f \
-	linux-bluefield=5.15.0.1082.84 \
-	linux-bluefield-cloud-tools-common=5.15.0-1082.84 \
-	linux-bluefield-headers-5.15.0-1082=5.15.0-1082.84 \
-	linux-bluefield-tools-5.15.0-1082=5.15.0-1082.84 \
-	linux-buildinfo-5.15.0-1082-bluefield=5.15.0-1082.84 \
-	linux-headers-5.15.0-1082-bluefield=5.15.0-1082.84 \
-	linux-headers-bluefield=5.15.0.1082.84 \
-	linux-image-5.15.0-1082-bluefield=5.15.0-1082.84 \
-	linux-image-bluefield=5.15.0.1082.84 \
-	linux-modules-5.15.0-1082-bluefield=5.15.0-1082.84 \
-	linux-modules-extra-5.15.0-1082-bluefield=5.15.0-1082.84 \
-	linux-tools-5.15.0-1082-bluefield=5.15.0-1082.84 \
-	linux-tools-bluefield=5.15.0.1082.84
+	linux-bluefield=5.15.0.1086.88 \
+	linux-bluefield-cloud-tools-common=5.15.0-1086.88 \
+	linux-bluefield-headers-5.15.0-1086=5.15.0-1086.88 \
+	linux-bluefield-tools-5.15.0-1086=5.15.0-1086.88 \
+	linux-buildinfo-5.15.0-1086-bluefield=5.15.0-1086.88 \
+	linux-headers-5.15.0-1086-bluefield=5.15.0-1086.88 \
+	linux-headers-bluefield=5.15.0.1086.88 \
+	linux-image-5.15.0-1086-bluefield=5.15.0-1086.88 \
+	linux-image-bluefield=5.15.0.1086.88 \
+	linux-modules-5.15.0-1086-bluefield=5.15.0-1086.88 \
+	linux-modules-extra-5.15.0-1086-bluefield=5.15.0-1086.88 \
+	linux-tools-5.15.0-1086-bluefield=5.15.0-1086.88 \
+	linux-tools-bluefield=5.15.0.1086.88
 
 RUN apt-get clean -y && \
     apt-get update -o "Acquire::https::Verify-Peer=false" -y && \

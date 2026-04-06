@@ -63,6 +63,7 @@ RUN apt-get clean -y && \
         bridge-utils \
         bsdextrautils \
         build-essential \
+        cd-boot-images-arm64 \
         conntrack \
         containerd \
         cri-tools \
@@ -139,6 +140,7 @@ RUN apt-get clean -y && \
         uuid-runtime \
         vim \
         watchdog \
+        xorriso \
         xxd \
         zip \
         zstd \

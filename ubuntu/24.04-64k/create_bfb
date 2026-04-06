@@ -38,6 +38,7 @@ echo "Work directory: $WDIR"
 
 ubuntu_IMAGE=$(cat /etc/mlnx-release)
 ubuntu_BFB=${ubuntu_IMAGE}.bfb
+ubuntu_ISO=${ubuntu_IMAGE}.iso
 
 PATH=$PATH:/opt/mellanox/scripts:/opt/mellanox/scripts/bin
 mkbfb=$(which mlx-mkbfb)
@@ -295,7 +296,7 @@ EOF
 
 ex mkdir -p ubuntu
 # Tar the image
-XZ_OPT="--threads=0 -9 --verbose" tar -cJp --exclude='./workspace' --exclude='./signing-local' --exclude='./signing-shared' --exclude='./var/run/docker.sock' --exclude='./root/workspace' --exclude='./tmp/*' --exclude='./run/*' --exclude='./sys/*' --exclude='./proc/*' --exclude='./dev/*' --exclude='./.dockerenv' --exclude='./root/.bash_history' --exclude='./var/tmp/*' --exclude='./bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-arm-static' --exclude='./var/cache/apt/*' --exclude='./var/lib/apt/lists/*' -f ./ubuntu/image.tar.xz -C / .
+XZ_OPT="--threads=0 -9 --verbose" tar -cJp --exclude='./workspace' --exclude='./signing-local' --exclude='./signing-shared' --exclude='./var/run/docker.sock' --exclude='./root/workspace' --exclude='./tmp/*' --exclude='./run/*' --exclude='./sys/*' --exclude='./proc/*' --exclude='./dev/*' --exclude='./.dockerenv' --exclude='./root/.bash_history' --exclude='./var/tmp/*' --exclude='./bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-arm-static' --exclude='./var/cache/apt/*' --exclude='./var/lib/apt/lists/*' --exclude='./usr/share/cd-boot-images-arm64' -f ./ubuntu/image.tar.xz -C / .
 ex install -m 0755 ${SDIR}/install.sh ./ubuntu/install.sh
 ex cp -a ${SDIR}/install.env ./ubuntu/
 
@@ -693,6 +694,44 @@ ex $mkbfb \
 	--info "${WDIR}/info.json" \
 	${BFB} /workspace/${ubuntu_BFB}
 
+# Create ISO image
+ISO_DIR="/workspace/ISO"
+mkdir -p "$ISO_DIR/bfb"
+cp /boot/vmlinuz-$kernel "$ISO_DIR/bfb/vmlinuz"
+cp $initramfs "$ISO_DIR/bfb/initrd"
+cp -a /usr/share/cd-boot-images-arm64/tree/* "$ISO_DIR/"
+
+cat > "${ISO_DIR}/boot/grub/grub.cfg" << EOF
+loadfont unicode
+
+set menu_color_normal=white/black
+set menu_color_highlight=black/light-gray
+
+set default=0
+set timeout=3
+
+menuentry "${ubuntu_IMAGE/.iso/} Installation" {
+  linux /bfb/vmlinuz net.ifnames=0 keep_bootcon biosdevname=0 ip=dhcp
+  initrd /bfb/initrd
+}
+EOF
+
+ex xorriso -as mkisofs \
+  -iso-level 3 \
+  -allow-lowercase \
+  -volid "BF_BUNDLE_ISO" \
+  -J \
+  -joliet-long \
+  -l \
+  -c boot/boot.cat \
+  -partition_offset 16 \
+  -append_partition 2 0xef "/usr/share/cd-boot-images-arm64/images/boot/grub/efi.img" \
+  -e --interval:appended_partition_2:all:: \
+  -no-emul-boot \
+  -partition_cyl_align all \
+  "$ISO_DIR" \
+  -output "/workspace/${ubuntu_ISO}"
 cd ..
 
 echo "BFB is ready: $(readlink -f /workspace/${ubuntu_BFB})"
+echo "ISO is ready: $(readlink -f /workspace/${ubuntu_ISO})"

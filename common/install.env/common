@@ -8,7 +8,7 @@ LOG=/tmp/$logfile
 
 fspath=$(readlink -f "$(dirname $0)")
 
-SUPPORTED_DEVICES=${SUPPORTED_DEVICES:-"a2d[26cf]|1023|1025"}
+SUPPORTED_DEVICES=${SUPPORTED_DEVICES:-"a2d[26cf]"}
 
 cx_pcidev=$(lspci -nD 2> /dev/null | grep -E "$SUPPORTED_DEVICES" | awk '{print $1}' | head -1)
 cx_dev_id=$(lspci -nD -s ${cx_pcidev} 2> /dev/null | awk -F ':' '{print strtonum("0x" $NF)}')

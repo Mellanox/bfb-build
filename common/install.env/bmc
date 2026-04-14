@@ -327,6 +327,8 @@ bmc_get_task_id()
 
 wait_bmc_task_complete()
 {
+	local tid=$1
+
 	copy_status=$(curl -sSk -u $BMC_USER:$BMC_PASSWORD -X GET https://${BMC_IP}/redfish/v1/Chassis/Bluefield_ERoT | jq -r ' .Oem.Nvidia.BackgroundCopyStatus')
 	if [ "X$copy_status" != "Xnull" ]; then
 		if [ "$copy_status" != "Completed" ]; then
@@ -346,11 +348,19 @@ wait_bmc_task_complete()
 		done
 	fi
 
-	bmc_get_task_id
+	if [ ! -z "$tid" ]; then
+		task_id=$tid
+		ilog "Received Task id: $task_id"
+	else
+		bmc_get_task_id
+	fi
+
 	if [ -z "${task_id}" ]; then
 		ilog "No active BMC task"
 		return
 	fi
+
+	ilog "wait_bmc_task_complete: Monitoring ${task_id}"
 	output=$(mktemp)
 	#Check upgrade progress (%).
 	get_bmc_token
@@ -382,6 +392,55 @@ wait_bmc_task_complete()
 			break
 		elif [ "$task_state" == "Aborted" ]; then
 			ilog "- ERROR: BMC task $task_id aborted"
+			RC=$((RC+1))
+			break
+		fi
+		sleep 10
+	done
+	task_state=$(jq '.TaskState' $output | tr -d '"')
+	task_status=$(jq '.TaskStatus' $output | tr -d '"')
+
+	if [ "$task_state$task_status" != "CompletedOK" ]; then
+		echo "BMC task failed:"  >> $LOG
+		cat $output >> $LOG
+		RC=$((RC+1))
+	fi
+	/bin/rm -f $output
+}
+
+wait_no_bmc_tasks()
+{
+	bmc_get_task_id
+	if [ -z "${task_id}" ]; then
+		ilog "No active BMC task"
+		return 0
+	fi
+	output=$(mktemp)
+	get_bmc_token
+	curl -sSk -H "X-Auth-Token: $BMC_TOKEN" https://${BMC_IP}${task_id} > $output
+	percent_done=$(cat $output | jq -r ' .PercentComplete')
+	SECONDS=0
+	while [ "$percent_done" != "100" ]; do
+		if [ "$percent_done" == "null" ]; then
+			ilog "- ERROR: There is no task with task id: $task_id"
+			RC=$((RC+1))
+			break
+		fi
+		if [ $SECONDS -gt $BMC_TASK_TIMEOUT ]; then
+			ilog "- ERROR: BMC task $task_id timeout"
+			RC=$((RC+1))
+			break
+		fi
+		get_bmc_token
+		curl -sSk -H "X-Auth-Token: $BMC_TOKEN" https://${BMC_IP}${task_id} > $output
+		percent_done=$(cat $output | jq -r ' .PercentComplete')
+		task_state=$(cat $output | jq -r ' .TaskState')
+		if [ "$task_state" == "Exception" ]; then
+			ilog "- ERROR: BMC task $task_id exception"
+			RC=$((RC+1))
+			break
+		elif [ "$task_state" == "Cancelled" ]; then
+			ilog "- ERROR: BMC task $task_id cancelled"
 			RC=$((RC+1))
 			break
 		fi
@@ -478,9 +537,7 @@ update_bmc_fw()
 	fi
 	ilog "Provided BMC firmware version: $BMC_IMAGE_VERSION"
 
-	if [ -z "$BMC_INSTALLED_VERSION" ]; then
-		get_bmc_firmware_version
-	fi
+	get_bmc_firmware_version
 
 	if [ "${BMC_IMAGE_VERSION}" == "${BMC_INSTALLED_VERSION}" ]; then
 		if [ "X${FORCE_BMC_FW_INSTALL}" == "Xyes" ]; then
@@ -508,9 +565,12 @@ update_bmc_fw()
 		return $rc
 	fi
 
+	tid=$(echo $output | jq -r '."@odata.id"')
+	ilog "BMC Firmware update task id: $tid"
+
 	BMC_FIRMWARE_UPDATED="yes"
 
-	wait_bmc_task_complete
+	wait_bmc_task_complete $tid
 	post_bmc_install_message="INFO: BMC firmware was updated to: ${BMC_IMAGE_VERSION}"
 	if [ "$BMC_REBOOT" != "yes" ]; then
 		post_bmc_install_message="${post_bmc_install_message}. BMC restart is required"
@@ -578,9 +638,7 @@ update_cec_fw()
 
 	ilog "Proceeding with the CEC firmware update..."
 
-	if [ -z "$BMC_INSTALLED_VERSION" ]; then
-		get_bmc_firmware_version
-	fi
+	get_bmc_firmware_version
 
 	if [[ $(echo -e "${BMC_MIN_MULTIPART_VERSION}\n${BMC_INSTALLED_VERSION}" | sort -V | head -n1) == "${BMC_MIN_MULTIPART_VERSION}" ]]; then
 		ilog "curl -sSk -u <BMC_USER:BMC_PASSWORD> https://${BMC_IP}/redfish/v1/UpdateService/update-multipart -F 'UpdateParameters={\"ForceUpdate\":true};type=application/octet-stream' -F UpdateFile=@${image}"
@@ -597,7 +655,10 @@ update_cec_fw()
 		return $rc
 	fi
 
-	wait_bmc_task_complete
+	tid=$(echo $output | jq -r '."@odata.id"')
+	ilog "CEC Firmware update task id: $tid"
+
+	wait_bmc_task_complete $tid
 	if [ "$CEC_REBOOT" == "yes" ]; then
 		if [[ $(echo -e "${CEC_MIN_RESET_VERSION}\n${CEC_INSTALLED_VERSION}" | sort -V | head -n1) == "${CEC_MIN_RESET_VERSION}" ]]; then
 			log "Rebooting CEC..."
@@ -751,6 +812,9 @@ update_dpu_golden_image()
 		image_type="bfb"
 	fi
 
+	ilog "Waiting for no BMC tasks..."
+	wait_no_bmc_tasks
+
 	if [ "$image_type" == "bfb" ]; then
 		prepare_sshpass_environment
 
@@ -779,11 +843,7 @@ update_dpu_golden_image()
 		fi
 	elif [ "$image_type" == "pldm" ]; then
 
-		wait_bmc_task_complete
-
-		if [ -z "$BMC_INSTALLED_VERSION" ]; then
-			get_bmc_firmware_version
-		fi
+		get_bmc_firmware_version
 
 		if [[ $(echo -e "${BMC_MIN_MULTIPART_VERSION_PLDM}\n${BMC_INSTALLED_VERSION}" | sort -V | head -n1) == "${BMC_MIN_MULTIPART_VERSION_PLDM}" ]]; then
 			ilog "curl -k -H \"X-Auth-Token: <BMC_TOKEN>\" -X POST https://${BMC_IP}/redfish/v1/UpdateService/update-multipart  -F 'UpdateParameters={};type=application/json'  -F \"UpdateFile=@${image};type=application/octet-stream\""
@@ -795,6 +855,11 @@ update_dpu_golden_image()
 				log "ERR Failed to update DPU Golden Image"
 				return $rc
 			fi
+
+			tid=$(echo $output | jq -r '."@odata.id"')
+			ilog "DPU Golden Image update task id: $tid"
+			wait_bmc_task_complete $tid
+
 		else
 			ilog "DPU Golden Image update is not supported for BMC firmware version $BMC_INSTALLED_VERSION"
 			ilog "Please update BMC firmware to version $BMC_MIN_MULTIPART_VERSION_PLDM or higher"
@@ -805,6 +870,10 @@ update_dpu_golden_image()
 
 	if (echo "${BD_PSIDS}" | grep -qw "${PSID}"); then
 		if [ "X${UPLOAD_CONFIG_IMAGE}" == "Xyes" ]; then
+
+			ilog "Waiting for no BMC tasks..."
+			wait_no_bmc_tasks
+
 			if [ "X${GENERATE_CONFIG_IMAGE}" == "Xyes" ]; then
 				generate_config_image $image
 			fi
@@ -854,6 +923,9 @@ update_nic_firmware_golden_image()
 		image_type="bfb"
 	fi
 
+	ilog "Waiting for no BMC tasks..."
+	wait_no_bmc_tasks
+
 	if [ "$image_type" == "bfb" ]; then
 		prepare_sshpass_environment
 
@@ -881,11 +953,7 @@ update_nic_firmware_golden_image()
 		ilog "$output"
 	elif [ "$image_type" == "pldm" ]; then
 
-		wait_bmc_task_complete
-
-		if [ -z "$BMC_INSTALLED_VERSION" ]; then
-			get_bmc_firmware_version
-		fi
+		get_bmc_firmware_version
 
 		if [[ $(echo -e "${BMC_MIN_MULTIPART_VERSION_PLDM}\n${BMC_INSTALLED_VERSION}" | sort -V | head -n1) == "${BMC_MIN_MULTIPART_VERSION_PLDM}" ]]; then
 			ilog "curl -k -H \"X-Auth-Token: <BMC_TOKEN>\" -X POST https://${BMC_IP}/redfish/v1/UpdateService/update-multipart  -F 'UpdateParameters={};type=application/json'  -F \"UpdateFile=@${image};type=application/octet-stream\""
@@ -897,6 +965,11 @@ update_nic_firmware_golden_image()
 				log "ERR Failed to update NIC firmware Golden Image"
 				return $rc
 			fi
+
+			tid=$(echo $output | jq -r '."@odata.id"')
+			ilog "NIC Firmware Golden Image update task id: $tid"
+			wait_bmc_task_complete $tid
+
 		else
 			ilog "NIC Firmware Golden Image update is not supported for BMC firmware version $BMC_INSTALLED_VERSION"
 			ilog "Please update BMC firmware to version $BMC_MIN_MULTIPART_VERSION_PLDM or higher"
@@ -943,8 +1016,8 @@ update_certificates()
 		"CertificateString": "$(cat ${L2_CERT} ${L1_CERT} | sed ':a;N;$!ba;s/\n/\\n/g')"
 	}
 EOF
-
-	wait_bmc_task_complete
+	ilog "Waiting for no BMC tasks..."
+	wait_no_bmc_tasks
 
 	# Upload certificates to BMC
 	ilog "curl -sSk -u <BMC_USER:BMC_PASSWORD> -X POST https://${BMC_IP}/redfish/v1/Systems/Bluefield/Oem/Nvidia/SystemConfigProfile/Truststore/NvidiaCertificates -d @${CA_CHAIN_JSON}"

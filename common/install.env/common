@@ -14,6 +14,9 @@ pciids=$(lspci -nD 2> /dev/null | grep 15b3:a2d[26cf] | awk '{print $1}')
 dpu_part_number=$(mstflint -d $cx_pcidev q full | grep "Part Number:" | awk '{print $NF}')
 PSID=$(mstflint -d $cx_pcidev q | grep PSID | awk '{print $NF}')
 BD_PSIDS=${BD_PSIDS:-"BD_0000000004 BD_0000000005"}
+OCI_PSIDS=${OCI_PSIDS:-"ORC0000000012"}
+BSP_MIN_DDR_VERSION=${MIN_BSP_DDR_VERSION:-"4.13.0.13925"}
+SYS_ENABLE_DDR5600=${SYS_ENABLE_DDR5600:-"FALSE"}
 DEVICE_TIMEOUT=${DEVICE_TIMEOUT:-30}
 FSTAB_USE_DEV_NAME=${FSTAB_USE_DEV_NAME:-"no"}
 
@@ -345,6 +348,17 @@ BOOT9=NET-OOB-IPV4-HTTP
 PXE_DHCP_CLASS_ID=$DHCP_CLASS_ID
 EOF
 fi
+
+	if (echo "${OCI_PSIDS}" | grep -qw "${PSID}"); then
+		latest_bsp=$(printf '%s\n' "$BSP_MIN_DDR_VERSION" "$BSP_RUNNING_VERSION" | sort -V | tail -n1)
+		if [ "$BSP_MIN_DDR_VERSION" != "$BSP_RUNNING_VERSION" ]; then
+			if [ "$latest_bsp" != "$BSP_RUNNING_VERSION" ]; then
+				# Set ENABLE_DDR5600 to False
+				ilog "Setting SYS_ENABLE_DDR5600=${SYS_ENABLE_DDR5600}"
+				echo SYS_ENABLE_DDR5600=${SYS_ENABLE_DDR5600} >> /etc/bf.cfg
+			fi
+		fi
+	fi
 
 	$BFCFG
 	rc=$?
@@ -1007,6 +1021,12 @@ $dpu_part_number
 
 MLXCONFIG:
 $(mlxconfig -d /dev/mst/mt*_pciconf0 -e q)
+
+BFVER:
+$(bfver)
+
+BFCFG:
+$(bfcfg -d)
 ########### DEBUG INFO END ############
 
 EOF
@@ -1080,3 +1100,5 @@ fi
 ERASE_PARTITIONS=${ERASE_PARTITIONS:-"no"}
 ERASE_EMMC=${ERASE_EMMC:-"yes"}
 ERASE_SSD=${ERASE_SSD:-"yes"}
+
+BSP_RUNNING_VERSION=$(bfver | awk -F': ' '/BlueField BSP version:/ {print $2}')

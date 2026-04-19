@@ -161,7 +161,7 @@ RUN apt-get clean -y && \
     sed -i -r -e "s/^(MACAddressPolicy.*)/# \1/" /usr/lib/systemd/network/99-default.link && \
     update-pciids && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1 && \
-    wget -qO - https://linux.mellanox.com/public/repo/doca/latest/ubuntu22.04/aarch64/GPG-KEY-Mellanox.pub | apt-key add -
+    wget -qO - https://linux.mellanox.com/public/repo/doca/2.9.4/ubuntu22.04/arm64-dpu/nvidia-doca-debian-gpg-public-key.asc | apt-key add -
 
 # Manage system services
 RUN systemctl enable NetworkManager.service || true

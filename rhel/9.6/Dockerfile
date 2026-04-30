@@ -10,12 +10,14 @@ ARG BMC_FW_PACKAGES="bf2-bmc-fw-signed bf3-bmc-fw-signed bf3-bmc-gi-signed bf3-b
 ARG CEC_FW_PACKAGES="bf2-cec-fw-signed bf3-cec-fw-signed"
 
 ADD bootimages bootimages/
+ADD dependencies dependencies/
 ADD 10-mlx-console-messages.conf /etc/sysctl.d/
 ADD install.env /root/workspace/install.env/
 ADD install.sh create_bfb /root/workspace/
 ADD repos/ /etc/yum.repos.d/
 
 RUN rpm -ihv --force bootimages/mlxbf-bootimages-*.aarch64.rpm || true
+RUN rpm -ihv --force dependencies/*.rpm || true
 
 RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
     rm -f /etc/sysconfig/network-scripts/ifcfg-enp1s0 /etc/NetworkManager/system-connections/enp1s0.nmconnection /etc/yum.repos.d/ubi.repo && \

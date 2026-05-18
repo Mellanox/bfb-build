@@ -60,6 +60,7 @@ if [ ! -e /tmp/bfpxe.done ]; then touch /tmp/bfpxe.done; bfpxe; fi
 
 DUAL_BOOT="no"
 ROOTFS=${ROOTFS:-"ext4"}
+SET_EXT4_JOURNAL_DATA=${SET_EXT4_JOURNAL_DATA:-"yes"}
 
 if [ -e ${BDIR}/install.env/common ]; then
 	. ${BDIR}/install.env/common
@@ -243,7 +244,9 @@ mount_target_partition()
 	sync
 	sleep 1
 
-	tune2fs -o journal_data $ROOT_PARTITION
+	if [[ "X$ROOTFS" == "Xext4" && "X$SET_EXT4_JOURNAL_DATA" == "Xyes" ]]; then
+		tune2fs -o journal_data $ROOT_PARTITION
+	fi
 
 	mkdir -p /mnt
 	mount -t ${ROOTFS} $ROOT_PARTITION /mnt

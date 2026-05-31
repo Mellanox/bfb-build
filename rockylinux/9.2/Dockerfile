@@ -44,7 +44,7 @@ RUN dnf versionlock add kernel-${KERNEL}
 RUN dnf versionlock add kernel-core-${KERNEL}
 RUN dnf versionlock add kernel-devel-${KERNEL}
 
-RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
+RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
     dnf -y install systemd && \
     rm -f /etc/machine-id && systemd-machine-id-setup && \
     rm -f /etc/sysconfig/network-scripts/ifcfg-enp1s0 && \
@@ -76,6 +76,8 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
         epel-release \
         glibc-langpack-en \
         grub2 \
+        grub2-efi-aa64-cdboot \
+        grub2-efi-aa64-modules \
         grubby \
         i2c-tools \
         iperf3 \
@@ -98,6 +100,7 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
         lvm2 \
         net-tools \
         lsb-release \
+        mtools \
         NetworkManager \
         NetworkManager-config-server \
         NetworkManager-ovs \
@@ -130,6 +133,7 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
         watchdog \
         wget \
         xfsprogs \
+        xorriso \
         yum-utils \
         zip \
         https://dl.rockylinux.org/pub/rocky/8/BaseOS/aarch64/os/Packages/l/libhugetlbfs-2.21-17.el8.aarch64.rpm \
@@ -141,7 +145,7 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
         mlnx-libsnap \
         mft-autocomplete \
         mstflint \
-        strongswan \
+        https://archives.fedoraproject.org/pub/archive/epel/9.6/Everything/aarch64/Packages/s/strongswan-5.9.11-1.el9.aarch64.rpm \
         kmod-gpio-mlxbf3 \
         ${MLNX_FW_UPDATER} \
         ${BMC_FW_PACKAGES} \

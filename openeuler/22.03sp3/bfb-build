@@ -43,9 +43,9 @@ DISTRO="openeuler"
 DISTRO_VERSION="22.03sp3"
 DISTRO_KERNEL=${DISTRO_KERNEL:-""}
 ARCH=${ARCH:-"arm64-dpu"}
-DOCA_VERSION="3.3.0"
-BSP_VERSION="4.14.0-13878"
-MLNX_OFED_VERSION="26.01-1.0.0"
+DOCA_VERSION="3.4.0"
+BSP_VERSION="4.15.0-13977"
+MLNX_OFED_VERSION="26.04-0.8.5.0"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-""}
 BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
@@ -68,7 +68,7 @@ case "$IMAGE_TYPE" in
 esac
 
 mkdir -p $WDIR/bootimages
-wget --no-verbose -P $WDIR/bootimages ${BASE_URL}/doca/${DOCA_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/${ARCH}/$bootimages
+wget --no-verbose -P $WDIR/bootimages ${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}${RELEASE_DIR_SUFFIX}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/${ARCH}/$bootimages
 
 cp -a \
 	Dockerfile \
@@ -91,7 +91,7 @@ cd $WDIR
 
 echo -e "[doca] \n\
 name=Nvidia DOCA repository \n\
-baseurl=$BASE_URL/doca/$DOCA_VERSION/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/arm64-dpu/ \n\
+baseurl=$BASE_URL/doca/${DOCA_VERSION}-${BSP_VERSION}${RELEASE_DIR_SUFFIX}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/arm64-dpu/ \n\
 gpgcheck=0 \n\
 enabled=1" > $WDIR/repos/doca.repo
 

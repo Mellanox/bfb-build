@@ -50,6 +50,8 @@ RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
         gawk \
         glibc-langpack-en \
         grub2 \
+        grub2-efi-aa64-cdboot \
+        grub2-efi-aa64-modules \
         grubby \
         i2c-tools \
         iperf3 \
@@ -75,6 +77,7 @@ RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
         mmc-utils \
         mokutil \
         mstflint \
+        mtools \
         net-tools \
         NetworkManager \
         NetworkManager-config-server \
@@ -112,6 +115,7 @@ RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
         watchdog \
         wget \
         which \
+        xorriso \
         xfsprogs \
 #DOCA Packages
         doca-runtime \

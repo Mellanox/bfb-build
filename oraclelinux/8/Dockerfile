@@ -46,6 +46,7 @@ RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
         grub2 \
         grub2-tools grubby grub2-tools-minimal grub2-efi-aa64 \
         grub2-efi-aa64-modules grub2-common grub2-tools-extra shim-aa64 \
+        grub2-efi-aa64-cdboot \
         i2c-tools \
         ibacm \
         infiniband-diags \
@@ -79,6 +80,7 @@ RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
         ltrace \
         lvm2 \
         mstflint \
+        mtools \
         nano \
         net-tools \
         redhat-lsb-core \
@@ -124,6 +126,7 @@ RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
         wget \
         which \
         xfsprogs \
+        xorriso \
         yum-utils \
         zip \
 #DOCA Packages

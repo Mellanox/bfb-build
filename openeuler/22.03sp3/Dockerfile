@@ -18,7 +18,7 @@ ADD repos/ /etc/yum.repos.d/
 
 RUN rpm -ihv --force bootimages/mlxbf-bootimages-*.aarch64.rpm || true
 
-RUN dnf install -y kernel-5.10.0-292.0.0.194.oe2203sp3 kernel-devel-5.10.0-292.0.0.194.oe2203sp3 kernel-headers-5.10.0-292.0.0.194.oe2203sp3
+RUN dnf install -y kernel-5.10.0-298.0.0.200.oe2203sp3 kernel-devel-5.10.0-298.0.0.200.oe2203sp3 kernel-headers-5.10.0-298.0.0.200.oe2203sp3
 
 RUN echo 'excludepkgs=OpenIPMI network-scripts-openvswitch' >> /etc/dnf/dnf.conf && \
     dnf -y clean all && \
@@ -38,6 +38,8 @@ RUN echo 'excludepkgs=OpenIPMI network-scripts-openvswitch' >> /etc/dnf/dnf.conf
         e2fsprogs \
         efibootmgr \
         grub2 \
+        grub2-efi-aa64-cdboot \
+        grub2-efi-aa64-modules \
         grubby \
         glibc-all-langpacks \
         glibc-common \
@@ -59,6 +61,7 @@ RUN echo 'excludepkgs=OpenIPMI network-scripts-openvswitch' >> /etc/dnf/dnf.conf
         lvm2 \
         https://www.rpmfind.net/linux/opensuse/distribution/leap/15.5/repo/oss/aarch64/mmc-utils-0.1+git.20220208-bp155.1.12.aarch64.rpm \
         mstflint \
+        mtools \
         net-tools \
         NetworkManager \
         NetworkManager-config-server \
@@ -92,6 +95,7 @@ RUN echo 'excludepkgs=OpenIPMI network-scripts-openvswitch' >> /etc/dnf/dnf.conf
         watchdog \
         wget \
         xfsprogs \
+        xorriso \
         https://linux.mellanox.com/public/repo/bluefield/4.9.1/extras/addons/libmd-1.1.0-1.el8.aarch64.rpm \
         https://linux.mellanox.com/public/repo/bluefield/4.9.1/extras/addons/libmd-devel-1.1.0-1.el8.aarch64.rpm \
         https://linux.mellanox.com/public/repo/bluefield/4.9.1/extras/addons/libbsd-devel-0.12.2-1.el8.aarch64.rpm \

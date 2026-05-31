@@ -88,7 +88,7 @@ GRUB_DEFAULT=saved
 GRUB_DISABLE_SUBMENU=true
 GRUB_TERMINAL=console
 GRUB_SERIAL_COMMAND="serial --unit=1"
-GRUB_CMDLINE_LINUX="crashkernel=1024M console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 modprobe.blacklist=mlx5_core,mlx5_ib net.ifnames=0 biosdevname=0"
+GRUB_CMDLINE_LINUX="crashkernel=1024M console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 modprobe.blacklist=mlx5_core,mlx5_ib biosdevname=0"
 GRUB_DISABLE_RECOVERY="true"
 GRUB_TIMEOUT_STYLE=countdown
 GRUB_DISABLE_OS_PROBER=false
@@ -236,7 +236,7 @@ mkdir -p openeuler
 XZ_OPT="--threads=0 -9 --verbose" tar -cJp --exclude='./workspace' --exclude='./signing-local' --exclude='./signing-shared' --exclude='./var/run/docker.sock' \
  --exclude='./root/workspace' --exclude='./tmp/*' --exclude='./run/*' --exclude='./sys/*' --exclude='./proc/*' --exclude='./dev/*' --exclude='./.dockerenv' \
  --exclude='./root/rpmbuild' --exclude='./root/.rpmmacros' --exclude='./root/.bash_history' --exclude='./var/tmp/*rpm' --exclude='./bin/qemu-aarch64-static' \
- --exclude='./usr/bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-arm-static' --exclude='./var/lib/yum/*' --exclude='./var/cache/yum/*' -f "./openeuler/image.tar.xz" -C / .
+ --exclude='./usr/bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-arm-static' --exclude='./var/lib/yum/*' --exclude='./var/cache/yum/*' --exclude='./var/lib/dnf/*' --exclude='./var/cache/dnf/*' -f "./openeuler/image.tar.xz" -C / .
 install -m 0755 ${SDIR}/install.sh ./openeuler/install.sh
 cp -a ${SDIR}/install.env ./openeuler/
 

@@ -1,4 +1,4 @@
-[rdma-core-56.0-el8-aarch64]
+[rdma-core-63.0-1.0.0-el8-aarch64]
 name=RDMA packages for Oracle Linux 8 BFB Build
 baseurl=<FILL YOUR BASE URL HERE>
 gpgcheck=0

@@ -1,10 +1,15 @@
+# Disable history expansion so passwords containing ! work (e.g. "event not found")
+set +H 2>/dev/null || true
 BMC_IP=${BMC_IP:-"192.168.240.1"}
 BMC_PORT=${BMC_PORT:-"443"}
-BMC_USER=${BMC_USER:-"root"}
+if [ ! -d /sys/firmware/efi/efivars ]; then
+	mount -t efivarfs none /sys/firmware/efi/efivars
+fi
+BMC_USER=${BMC_USER:-"$({ echo "$(cat /sys/firmware/efi/efivars/DPUBMCUsername-75a6cbf6-148c-487f-9ffa-7dad26e15801)" | tr -d '\006'; } 2>/dev/null)"}
 DEFAULT_BMC_PASSWORD="0penBmc"
 TMP_BMC_PASSWORD="Nvidia_12345!"
 RESET_BMC_PASSWORD=0
-BMC_PASSWORD=${BMC_PASSWORD:-""}
+BMC_PASSWORD=${BMC_PASSWORD:-"$({ echo "$(cat /sys/firmware/efi/efivars/DPUBMCPassword-75a6cbf6-148c-487f-9ffa-7dad26e15801)" | tr -d '\006'; } 2>/dev/null)"}
 BMC_SSH_USER=${BMC_SSH_USER:-"$BMC_USER"}
 BMC_SSH_PASSWORD=${BMC_SSH_PASSWORD:-"$BMC_PASSWORD"}
 NEW_BMC_PASSWORD=${NEW_BMC_PASSWORD:-""}
@@ -12,8 +17,9 @@ UEFI_PASSWORD=${UEFI_PASSWORD:-""}
 NEW_UEFI_PASSWORD=${NEW_UEFI_PASSWORD:-""}
 OOB_IP=${OOB_IP:-"192.168.240.2"}
 OOB_NETPREFIX=${OOB_NETPREFIX:-"29"}
-BMC_IP_TIMEOUT=${BMC_IP_TIMEOUT:-60}
+BMC_IP_TIMEOUT=${BMC_IP_TIMEOUT:-90}
 BMC_TASK_TIMEOUT=${BMC_TASK_TIMEOUT:-"1800"}
+BMC_HTTPS_READY_TIMEOUT=${BMC_HTTPS_READY_TIMEOUT:-300}
 UPDATE_BMC_FW=${UPDATE_BMC_FW:-"yes"}
 BMC_REBOOT=${BMC_REBOOT:-"no"}
 CEC_REBOOT=${CEC_REBOOT:-"no"}
@@ -84,7 +90,12 @@ export DPU_GI_PATH
 export BMC_PATH
 export CEC_PATH
 
-BMC_CREDENTIALS="'{\"username\":\"$BMC_USER\", \"password\":\"${BMC_PASSWORD}\"}'"
+# Build JSON credentials safely for passwords with special characters (e.g. !&/{)
+get_bmc_credentials_json() {
+	jq -n -c --arg u "$BMC_USER" --arg p "$BMC_PASSWORD" '{username:$u, password:$p}'
+}
+
+BMC_CREDENTIALS=$(get_bmc_credentials_json 2>/dev/null) || BMC_CREDENTIALS=""
 BMC_LINK_UP="no"
 BMC_FIRMWARE_UPDATED="no"
 export BMC_TOKEN=""
@@ -101,17 +112,17 @@ mlx_mkcap="/usr/lib/firmware/mellanox/boot/capsule/scripts/mlx-mkcap"
 reset_bmc_rshim_log()
 {
 	ilog "Resetting BMC Rshim log"
-	is_bmc_rshim=$(sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} 'test -e /dev/rshim0/misc && echo "yes" || echo "no"')
+	is_bmc_rshim=$(sshpass -p "$BMC_SSH_PASSWORD" $SSH ${BMC_SSH_USER}@${BMC_IP} 'test -e /dev/rshim0/misc && echo "yes" || echo "no"')
 	if [ "$is_bmc_rshim" == "no" ]; then
 		ilog "BMC Rshim is not found"
 		return
 	fi
-	ilog "$(sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} 'echo "CLEAR_ON_READ 1" > /dev/rshim0/misc')"
+	ilog "$(sshpass -p "$BMC_SSH_PASSWORD" $SSH ${BMC_SSH_USER}@${BMC_IP} 'echo "CLEAR_ON_READ 1" > /dev/rshim0/misc')"
 	log "Resetting BMC Rshim log"
 	# Wait for the misc to flush
 	sleep 10
-	ilog "$(sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} 'cat /dev/rshim0/misc')"
-	ilog "$(sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} 'echo "CLEAR_ON_READ 0" > /dev/rshim0/misc')"
+	ilog "$(sshpass -p "$BMC_SSH_PASSWORD" $SSH ${BMC_SSH_USER}@${BMC_IP} 'cat /dev/rshim0/misc')"
+	ilog "$(sshpass -p "$BMC_SSH_PASSWORD" $SSH ${BMC_SSH_USER}@${BMC_IP} 'echo "CLEAR_ON_READ 0" > /dev/rshim0/misc')"
 	log "Rshim log cleared"
 }
 
@@ -146,10 +157,29 @@ wait_for_bmc_ip()
                 rlog "ERR Failed to access BMC"
                 ilog "- ERROR: Failed to access $BMC_IP after $SECONDS sec."
                 RC=$((RC+1))
+                return 1
             fi
         fi
     done
     sleep 60
+}
+
+wait_for_bmc_https()
+{
+	local max_sec=${BMC_HTTPS_READY_TIMEOUT:-300}
+	SECONDS=0
+	ilog "Waiting for BMC Redfish HTTPS at https://${BMC_IP}/redfish/v1/ (up to ${max_sec}s)..."
+	while [ $SECONDS -lt $max_sec ]; do
+		if curl -sSk --connect-timeout 5 --max-time 25 -o /dev/null "https://${BMC_IP}/redfish/v1/"; then
+			ilog "BMC HTTPS/Redfish is reachable after ${SECONDS}s"
+			return 0
+		fi
+		sleep 5
+	done
+	rlog "ERR BMC HTTPS/Redfish not ready after ${max_sec}s"
+	ilog "- ERROR: https://${BMC_IP}:443 did not accept connections in time after BMC reboot"
+	RC=$((RC+1))
+	return 1
 }
 
 create_vlan()
@@ -233,7 +263,7 @@ create_vlan()
 prepare_sshpass_environment()
 {
         if [ ! -f /dev/pts/ptmx ]; then
-                echo "none  /dev/pts  devpts  defaults 0 0" >> /etc/fstab
+                grep -q '/dev/pts' /etc/fstab || echo "none  /dev/pts  devpts  defaults 0 0" >> /etc/fstab
                 mount /dev/pts
         fi
         if [ ! -f /etc/passwd ]; then
@@ -244,7 +274,7 @@ prepare_sshpass_environment()
 get_field_mode()
 {
     mode=$(ipmitool raw 0x32 0x68 2> /dev/null | tr -d ' ')
-    return $mode
+    echo "$mode"
 }
 
 set_field_mode()
@@ -257,11 +287,11 @@ set_field_mode()
 
 get_bmc_token()
 {
-	cmd=$(echo curl -sSk -H \"Content-Type: application/json\" -X POST https://${BMC_IP}/login -d $BMC_CREDENTIALS)
-	BMC_TOKEN=$(eval $cmd | jq -r ' .token')
+	BMC_CREDENTIALS=$(get_bmc_credentials_json 2>/dev/null)
+	BMC_TOKEN=$(curl -sSk -H "Content-Type: application/json" -X POST "https://${BMC_IP}/login" -d "$BMC_CREDENTIALS" | jq -r ' .token')
 	if [[ -z "$BMC_TOKEN" || "$BMC_TOKEN" == "null" ]]; then
 		rlog "ERR Failed to get BMC token. Check BMC user/password"
-		ilog "- ERROR: Failed to get BMC token using command: $cmd. Check BMC user/password."
+		ilog "- ERROR: Failed to get BMC token. Check BMC user/password."
 		RC=$((RC+1))
 		return 1
 	fi
@@ -270,10 +300,9 @@ get_bmc_token()
 
 change_uefi_password()
 {
-	UEFI_CREDENTIALS="'{\"Attributes\":{\"CurrentUefiPassword\":\"$UEFI_PASSWORD\",\"UefiPassword\":\"${NEW_UEFI_PASSWORD}\"}}'"
-	cmd=$(echo curl -sSk -u $BMC_USER:"$BMC_PASSWORD" -H \"Content-Type: application/json\" -X PATCH https://${BMC_IP}/redfish/v1/Systems/Bluefield/Bios/Settings -d $UEFI_CREDENTIALS)
-	ilog "Command: $cmd"
-	output=$(eval $cmd)
+	UEFI_CREDENTIALS=$(jq -n -c --arg cur "$UEFI_PASSWORD" --arg new "$NEW_UEFI_PASSWORD" '{Attributes:{CurrentUefiPassword:$cur, UefiPassword:$new}}')
+	ilog "Changing UEFI password via Redfish"
+	output=$(curl -sSk -u "$BMC_USER:$BMC_PASSWORD" -H "Content-Type: application/json" -X PATCH "https://${BMC_IP}/redfish/v1/Systems/Bluefield/Bios/Settings" -d "$UEFI_CREDENTIALS")
 	status=$(echo $output | jq '."@Message.ExtendedInfo"[0].Message')
 	if [ "$status" != "\"The request completed successfully."\" ]; then
 		rlog "ERR Failed to change UEFI password."
@@ -291,9 +320,8 @@ change_bmc_password()
 	current_password="$1"
 	new_password="$2"
 
-	NEW_BMC_CREDENTIALS="'{\"Password\":\"${new_password}\"}'"
-	cmd=$(echo curl -sSk -u $BMC_USER:$current_password  -H \"Content-Type: application/json\" -X PATCH https://${BMC_IP}/redfish/v1/AccountService/Accounts/$BMC_USER -d $NEW_BMC_CREDENTIALS)
-	output=$(eval $cmd)
+	NEW_BMC_CREDENTIALS=$(jq -n -c --arg p "$new_password" '{Password:$p}')
+	output=$(curl -sSk -u "$BMC_USER:$current_password" -H "Content-Type: application/json" -X PATCH "https://${BMC_IP}/redfish/v1/AccountService/Accounts/$BMC_USER" -d "$NEW_BMC_CREDENTIALS")
 	status=$(echo $output | jq '."@Message.ExtendedInfo"[0].Message')
 	if [ "$status" != "\"The request completed successfully."\" ]; then
 		rlog "ERR Failed to change BMC $BMC_USER password."
@@ -325,32 +353,47 @@ bmc_get_task_id()
 	ilog "Task id: $task_id"
 }
 
-wait_bmc_task_complete()
+wait_bmc_background_copy()
 {
-	copy_status=$(curl -sSk -u $BMC_USER:$BMC_PASSWORD -X GET https://${BMC_IP}/redfish/v1/Chassis/Bluefield_ERoT | jq -r ' .Oem.Nvidia.BackgroundCopyStatus')
-	if [ "X$copy_status" != "Xnull" ]; then
-		if [ "$copy_status" != "Completed" ]; then
-			ilog "BMC background copy is: $copy_status"
-		fi
-
-		SECONDS=0
-		while [ "$copy_status" != "Completed" ]
-		do
-			if [ $SECONDS -gt $BMC_TASK_TIMEOUT ]; then
-				ilog "- ERROR: BMC copy task timeout"
-				RC=$((RC+1))
-				break
-			fi
-			sleep 10
-			copy_status=$(curl -sSk -u $BMC_USER:$BMC_PASSWORD -X GET https://${BMC_IP}/redfish/v1/Chassis/Bluefield_ERoT | jq -r ' .Oem.Nvidia.BackgroundCopyStatus')
-		done
+	copy_status=$(curl -sSk -u "$BMC_USER:$BMC_PASSWORD" -X GET https://${BMC_IP}/redfish/v1/Chassis/Bluefield_ERoT | jq -r ' .Oem.Nvidia.BackgroundCopyStatus')
+	if [ "X$copy_status" == "Xnull" ]; then
+		return 0
 	fi
 
-	bmc_get_task_id
+	if [ "$copy_status" != "Completed" ]; then
+		ilog "BMC background copy is: $copy_status"
+	fi
+
+	SECONDS=0
+	while [ "$copy_status" != "Completed" ]
+	do
+		if [ $SECONDS -gt $BMC_TASK_TIMEOUT ]; then
+			ilog "- ERROR: BMC copy task timeout"
+			RC=$((RC+1))
+			break
+		fi
+		sleep 10
+		copy_status=$(curl -sSk -u "$BMC_USER:$BMC_PASSWORD" -X GET https://${BMC_IP}/redfish/v1/Chassis/Bluefield_ERoT | jq -r ' .Oem.Nvidia.BackgroundCopyStatus')
+	done
+}
+
+wait_bmc_task_complete()
+{
+	local tid=$1
+
+	if [ ! -z "$tid" ]; then
+		task_id=$tid
+		ilog "Received Task id: $task_id"
+	else
+		bmc_get_task_id
+	fi
+
 	if [ -z "${task_id}" ]; then
 		ilog "No active BMC task"
 		return
 	fi
+
+	ilog "wait_bmc_task_complete: Monitoring ${task_id}"
 	output=$(mktemp)
 	#Check upgrade progress (%).
 	get_bmc_token
@@ -382,6 +425,67 @@ wait_bmc_task_complete()
 			break
 		elif [ "$task_state" == "Aborted" ]; then
 			ilog "- ERROR: BMC task $task_id aborted"
+			RC=$((RC+1))
+			break
+		fi
+		sleep 10
+	done
+	task_state=$(jq '.TaskState' $output | tr -d '"')
+	task_status=$(jq '.TaskStatus' $output | tr -d '"')
+
+	if [ "$task_state$task_status" != "CompletedOK" ]; then
+		echo "BMC task failed:"  >> $LOG
+		cat $output >> $LOG
+		RC=$((RC+1))
+	fi
+	/bin/rm -f $output
+}
+
+wait_bmc_task_complete_check_rc()
+{
+	local tid=$1
+	local rc_before=$RC
+
+	wait_bmc_task_complete "$tid"
+	if [ "$RC" -ne "$rc_before" ]; then
+		return 1
+	fi
+	return 0
+}
+
+wait_no_bmc_tasks()
+{
+	bmc_get_task_id
+	if [ -z "${task_id}" ]; then
+		ilog "No active BMC task"
+		return 0
+	fi
+	output=$(mktemp)
+	get_bmc_token
+	curl -sSk -H "X-Auth-Token: $BMC_TOKEN" https://${BMC_IP}${task_id} > $output
+	percent_done=$(cat $output | jq -r ' .PercentComplete')
+	SECONDS=0
+	while [ "$percent_done" != "100" ]; do
+		if [ "$percent_done" == "null" ]; then
+			ilog "- ERROR: There is no task with task id: $task_id"
+			RC=$((RC+1))
+			break
+		fi
+		if [ $SECONDS -gt $BMC_TASK_TIMEOUT ]; then
+			ilog "- ERROR: BMC task $task_id timeout"
+			RC=$((RC+1))
+			break
+		fi
+		get_bmc_token
+		curl -sSk -H "X-Auth-Token: $BMC_TOKEN" https://${BMC_IP}${task_id} > $output
+		percent_done=$(cat $output | jq -r ' .PercentComplete')
+		task_state=$(cat $output | jq -r ' .TaskState')
+		if [ "$task_state" == "Exception" ]; then
+			ilog "- ERROR: BMC task $task_id exception"
+			RC=$((RC+1))
+			break
+		elif [ "$task_state" == "Cancelled" ]; then
+			ilog "- ERROR: BMC task $task_id cancelled"
 			RC=$((RC+1))
 			break
 		fi
@@ -448,6 +552,7 @@ get_bmc_firmware_version()
 update_bmc_fw()
 {
 	rc=0
+	wait_bmc_background_copy
 	wait_bmc_task_complete
 	log "Updating BMC firmware"
 	extract_images
@@ -468,7 +573,7 @@ update_bmc_fw()
 			# BlueField-2
 			BMC_IMAGE_VERSION="$(strings -a -t d $image | grep -m 1 ExtendedVersion | cut -d '-' -f 2,3)"
 		else
-			BMC_IMAGE_VERSION="$(strings -a -t d $image | grep -m 1 BF- | cut -d '-' -f 2- | sed -e 's/ //g')"
+			BMC_IMAGE_VERSION="$(strings -a -t d $image | grep -m 1 BF- | grep -oE '[0-9]+\.[0-9]+-[0-9]+')"
 		fi
 		if [ -z "$BMC_IMAGE_VERSION" ]; then
 			ilog "- ERROR: Cannot detect included BMC firmware version"
@@ -478,9 +583,7 @@ update_bmc_fw()
 	fi
 	ilog "Provided BMC firmware version: $BMC_IMAGE_VERSION"
 
-	if [ -z "$BMC_INSTALLED_VERSION" ]; then
-		get_bmc_firmware_version
-	fi
+	get_bmc_firmware_version
 
 	if [ "${BMC_IMAGE_VERSION}" == "${BMC_INSTALLED_VERSION}" ]; then
 		if [ "X${FORCE_BMC_FW_INSTALL}" == "Xyes" ]; then
@@ -495,10 +598,10 @@ update_bmc_fw()
 
 	if [[ $(echo -e "${BMC_MIN_MULTIPART_VERSION}\n${BMC_INSTALLED_VERSION}" | sort -V | head -n1) == "${BMC_MIN_MULTIPART_VERSION}" ]]; then
 		ilog "curl -sSk -u <BMC_USER:BMC_PASSWORD> https://${BMC_IP}/redfish/v1/UpdateService/update-multipart -F 'UpdateParameters={\"ForceUpdate\":true};type=application/octet-stream' -F UpdateFile=@${image}"
-		output=$(curl -sSk -u $BMC_USER:$BMC_PASSWORD https://${BMC_IP}/redfish/v1/UpdateService/update-multipart -F 'UpdateParameters={"ForceUpdate":true};type=application/octet-stream' -F UpdateFile=@${image} 2>&1)
+		output=$(curl -sSk -u "$BMC_USER:$BMC_PASSWORD" https://${BMC_IP}/redfish/v1/UpdateService/update-multipart -F 'UpdateParameters={"ForceUpdate":true};type=application/octet-stream' -F UpdateFile=@${image} 2>&1)
 	else
 		ilog "curl -sSk -u <BMC_USER:BMC_PASSWORD> -H "Content-Type: application/octet-stream" -X POST -T ${image} https://${BMC_IP}/redfish/v1/UpdateService"
-		output=$(curl -sSk -u $BMC_USER:$BMC_PASSWORD -H "Content-Type: application/octet-stream" -X POST -T ${image} https://${BMC_IP}/redfish/v1/UpdateService 2>&1)
+		output=$(curl -sSk -u "$BMC_USER:$BMC_PASSWORD" -H "Content-Type: application/octet-stream" -X POST -T ${image} https://${BMC_IP}/redfish/v1/UpdateService 2>&1)
 	fi
 	ilog "BMC Firmware update: $output"
 	if (echo $output | grep -q "internal service error"); then
@@ -508,9 +611,16 @@ update_bmc_fw()
 		return $rc
 	fi
 
+	tid=$(echo $output | jq -r '."@odata.id"')
+	ilog "BMC Firmware update task id: $tid"
+
+	if ! wait_bmc_task_complete_check_rc $tid; then
+		log "ERR Failed to update BMC firmware"
+		return 1
+	fi
+
 	BMC_FIRMWARE_UPDATED="yes"
 
-	wait_bmc_task_complete
 	post_bmc_install_message="INFO: BMC firmware was updated to: ${BMC_IMAGE_VERSION}"
 	if [ "$BMC_REBOOT" != "yes" ]; then
 		post_bmc_install_message="${post_bmc_install_message}. BMC restart is required"
@@ -526,18 +636,16 @@ update_bmc_fw()
 update_cec_fw()
 {
 	rc=0
+	wait_bmc_background_copy
 	wait_bmc_task_complete
 	log "Updating CEC firmware"
 	extract_images
 	image=$(/bin/ls -1 {${BMC_BASE_DIR},/}${CEC_PATH}/${bmc_pref}*cec*${cec_sfx} 2> /dev/null | tail -1)
 
 	if [ -z "$image" ]; then
-		image=$(/bin/ls -1 {${BMC_BASE_DIR},/}${CEC_PATH}/${bmc_pref}*cec*${cec_sfx} 2> /dev/null | tail -1)
-		if [ -z "$image" ]; then
-			ilog "- ERROR: Cannot find CEC firmware image"
-			RC=$((RC+1))
-			return 1
-		fi
+		ilog "- ERROR: Cannot find CEC firmware image"
+		RC=$((RC+1))
+		return 1
 	fi
 	ilog "Found CEC firmware image: $image"
 
@@ -578,16 +686,14 @@ update_cec_fw()
 
 	ilog "Proceeding with the CEC firmware update..."
 
-	if [ -z "$BMC_INSTALLED_VERSION" ]; then
-		get_bmc_firmware_version
-	fi
+	get_bmc_firmware_version
 
 	if [[ $(echo -e "${BMC_MIN_MULTIPART_VERSION}\n${BMC_INSTALLED_VERSION}" | sort -V | head -n1) == "${BMC_MIN_MULTIPART_VERSION}" ]]; then
 		ilog "curl -sSk -u <BMC_USER:BMC_PASSWORD> https://${BMC_IP}/redfish/v1/UpdateService/update-multipart -F 'UpdateParameters={\"ForceUpdate\":true};type=application/octet-stream' -F UpdateFile=@${image}"
-		output=$(curl -sSk -u $BMC_USER:$BMC_PASSWORD https://${BMC_IP}/redfish/v1/UpdateService/update-multipart -F 'UpdateParameters={"ForceUpdate":true};type=application/octet-stream' -F UpdateFile=@${image} 2>&1)
+		output=$(curl -sSk -u "$BMC_USER:$BMC_PASSWORD" https://${BMC_IP}/redfish/v1/UpdateService/update-multipart -F 'UpdateParameters={"ForceUpdate":true};type=application/octet-stream' -F UpdateFile=@${image} 2>&1)
 	else
 		ilog "curl -sSk -u <BMC_USER:BMC_PASSWORD> -H "Content-Type: application/octet-stream" -X POST -T ${image} https://${BMC_IP}/redfish/v1/UpdateService"
-		output=$(curl -sSk -u $BMC_USER:$BMC_PASSWORD -H "Content-Type: application/octet-stream" -X POST -T ${image} https://${BMC_IP}/redfish/v1/UpdateService 2>&1)
+		output=$(curl -sSk -u "$BMC_USER:$BMC_PASSWORD" -H "Content-Type: application/octet-stream" -X POST -T ${image} https://${BMC_IP}/redfish/v1/UpdateService 2>&1)
 	fi
 	ilog "CEC Firmware update: $output"
 	if (echo $output | grep -q "internal service error"); then
@@ -597,11 +703,18 @@ update_cec_fw()
 		return $rc
 	fi
 
-	wait_bmc_task_complete
+	tid=$(echo $output | jq -r '."@odata.id"')
+	ilog "CEC Firmware update task id: $tid"
+
+	if ! wait_bmc_task_complete_check_rc $tid; then
+		log "ERR Failed to update CEC firmware"
+		return 1
+	fi
+
 	if [ "$CEC_REBOOT" == "yes" ]; then
 		if [[ $(echo -e "${CEC_MIN_RESET_VERSION}\n${CEC_INSTALLED_VERSION}" | sort -V | head -n1) == "${CEC_MIN_RESET_VERSION}" ]]; then
 			log "Rebooting CEC..."
-			output=$(curl -sSk -u $BMC_USER:"$BMC_PASSWORD" -H "Content-Type: application/json" -X POST -d '{"ResetType": "GracefulRestart"}' https://${BMC_IP}/redfish/v1/Chassis/Bluefield_ERoT/Actions/Chassis.Reset)
+			output=$(curl -sSk -u "$BMC_USER:$BMC_PASSWORD" -H "Content-Type: application/json" -X POST -d '{"ResetType": "GracefulRestart"}' https://${BMC_IP}/redfish/v1/Chassis/Bluefield_ERoT/Actions/Chassis.Reset)
 			status=$(echo $output | jq '."@Message.ExtendedInfo"[0].Message')
 			if [ "$status" == "\"The request completed successfully."\" ]; then
 				log "INFO: CEC firmware was updated to ${CEC_IMAGE_VERSION}."
@@ -614,6 +727,8 @@ update_cec_fw()
 		else
 			log "INFO: CEC firmware was updated to ${CEC_IMAGE_VERSION}. Host power cycle is required"
 		fi
+	else
+		log "INFO: CEC firmware was updated to ${CEC_IMAGE_VERSION}. Host power cycle is required"
 	fi
 	if [ "$BMC_UPGRADE_RESET" == "yes" ]; then
 		BMC_UPGRADE_RESET=1 bfcfg -f /dev/null
@@ -629,6 +744,7 @@ bmc_reboot()
 	curl -sSk -H "X-Auth-Token: $BMC_TOKEN" -H "Content-Type: application/json" -X POST https://${BMC_IP}/redfish/v1/Managers/Bluefield_BMC/Actions/Manager.Reset -d '{"ResetType":"GracefulRestart"}'
 	sleep 10
 	wait_for_bmc_ip
+	wait_for_bmc_https
 }
 
 bmc_reboot_from_dpu()
@@ -751,6 +867,9 @@ update_dpu_golden_image()
 		image_type="bfb"
 	fi
 
+	ilog "Waiting for no BMC tasks..."
+	wait_no_bmc_tasks
+
 	if [ "$image_type" == "bfb" ]; then
 		prepare_sshpass_environment
 
@@ -758,17 +877,17 @@ update_dpu_golden_image()
 		DPU_GI_IMAGE_VERSION="$(sha256sum $image | awk '{print $1}')"
 		ilog "Provided DPU Golden Image version: $DPU_GI_IMAGE_VERSION"
 
-		DPU_GI_INSTALLED_VERSION="$(sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} dpu_golden_image golden_image_arm -V 2> /dev/null)"
+		DPU_GI_INSTALLED_VERSION="$(sshpass -p "$BMC_SSH_PASSWORD" $SSH ${BMC_SSH_USER}@${BMC_IP} dpu_golden_image golden_image_arm -V 2> /dev/null)"
 		ilog "Installed DPU Golden Image version: $DPU_GI_INSTALLED_VERSION"
 
 		if [ "$DPU_GI_IMAGE_VERSION" == "$DPU_GI_INSTALLED_VERSION" ]; then
 			ilog "Installed DPU Golden Image version is the same as provided. Skipping DPU Golden Image update."
 		else
-			sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} mkdir -p ${BMC_TMP_DIR}/golden-image-arm
+			sshpass -p "$BMC_SSH_PASSWORD" $SSH ${BMC_SSH_USER}@${BMC_IP} mkdir -p ${BMC_TMP_DIR}/golden-image-arm
 			ilog "Copying $image to ${BMC_SSH_USER}@${BMC_IP}:${BMC_TMP_DIR}/golden-image-arm"
-			sshpass -p $BMC_SSH_PASSWORD $SCP $image ${BMC_SSH_USER}@${BMC_IP}:${BMC_TMP_DIR}/golden-image-arm
+			sshpass -p "$BMC_SSH_PASSWORD" $SCP $image ${BMC_SSH_USER}@${BMC_IP}:${BMC_TMP_DIR}/golden-image-arm
 			ilog "Installing DPU Golden Image on the BMC by: dpu_golden_image golden_image_arm -w ${BMC_TMP_DIR}/golden-image-arm/$(basename $image)"
-			output=$(sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} dpu_golden_image golden_image_arm -w ${BMC_TMP_DIR}/golden-image-arm/$(basename $image) 2>&1)
+			output=$(sshpass -p "$BMC_SSH_PASSWORD" $SSH ${BMC_SSH_USER}@${BMC_IP} dpu_golden_image golden_image_arm -w ${BMC_TMP_DIR}/golden-image-arm/$(basename $image) 2>&1)
 			if [ $? -eq 0 ]; then
 				log "DPU Golden Image installed successfully"
 			else
@@ -779,11 +898,7 @@ update_dpu_golden_image()
 		fi
 	elif [ "$image_type" == "pldm" ]; then
 
-		wait_bmc_task_complete
-
-		if [ -z "$BMC_INSTALLED_VERSION" ]; then
-			get_bmc_firmware_version
-		fi
+		get_bmc_firmware_version
 
 		if [[ $(echo -e "${BMC_MIN_MULTIPART_VERSION_PLDM}\n${BMC_INSTALLED_VERSION}" | sort -V | head -n1) == "${BMC_MIN_MULTIPART_VERSION_PLDM}" ]]; then
 			ilog "curl -k -H \"X-Auth-Token: <BMC_TOKEN>\" -X POST https://${BMC_IP}/redfish/v1/UpdateService/update-multipart  -F 'UpdateParameters={};type=application/json'  -F \"UpdateFile=@${image};type=application/octet-stream\""
@@ -795,6 +910,14 @@ update_dpu_golden_image()
 				log "ERR Failed to update DPU Golden Image"
 				return $rc
 			fi
+
+			tid=$(echo $output | jq -r '."@odata.id"')
+			ilog "DPU Golden Image update task id: $tid"
+			if ! wait_bmc_task_complete_check_rc $tid; then
+				log "ERR Failed to update DPU Golden Image"
+				return 1
+			fi
+
 		else
 			ilog "DPU Golden Image update is not supported for BMC firmware version $BMC_INSTALLED_VERSION"
 			ilog "Please update BMC firmware to version $BMC_MIN_MULTIPART_VERSION_PLDM or higher"
@@ -805,6 +928,10 @@ update_dpu_golden_image()
 
 	if (echo "${BD_PSIDS}" | grep -qw "${PSID}"); then
 		if [ "X${UPLOAD_CONFIG_IMAGE}" == "Xyes" ]; then
+
+			ilog "Waiting for no BMC tasks..."
+			wait_no_bmc_tasks
+
 			if [ "X${GENERATE_CONFIG_IMAGE}" == "Xyes" ]; then
 				generate_config_image $image
 			fi
@@ -813,12 +940,12 @@ update_dpu_golden_image()
 				ilog "Config image does not exist: $config_image"
 				return 1
 			fi
-			sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} mkdir -p ${BMC_TMP_DIR}/golden-image-config
+			sshpass -p "$BMC_SSH_PASSWORD" $SSH ${BMC_SSH_USER}@${BMC_IP} mkdir -p ${BMC_TMP_DIR}/golden-image-config
 			ilog "Copying $config_image to ${BMC_SSH_USER}@${BMC_IP}:${BMC_TMP_DIR}/golden-image-config"
-			sshpass -p $BMC_SSH_PASSWORD $SCP $config_image ${BMC_SSH_USER}@${BMC_IP}:${BMC_TMP_DIR}/golden-image-config
+			sshpass -p "$BMC_SSH_PASSWORD" $SCP $config_image ${BMC_SSH_USER}@${BMC_IP}:${BMC_TMP_DIR}/golden-image-config
 			if [ "X$BMC_INSTALL_CONFIG_IMAGE" == "Xyes" ]; then
 				ilog "Installing DPU Config Image on the BMC by: dpu_golden_image golden_image_config -w ${BMC_TMP_DIR}/golden-image-config/$(basename $config_image)"
-				output=$(sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} dpu_golden_image golden_image_config -w ${BMC_TMP_DIR}/golden-image-config/$(basename $config_image) 2>&1)
+				output=$(sshpass -p "$BMC_SSH_PASSWORD" $SSH ${BMC_SSH_USER}@${BMC_IP} dpu_golden_image golden_image_config -w ${BMC_TMP_DIR}/golden-image-config/$(basename $config_image) 2>&1)
 				if [ $? -eq 0 ]; then
 					log "Installed BMC config image"
 					BMC_CONFIG_UPDATED="yes"
@@ -854,6 +981,9 @@ update_nic_firmware_golden_image()
 		image_type="bfb"
 	fi
 
+	ilog "Waiting for no BMC tasks..."
+	wait_no_bmc_tasks
+
 	if [ "$image_type" == "bfb" ]; then
 		prepare_sshpass_environment
 
@@ -861,7 +991,7 @@ update_nic_firmware_golden_image()
 		NIC_GI_IMAGE_VERSION="$(sha256sum $image | awk '{print $1}')"
 		ilog "Provided NIC firmware Golden Image version: $NIC_GI_IMAGE_VERSION"
 
-		NIC_GI_INSTALLED_VERSION="$(sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} dpu_golden_image golden_image_nic -V 2> /dev/null)"
+		NIC_GI_INSTALLED_VERSION="$(sshpass -p "$BMC_SSH_PASSWORD" $SSH ${BMC_SSH_USER}@${BMC_IP} dpu_golden_image golden_image_nic -V 2> /dev/null)"
 		ilog "Installed NIC firmware Golden Image version: $NIC_GI_INSTALLED_VERSION"
 
 		if [ "$NIC_GI_IMAGE_VERSION" == "$NIC_GI_INSTALLED_VERSION" ]; then
@@ -869,9 +999,9 @@ update_nic_firmware_golden_image()
 			return 0
 		fi
 
-		sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} mkdir -p ${BMC_TMP_DIR}/golden-image-nic
-		sshpass -p $BMC_SSH_PASSWORD $SCP $image ${BMC_SSH_USER}@${BMC_IP}:${BMC_TMP_DIR}/golden-image-nic
-		output=$(sshpass -p $BMC_SSH_PASSWORD $SSH ${BMC_SSH_USER}@${BMC_IP} dpu_golden_image golden_image_nic -w ${BMC_TMP_DIR}/golden-image-nic/$(basename $image) 2>&1)
+		sshpass -p "$BMC_SSH_PASSWORD" $SSH ${BMC_SSH_USER}@${BMC_IP} mkdir -p ${BMC_TMP_DIR}/golden-image-nic
+		sshpass -p "$BMC_SSH_PASSWORD" $SCP $image ${BMC_SSH_USER}@${BMC_IP}:${BMC_TMP_DIR}/golden-image-nic
+		output=$(sshpass -p "$BMC_SSH_PASSWORD" $SSH ${BMC_SSH_USER}@${BMC_IP} dpu_golden_image golden_image_nic -w ${BMC_TMP_DIR}/golden-image-nic/$(basename $image) 2>&1)
 		if [ $? -eq 0 ]; then
 			log "NIC firmware Golden Image installed successfully"
 		else
@@ -881,11 +1011,7 @@ update_nic_firmware_golden_image()
 		ilog "$output"
 	elif [ "$image_type" == "pldm" ]; then
 
-		wait_bmc_task_complete
-
-		if [ -z "$BMC_INSTALLED_VERSION" ]; then
-			get_bmc_firmware_version
-		fi
+		get_bmc_firmware_version
 
 		if [[ $(echo -e "${BMC_MIN_MULTIPART_VERSION_PLDM}\n${BMC_INSTALLED_VERSION}" | sort -V | head -n1) == "${BMC_MIN_MULTIPART_VERSION_PLDM}" ]]; then
 			ilog "curl -k -H \"X-Auth-Token: <BMC_TOKEN>\" -X POST https://${BMC_IP}/redfish/v1/UpdateService/update-multipart  -F 'UpdateParameters={};type=application/json'  -F \"UpdateFile=@${image};type=application/octet-stream\""
@@ -897,6 +1023,14 @@ update_nic_firmware_golden_image()
 				log "ERR Failed to update NIC firmware Golden Image"
 				return $rc
 			fi
+
+			tid=$(echo $output | jq -r '."@odata.id"')
+			ilog "NIC Firmware Golden Image update task id: $tid"
+			if ! wait_bmc_task_complete_check_rc $tid; then
+				log "ERR Failed to update NIC firmware Golden Image"
+				return 1
+			fi
+
 		else
 			ilog "NIC Firmware Golden Image update is not supported for BMC firmware version $BMC_INSTALLED_VERSION"
 			ilog "Please update BMC firmware to version $BMC_MIN_MULTIPART_VERSION_PLDM or higher"
@@ -913,7 +1047,7 @@ update_certificates()
 	log "Updating certificates"
 
 	# Get the number of existing certificates
-	num_certs=$(curl -sSk -u $BMC_USER:$BMC_PASSWORD -X GET https://${BMC_IP}/redfish/v1/Systems/Bluefield/Oem/Nvidia/SystemConfigProfile/Truststore/NvidiaCertificates | jq '."Members@odata.count"')
+	num_certs=$(curl -sSk -u "$BMC_USER:$BMC_PASSWORD" -X GET https://${BMC_IP}/redfish/v1/Systems/Bluefield/Oem/Nvidia/SystemConfigProfile/Truststore/NvidiaCertificates | jq '."Members@odata.count"')
 	# Validate num_certs is a valid integer
 	if [[ -z "$num_certs" || "$num_certs" == "null" || ! "$num_certs" =~ ^[0-9]+$ ]]; then
 		ilog "WARNING: Could not get valid certificate count (got: '$num_certs'), assuming 0"
@@ -923,9 +1057,9 @@ update_certificates()
 	if [ $num_certs -gt 0 ]; then
 		ilog "Checking if certificates are already uploaded"
 		uploaded_pem_certs=0
-		cert_ids=$(curl -sSk -u $BMC_USER:$BMC_PASSWORD -X GET https://${BMC_IP}/redfish/v1/Systems/Bluefield/Oem/Nvidia/SystemConfigProfile/Truststore/NvidiaCertificates | jq '."Members"[] | ."@odata.id"' | tr -d '"')
+		cert_ids=$(curl -sSk -u "$BMC_USER:$BMC_PASSWORD" -X GET https://${BMC_IP}/redfish/v1/Systems/Bluefield/Oem/Nvidia/SystemConfigProfile/Truststore/NvidiaCertificates | jq '."Members"[] | ."@odata.id"' | tr -d '"')
 		for cert_id in $cert_ids; do
-			curl -sSk -u $BMC_USER:$BMC_PASSWORD -X GET https://${BMC_IP}${cert_id} | jq '."CertificateType"' | grep -q '"PEM"'
+			curl -sSk -u "$BMC_USER:$BMC_PASSWORD" -X GET https://${BMC_IP}${cert_id} | jq '."CertificateType"' | grep -q '"PEM"'
 			if [ $? -eq 0 ]; then
 				uploaded_pem_certs=$((uploaded_pem_certs+1))
 			fi
@@ -943,10 +1077,12 @@ update_certificates()
 		"CertificateString": "$(cat ${L2_CERT} ${L1_CERT} | sed ':a;N;$!ba;s/\n/\\n/g')"
 	}
 EOF
+	ilog "Waiting for no BMC tasks..."
+	wait_no_bmc_tasks
 
 	# Upload certificates to BMC
 	ilog "curl -sSk -u <BMC_USER:BMC_PASSWORD> -X POST https://${BMC_IP}/redfish/v1/Systems/Bluefield/Oem/Nvidia/SystemConfigProfile/Truststore/NvidiaCertificates -d @${CA_CHAIN_JSON}"
-	output=$(curl -sSk -u $BMC_USER:$BMC_PASSWORD -X POST https://${BMC_IP}/redfish/v1/Systems/Bluefield/Oem/Nvidia/SystemConfigProfile/Truststore/NvidiaCertificates -d @${CA_CHAIN_JSON} 2>&1)
+	output=$(curl -sSk -u "$BMC_USER:$BMC_PASSWORD" -X POST https://${BMC_IP}/redfish/v1/Systems/Bluefield/Oem/Nvidia/SystemConfigProfile/Truststore/NvidiaCertificates -d @${CA_CHAIN_JSON} 2>&1)
 	status=$(echo $output | jq '."Issuer"."Organization"')
 	if [ "$status" == "\"NVIDIA"\" ]; then
 		log "INFO: Certificates uploaded successfully"
@@ -994,7 +1130,7 @@ bmc_components_update()
 						fi
 						BMC_PASSWORD="$NEW_BMC_PASSWORD"
 					else
-						update_progress bmc_password 0
+						update_progress bmc_password 1
 						skip_bmc
 						return
 					fi
@@ -1009,7 +1145,7 @@ bmc_components_update()
 					fi
 					RESET_BMC_PASSWORD=1
 				fi
-				BMC_CREDENTIALS="'{\"username\":\"$BMC_USER\", \"password\":\"${BMC_PASSWORD}\"}'"
+				BMC_CREDENTIALS=$(get_bmc_credentials_json 2>/dev/null)
 			else
 				skip_bmc
 				return
@@ -1108,7 +1244,7 @@ bmc_components_update()
 
 	if [ $RESET_BMC_PASSWORD -eq 1 ]; then
 		ilog "Reset BMC configuration to default"
-		output=$(curl -sSk -u $BMC_USER:"$BMC_PASSWORD" -H "Content-Type: application/json" -X POST https://${BMC_IP}/redfish/v1/Managers/Bluefield_BMC/Actions/Manager.ResetToDefaults -d '{"ResetToDefaultsType": "ResetAll"}')
+		output=$(curl -sSk -u "$BMC_USER:$BMC_PASSWORD" -H "Content-Type: application/json" -X POST https://${BMC_IP}/redfish/v1/Managers/Bluefield_BMC/Actions/Manager.ResetToDefaults -d '{"ResetToDefaultsType": "ResetAll"}')
 		status=$(echo $output | jq '."@Message.ExtendedInfo"[0].Message')
 		if [ "$status" != "\"The request completed successfully."\" ]; then
 			rlog "ERR Failed to reset BMC $BMC_USER password."

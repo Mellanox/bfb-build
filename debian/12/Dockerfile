@@ -84,6 +84,7 @@ RUN apt-get clean -y && \
         lm-sensors \
         mmc-utils \
         mstflint \
+        mtools \
         net-tools \
         network-manager \
         nfs-common \
@@ -118,6 +119,7 @@ RUN apt-get clean -y && \
         vim-common \
         watchdog \
         wget \
+        xorriso \
         xxd \
         zip \
         zstd \

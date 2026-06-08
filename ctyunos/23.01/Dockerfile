@@ -41,6 +41,8 @@ RUN echo 'excludepkgs=OpenIPMI libreswan' >> /etc/dnf/dnf.conf && \
         e2fsprogs \
         efibootmgr \
         grub2 \
+        grub2-efi-aa64-cdboot \
+        grub2-efi-aa64-modules \
         grubby \
         glibc-langpack-en \
         i2c-tools \
@@ -62,6 +64,7 @@ RUN echo 'excludepkgs=OpenIPMI libreswan' >> /etc/dnf/dnf.conf && \
         lvm2 \
         https://www.rpmfind.net/linux/opensuse/distribution/leap/15.5/repo/oss/aarch64/mmc-utils-0.1+git.20220208-bp155.1.12.aarch64.rpm \
         mstflint \
+        mtools \
         net-tools \
         NetworkManager \
         NetworkManager-config-server \
@@ -93,11 +96,12 @@ RUN echo 'excludepkgs=OpenIPMI libreswan' >> /etc/dnf/dnf.conf && \
         watchdog \
         wget \
         xfsprogs \
-		https://mirrors.aliyun.com/openeuler/openEuler-20.03-LTS-SP1/everything/aarch64/Packages/edac-utils-0.16-20.oe1.aarch64.rpm \
-		https://www.rpmfind.net/linux/epel/8/Everything/aarch64/Packages/l/libmd-1.1.0-1.el8.aarch64.rpm \
-        https://www.rpmfind.net/linux/epel/8/Everything/aarch64/Packages/l/libmd-devel-1.1.0-1.el8.aarch64.rpm \
-        https://www.rpmfind.net/linux/epel/8/Everything/aarch64/Packages/l/libbsd-0.12.2-1.el8.aarch64.rpm \
-        https://www.rpmfind.net/linux/epel/8/Everything/aarch64/Packages/l/libbsd-devel-0.12.2-1.el8.aarch64.rpm \
+        xorriso \
+        https://mirrors.aliyun.com/openeuler/openEuler-20.03-LTS-SP1/everything/aarch64/Packages/edac-utils-0.16-20.oe1.aarch64.rpm \
+        https://linux.mellanox.com/public/repo/bluefield/4.9.1/extras/addons/libmd-1.1.0-1.el8.aarch64.rpm \
+        https://linux.mellanox.com/public/repo/bluefield/4.9.1/extras/addons/libmd-devel-1.1.0-1.el8.aarch64.rpm \
+        https://linux.mellanox.com/public/repo/bluefield/4.9.1/extras/addons/libbsd-0.12.2-1.el8.aarch64.rpm \
+        https://linux.mellanox.com/public/repo/bluefield/4.9.1/extras/addons/libbsd-devel-0.12.2-1.el8.aarch64.rpm \
         https://www.rpmfind.net/linux/epel/9/Everything/aarch64/Packages/p/python3-twisted-22.10.0-3.el9.noarch.rpm \
         https://www.rpmfind.net/linux/epel/9/Everything/aarch64/Packages/p/python3-Automat-22.10.0-2.el9.noarch.rpm \
         https://www.rpmfind.net/linux/epel/9/Everything/aarch64/Packages/p/python3-zope-interface-5.4.0-5.el9.1.aarch64.rpm \

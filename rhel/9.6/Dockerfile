@@ -46,6 +46,8 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
         epel-release \
         glibc-langpack-en \
         grub2 \
+        grub2-efi-aa64-cdboot \
+        grub2-efi-aa64-modules \
         grubby \
         i2c-tools \
         iperf3 \
@@ -75,6 +77,7 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
         lvm2 \
         net-tools \
         lsb-release \
+        mtools \
         NetworkManager \
         NetworkManager-config-server \
         NetworkManager-ovs \

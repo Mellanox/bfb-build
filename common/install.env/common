@@ -8,7 +8,7 @@ LOG=/tmp/$logfile
 
 fspath=$(readlink -f "$(dirname $0)")
 
-SUPPORTED_DEVICES=${SUPPORTED_DEVICES:-"a2d[26cf]|1023|1025"}
+SUPPORTED_DEVICES=${SUPPORTED_DEVICES:-"a2d[26cf]"}
 
 cx_pcidev=$(lspci -nD 2> /dev/null | grep -E "$SUPPORTED_DEVICES" | awk '{print $1}' | head -1)
 cx_dev_id=$(lspci -nD -s ${cx_pcidev} 2> /dev/null | awk -F ':' '{print strtonum("0x" $NF)}')
@@ -16,6 +16,9 @@ pciids=$(lspci -nD 2> /dev/null | grep -E "$SUPPORTED_DEVICES" | awk '{print $1}
 dpu_part_number=$(mstflint -d $cx_pcidev q full | grep "Part Number:" | awk '{print $NF}')
 PSID=$(mstflint -d $cx_pcidev q | grep PSID | awk '{print $NF}')
 BD_PSIDS=${BD_PSIDS:-"BD_0000000004 BD_0000000005"}
+OCI_PSIDS=${OCI_PSIDS:-"ORC0000000012"}
+BSP_MIN_DDR_VERSION=${MIN_BSP_DDR_VERSION:-"4.13.0.13925"}
+SYS_ENABLE_DDR5600=${SYS_ENABLE_DDR5600:-"FALSE"}
 DEVICE_TIMEOUT=${DEVICE_TIMEOUT:-30}
 FSTAB_USE_DEV_NAME=${FSTAB_USE_DEV_NAME:-"no"}
 
@@ -200,6 +203,16 @@ function_exists()
 	return $?
 }
 
+is_bf4()
+{
+	# Check if the device is a BF4
+	if [ "$(lspci -nD 2> /dev/null | grep -w "15b3:a2df" | awk '{print $1}' | head -1)" != "" ]; then
+		return 0
+	fi
+
+	return 1
+}
+
 upgrade_emmc_fw()
 {
 	# Check that the eMMC is from Swissbit
@@ -282,6 +295,22 @@ EOF
 	done
 }
 
+configure_ovs()
+{
+	if (lspci -n -d 15b3: | grep -wq 'a2df'); then
+		case "${distro,,}" in
+			"ubuntu")
+			if [ -e /mnt/etc/mellanox/mlnx-ovs.conf ]; then
+					ilog "Enable OVS DOCA on BlueField-4"
+					sed -i -e "s/OVS_DOCA=.*/OVS_DOCA=yes/" /mnt/etc/mellanox/mlnx-ovs.conf
+			else
+					ilog "OVS configuration file was not found: /mnt/etc/mellanox/mlnx-ovs.conf"
+			fi
+			;;
+		esac
+	fi
+}
+
 update_uefi_boot_entries()
 {
 	ilog "Updating EFI boot entries:"
@@ -347,6 +376,17 @@ BOOT9=NET-OOB-IPV4-HTTP
 PXE_DHCP_CLASS_ID=$DHCP_CLASS_ID
 EOF
 fi
+
+	if (echo "${OCI_PSIDS}" | grep -qw "${PSID}"); then
+		latest_bsp=$(printf '%s\n' "$BSP_MIN_DDR_VERSION" "$BSP_RUNNING_VERSION" | sort -V | tail -n1)
+		if [ "$BSP_MIN_DDR_VERSION" != "$BSP_RUNNING_VERSION" ]; then
+			if [ "$latest_bsp" != "$BSP_RUNNING_VERSION" ]; then
+				# Set ENABLE_DDR5600 to False
+				ilog "Setting SYS_ENABLE_DDR5600=${SYS_ENABLE_DDR5600}"
+				echo SYS_ENABLE_DDR5600=${SYS_ENABLE_DDR5600} >> /etc/bf.cfg
+			fi
+		fi
+	fi
 
 	$BFCFG
 	rc=$?
@@ -764,9 +804,9 @@ configure_default_grub()
 		bootarg="$bootarg $redfish_osarg"
 	fi
 	if (lscpu 2>&1 | grep -wq Grace); then
-		sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=1024M $bootarg keep_bootcon earlycon modprobe.blacklist=mlx5_core,mlx5_ib selinux=0 net.ifnames=0 biosdevname=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
+		sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=1024M $bootarg keep_bootcon earlycon modprobe.blacklist=mlx5_core,mlx5_ib selinux=0 biosdevname=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
 	else
-		sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=1024M $bootarg console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 modprobe.blacklist=mlx5_core,mlx5_ib selinux=0 net.ifnames=0 biosdevname=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
+		sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=1024M $bootarg console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 modprobe.blacklist=mlx5_core,mlx5_ib selinux=0 biosdevname=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
 	fi
 	if (grep -q MLNXBF33 /sys/firmware/acpi/tables/SSDT*); then
 		# BlueField-3
@@ -800,6 +840,8 @@ os_installation_flow()
 	configure_network
 
 	configure_sfs
+
+	configure_ovs
 
 	configure_services
 
@@ -959,6 +1001,19 @@ update_progress()
 
 global_installation_flow()
 {
+	if is_bf4; then
+		UPDATE_ATF_UEFI="no"
+		UPDATE_NIC_FW_GOLDEN_IMAGE="no"
+		UPDATE_DPU_GOLDEN_IMAGE="no"
+		UPDATE_CERTIFICATES="no"
+		UPDATE_BMC_FW="no"
+		UPDATE_CEC_FW="no"
+		UPDATE_BMC_PASSWORD="no"
+		UPDATE_UEFI_PASSWORD="no"
+		WITH_NIC_FW_UPDATE="no"
+		UPGRADE_EMMC_FIRMWARE="no"
+	fi
+
 	calculate_total_weight
 	update_progress install_setup 0
 
@@ -1024,8 +1079,7 @@ hwclock -w
 boot_fifo_path="/sys/bus/platform/devices/MLNXBF04:00/bootfifo"
 if [ -e "${boot_fifo_path}" ]; then
 	cfg_file=$(mktemp)
-	# Get 128KB assuming it's big enough to hold the config file.
-	dd if=${boot_fifo_path} of=${cfg_file} bs=4096 count=32 > /dev/null 2>&1
+	dd if=${boot_fifo_path} of=${cfg_file} bs=4096 > /dev/null 2>&1
 
 	#
 	# Check the .xz signature {0xFD, '7', 'z', 'X', 'Z', 0x00} and extract the
@@ -1084,6 +1138,12 @@ $dpu_part_number
 
 MLXCONFIG:
 $(mlxconfig -d /dev/mst/mt*_pciconf0 -e q)
+
+BFVER:
+$(bfver)
+
+BFCFG:
+$(bfcfg -d)
 ########### DEBUG INFO END ############
 
 EOF
@@ -1157,3 +1217,5 @@ fi
 ERASE_PARTITIONS=${ERASE_PARTITIONS:-"no"}
 ERASE_EMMC=${ERASE_EMMC:-"yes"}
 ERASE_SSD=${ERASE_SSD:-"yes"}
+
+BSP_RUNNING_VERSION=$(bfver | awk -F': ' '/BlueField BSP version:/ {print $2}')

@@ -503,7 +503,7 @@ configure_grub()
 	fi
 
 	if (lscpu 2>&1 | grep -wq Grace); then
-		sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=1024M $bootarg keep_bootcon earlycon modprobe.blacklist=mlx5_core,mlx5_ib selinux=0 net.ifnames=0 biosdevname=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
+		sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=1024M $bootarg keep_bootcon earlycon modprobe.blacklist=mlx5_core,mlx5_ib selinux=0 biosdevname=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
 	elif (grep -q MLNXBF33 /sys/firmware/acpi/tables/SSDT*); then
 		# BlueField-3
 		sed -i -e "s/0x01000000/0x13010000/g" /mnt/etc/default/grub

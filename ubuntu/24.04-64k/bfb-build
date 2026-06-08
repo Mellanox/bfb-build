@@ -43,9 +43,9 @@ DISTRO="ubuntu"
 DISTRO_VERSION="24.04-64k"
 DISTRO_BASE_URL="https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-arm64-root.tar.xz"
 ARCH=${ARCH:-"arm64-dpu"}
-DOCA_VERSION="3.3.0"
-BSP_VERSION="4.14.0-13878"
-MLNX_OFED_VERSION="26.01-1.0.0"
+DOCA_VERSION="3.4.0"
+BSP_VERSION="4.15.0-13977"
+MLNX_OFED_VERSION="26.04-0.8.5.0"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-""}
 INCLUDE_DOCA_SERVICES=${INCLUDE_DOCA_SERVICES:-"yes"}
@@ -69,7 +69,7 @@ case "$IMAGE_TYPE" in
 		;;
 esac
 
-wget -q -P $WDIR ${BASE_URL}/doca/${DOCA_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/${ARCH}/$bootimages
+wget -q -P $WDIR ${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/${ARCH}/$bootimages
 mv $WDIR/mlxbf-bootimages*arm64.deb $WDIR/mlxbf-bootimages.deb
 
 cp -a \

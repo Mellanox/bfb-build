@@ -321,6 +321,8 @@ bmc_get_task_id()
 
 wait_bmc_task_complete()
 {
+	local tid=$1
+
 	copy_status=$(curl -sSk -u $BMC_USER:$BMC_PASSWORD -X GET https://${BMC_IP}/redfish/v1/Chassis/Bluefield_ERoT | jq -r ' .Oem.Nvidia.BackgroundCopyStatus')
 	if [ "X$copy_status" != "Xnull" ]; then
 		if [ "$copy_status" != "Completed" ]; then
@@ -340,11 +342,19 @@ wait_bmc_task_complete()
 		done
 	fi
 
-	bmc_get_task_id
+	if [ ! -z "$tid" ]; then
+		task_id=$tid
+		ilog "Received Task id: $task_id"
+	else
+		bmc_get_task_id
+	fi
+
 	if [ -z "${task_id}" ]; then
 		ilog "No active BMC task"
 		return
 	fi
+
+	ilog "wait_bmc_task_complete: Monitoring ${task_id}"
 	output=$(mktemp)
 	#Check upgrade progress (%).
 	get_bmc_token
@@ -473,9 +483,12 @@ update_bmc_fw()
 		return $rc
 	fi
 
+	tid=$(echo $output | jq -r '."@odata.id"')
+	ilog "BMC Firmware update task id: $tid"
+
 	BMC_FIRMWARE_UPDATED="yes"
 
-	wait_bmc_task_complete
+	wait_bmc_task_complete $tid
 	post_bmc_install_message="INFO: BMC firmware was updated to: ${BMC_IMAGE_VERSION}"
 	if [ "$BMC_REBOOT" != "yes" ]; then
 		post_bmc_install_message="${post_bmc_install_message}. BMC restart is required"
@@ -572,7 +585,10 @@ update_cec_fw()
 		return $rc
 	fi
 
-	wait_bmc_task_complete
+	tid=$(echo $output | jq -r '."@odata.id"')
+	ilog "CEC Firmware update task id: $tid"
+
+	wait_bmc_task_complete $tid
 	if [ "$CEC_REBOOT" == "yes" ]; then
 		if [[ $(echo -e "${CEC_MIN_RESET_VERSION}\n${CEC_INSTALLED_VERSION}" | sort -V | head -n1) == "${CEC_MIN_RESET_VERSION}" ]]; then
 			log "Rebooting CEC..."

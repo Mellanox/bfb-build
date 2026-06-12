@@ -5,9 +5,9 @@ ENV DEBIAN_FRONTEND="noninteractive" FLASH_KERNEL_SKIP="yes" RUN_FW_UPDATER="no"
 ADD noble-server-cloudimg-arm64-root.tar.xz /
 ADD qemu-aarch64-static /usr/bin/
 RUN mkdir -p /opt/mellanox/doca/services/
-ADD telemetry-agent /opt/mellanox/doca/services/telemetry
-ADD blueman /opt/mellanox/doca/services/blueman
-ADD infrastructure /opt/mellanox/doca/services/infrastructure
+ADD online-repo/repo/doca/3.3.0-4.14.0-13893-fur-215/services/telemetry-agent /opt/mellanox/doca/services/telemetry
+ADD online-repo/repo/doca/3.3.0-4.14.0-13893-fur-215/services/blueman /opt/mellanox/doca/services/blueman
+ADD online-repo/repo/doca/3.3.0-4.14.0-13893-fur-215/services/infrastructure /opt/mellanox/doca/services/infrastructure
 
 ARG MLNX_FW_UPDATER=mlnx-fw-updater-signed
 ARG BMC_FW_PACKAGES="bf2-bmc-fw-signed bf3-bmc-fw-signed bf3-bmc-gi-signed bf3-bmc-nic-fw*"
@@ -31,14 +31,14 @@ RUN apt remove -y --purge $(dpkg --list "*openipmi*" | grep openipmi | awk '{pri
 RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
 
 RUN apt install -y -f \
-    linux-bluefield-headers-6.8.0-1024=6.8.0-1024.20 \
-    linux-bluefield-tools-6.8.0-1024=6.8.0-1024.20 \
-    linux-buildinfo-6.8.0-1024-bluefield-64k=6.8.0-1024.20 \
-    linux-headers-6.8.0-1024-bluefield-64k=6.8.0-1024.20 \
-    linux-image-6.8.0-1024-bluefield-64k=6.8.0-1024.20 \
-    linux-modules-6.8.0-1024-bluefield-64k=6.8.0-1024.20 \
-    linux-modules-extra-6.8.0-1024-bluefield-64k=6.8.0-1024.20 \
-    linux-tools-6.8.0-1024-bluefield-64k=6.8.0-1024.20
+    linux-bluefield-headers-6.8.0-1024=6.8.0-1024.28 \
+    linux-bluefield-tools-6.8.0-1024=6.8.0-1024.28 \
+    linux-buildinfo-6.8.0-1024-bluefield-64k=6.8.0-1024.28 \
+    linux-headers-6.8.0-1024-bluefield-64k=6.8.0-1024.28 \
+    linux-image-6.8.0-1024-bluefield-64k=6.8.0-1024.28 \
+    linux-modules-6.8.0-1024-bluefield-64k=6.8.0-1024.28 \
+    linux-modules-extra-6.8.0-1024-bluefield-64k=6.8.0-1024.28 \
+    linux-tools-6.8.0-1024-bluefield-64k=6.8.0-1024.28
 
 RUN apt-get clean -y && \
     apt-get update -o "Acquire::https::Verify-Peer=false" -y && \

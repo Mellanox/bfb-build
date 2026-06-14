@@ -25,6 +25,7 @@ RUN echo 'excludepkgs=OpenIPMI,anolis-release*,anolis-repos*,anolis-gpg-keys*' >
     echo 'retries=20' >> /etc/dnf/dnf.conf && \
     dnf -y clean all && \
     dnf install -y epel-release && \
+    dnf --exclude='mlxbf-bootimages*' -y update && \
     dnf --exclude='mlxbf-bootimages*' -y install coreutils-single && \
     dnf --exclude='mlxbf-bootimages*,kernel*' -y install http://mirrors.openanolis.cn/anolis/8.6/BaseOS/aarch64/os/Packages/rasdaemon-0.6.1-12.0.2.an8.aarch64.rpm && \
     dnf -y install python3-dnf-plugin-versionlock && \

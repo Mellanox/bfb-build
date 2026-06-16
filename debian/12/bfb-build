@@ -50,26 +50,27 @@ IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-""}
 BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
 LEAVE_CONTAINER=${LEAVE_CONTAINER:-"no"}
+# path to a local-repo .deb (the self-contained DOCA repo package).
+# When set, it is installed inside the container and its postinst configures
+# the apt source
+LOCAL_REPO_DEB=${LOCAL_REPO_DEB:-""}
 
 WDIR=/tmp/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}.$$
 
 mkdir -p $WDIR
 
-echo "Downloading mlxbf-bootimages..."
+
 case "$IMAGE_TYPE" in
 	prod)
-		bootimages="mlxbf-bootimages-signed_${BSP_VERSION}_arm64.deb"
+		BOOTIMAGES_PKG="mlxbf-bootimages-signed"
 		;;
 	dev)
-		bootimages="mlxbf-bootimages-devsigned_${BSP_VERSION}_arm64.deb"
+		BOOTIMAGES_PKG="mlxbf-bootimages-devsigned"
 		;;
 	unsigned)
-		bootimages="mlxbf-bootimages_${BSP_VERSION}_arm64.deb"
+		BOOTIMAGES_PKG="mlxbf-bootimages"
 		;;
 esac
-
-wget -q -P $WDIR ${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/${ARCH}/$bootimages
-mv $WDIR/mlxbf-bootimages*arm64.deb $WDIR/mlxbf-bootimages.deb
 
 cp -a \
 	Dockerfile \
@@ -81,7 +82,14 @@ cp -a \
 	../../common/tools/qemu-aarch64-static \
 	$WDIR
 
-echo "deb [trusted=yes] ${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/arm64-dpu/ /" | tee $WDIR/repos/doca.base.list
+if [ -z "${LOCAL_REPO_DEB}" ]; then
+	echo "ERROR: LOCAL_REPO_DEB is not set. Pass the local DOCA repo .deb, e.g."
+	echo "       LOCAL_REPO_DEB=/path/to/doca-local-repo-*.deb $0"
+	exit 1
+fi
+echo "Using local DOCA repo package: ${LOCAL_REPO_DEB}"
+mkdir -p $WDIR/local-repo
+cp "${LOCAL_REPO_DEB}" $WDIR/local-repo/
 
 if [ -d install.env ]; then
 	cp -a install.env \
@@ -109,6 +117,7 @@ docker build -t ${docker_image} \
 	--build-arg DISTRO=$DISTRO \
 	--build-arg DISTRO_VERSION=$DISTRO_VERSION \
 	--build-arg DISTRO_KERNEL=$DISTRO_KERNEL \
+	--build-arg BOOTIMAGES_PKG=$BOOTIMAGES_PKG \
 	-f Dockerfile .
 
 DOCKER_RUN_PARAMS="--privileged -e container=docker \

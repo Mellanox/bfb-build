@@ -1,6 +1,7 @@
 FROM --platform=linux/arm64 debian:12
 ADD qemu-aarch64-static /usr/bin/
 
+ARG BOOTIMAGES_PKG=mlxbf-bootimages-signed
 ARG MLNX_FW_UPDATER=mlnx-fw-updater-signed
 ARG BMC_FW_PACKAGES="bf2-bmc-fw-signed bf3-bmc-fw-signed bf3-bmc-gi-signed bf3-bmc-nic-fw*"
 ARG CEC_FW_PACKAGES="bf2-cec-fw-signed bf3-cec-fw-signed"
@@ -8,26 +9,26 @@ WORKDIR /root/workspace
 ADD install.sh .
 ADD install.env ./install.env
 ADD create_bfb .
-ADD mlxbf-bootimages.deb .
 ADD 10-mlx-console-messages.conf /etc/sysctl.d/
 
 ENV DEBIAN_FRONTEND="noninteractive" FLASH_KERNEL_SKIP="yes" RUN_FW_UPDATER="no"
 
 ADD repos/ /etc/apt/sources.list.d/
 ADD apt-preferences /etc/apt/preferences.d/99doca
+
+ADD local-repo /root/workspace/local-repo
 ADD --chown=0:0 --chmod=644 https://download.docker.com/linux/debian/gpg /etc/apt/keyrings/docker.asc
 ADD --chown=0:0 --chmod=644 https://prod-cdn.packages.k8s.io/repositories/isv:/kubernetes:/core:/stable:/v1.34/deb/Release.key /etc/apt/keyrings/kubernetes.asc
 
 # Avoid running flash-kernel post install
 RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
 
-RUN dpkg -i /root/workspace/mlxbf-bootimages.deb
-
 RUN apt-get clean -y && \
     apt-get update -o "Acquire::https::Verify-Peer=false" -y && \
     apt-get install -o "Acquire::https::Verify-Peer=false" -y ca-certificates locales && \
     sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen && \
     dpkg-reconfigure locales && \
+    dpkg -i /root/workspace/local-repo/*.deb && \
     apt-get clean -y && \
     apt-get update -y && \
     apt-get autoremove --purge -y \
@@ -126,6 +127,7 @@ RUN apt-get clean -y && \
         libyara9 \
         libteec1 \
 #DOCA Packages
+        ${BOOTIMAGES_PKG} \
         doca-runtime \
         doca-devel \
         libxlio \
@@ -136,8 +138,9 @@ RUN apt-get clean -y && \
         ${BMC_FW_PACKAGES} \
         ${CEC_FW_PACKAGES} \
     && \
+    apt-get remove --purge -y 'doca-local-repo*' && \
     apt-get clean -y && \
-    rm -rf /var/lib/apt/lists/* /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf && \
+    rm -rf /var/lib/apt/lists/* /root/workspace/local-repo /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf && \
     truncate -s0 /etc/machine-id && \
     sed -i -r -e "s/^(MACAddressPolicy.*)/# \1/" /usr/lib/systemd/network/99-default.link && \
     update-pciids && \

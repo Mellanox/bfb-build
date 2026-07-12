@@ -1,13 +1,13 @@
-NIC_FW_UPDATE_DONE=0
+export NIC_FW_UPDATE_DONE=0
 FORCE_NIC_FW_UPDATE=${FORCE_NIC_FW_UPDATE:-"no"}
 NIC_FW_RESET=${NIC_FW_RESET:-"yes"}
 FORCE_NIC_FW_RESET=${FORCE_NIC_FW_RESET:-"no"}
-NIC_FW_RESET_REQUIRED=0
-NIC_FW_FOUND=0
+export NIC_FW_RESET_REQUIRED=0
+export NIC_FW_FOUND=0
 FW_UPDATER=/opt/mellanox/mlnx-fw-updater/mlnx_fw_updater.pl
 FW_DIR=/opt/mellanox/mlnx-fw-updater/firmware/
 is_nic_mode=${is_nic_mode:-0}
-NIC_FW_EXTRACTION_DONE=0
+export NIC_FW_EXTRACTION_DONE=0
 PROVIDED_NIC_FW_VERSION=""
 
 CHROOT=

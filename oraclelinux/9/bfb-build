@@ -35,13 +35,13 @@ if ! (which docker > /dev/null 2>&1); then
 fi
 
 DISTRO="oraclelinux"
-DISTRO_DISPLAY_NAME="OracleLinux"
+DISTRO_DISPLAY_NAME="ol"
 DISTRO_VERSION="9"
 DISTRO_KERNEL=${DISTRO_KERNEL:-""}
 RELEASE_DIR_SUFFIX=${RELEASE_DIR_SUFFIX:-""}
 ARCH=${ARCH:-"arm64-dpu"}
-DOCA_VERSION="3.2.0"
-BSP_VERSION="4.13.0-13932"
+DOCA_VERSION="3.2.3"
+BSP_VERSION="4.13.3-14047"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
 LEAVE_CONTAINER=${LEAVE_CONTAINER:-"no"}

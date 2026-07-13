@@ -137,6 +137,21 @@ RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
         ${MLNX_FW_UPDATER} \
         ${BMC_FW_PACKAGES} \
         ${CEC_FW_PACKAGES} \
+        ibacm \
+        infiniband-diags \
+        infiniband-diags-compat \
+        iwpmd \
+        libibumad \
+        libibverbs \
+        libibverbs-unsupported \
+        libibverbs-unsupported-devel \
+        libibverbs-utils \
+        librdmacm \
+        librdmacm-utils \
+        python3-pyverbs \
+        rdma-core \
+        rdma-core-devel \
+        srp_daemon \
         https://linux.mellanox.com/public/repo/doca/2.2.1/extras/addons/dracut-sshd-0.6.5-1.el8.noarch.rpm \
     && \
     dnf -y clean all && \

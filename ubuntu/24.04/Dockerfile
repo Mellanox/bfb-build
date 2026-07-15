@@ -31,18 +31,18 @@ RUN apt remove -y --purge $(dpkg --list "*openipmi*" | grep openipmi | awk '{pri
 RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
 
 RUN apt install -y -f \
-    linux-bluefield=6.8.0.1016.17 \
-    linux-bluefield-headers-6.8.0-1016=6.8.0-1016.20 \
-    linux-bluefield-tools-6.8.0-1016=6.8.0-1016.20 \
-    linux-buildinfo-6.8.0-1016-bluefield=6.8.0-1016.20 \
-    linux-headers-6.8.0-1016-bluefield=6.8.0-1016.20 \
-    linux-headers-bluefield=6.8.0.1016.17 \
-    linux-image-6.8.0-1016-bluefield=6.8.0-1016.20 \
-    linux-image-bluefield=6.8.0.1016.17 \
-    linux-modules-6.8.0-1016-bluefield=6.8.0-1016.20 \
-    linux-modules-extra-6.8.0-1016-bluefield=6.8.0-1016.20 \
-    linux-tools-6.8.0-1016-bluefield=6.8.0-1016.20 \
-    linux-tools-bluefield=6.8.0.1016.17
+    linux-bluefield=6.8.0.1026.27 \
+    linux-bluefield-headers-6.8.0-1026=6.8.0-1026.30 \
+    linux-bluefield-tools-6.8.0-1026=6.8.0-1026.30 \
+    linux-buildinfo-6.8.0-1026-bluefield=6.8.0-1026.30 \
+    linux-headers-6.8.0-1026-bluefield=6.8.0-1026.30 \
+    linux-headers-bluefield=6.8.0.1026.27 \
+    linux-image-6.8.0-1026-bluefield=6.8.0-1026.30 \
+    linux-image-bluefield=6.8.0.1026.27 \
+    linux-modules-6.8.0-1026-bluefield=6.8.0-1026.30 \
+    linux-modules-extra-6.8.0-1026-bluefield=6.8.0-1026.30 \
+    linux-tools-6.8.0-1026-bluefield=6.8.0-1026.30 \
+    linux-tools-bluefield=6.8.0.1026.27
 
 RUN apt-get clean -y && \
     apt-get update -o "Acquire::https::Verify-Peer=false" -y && \

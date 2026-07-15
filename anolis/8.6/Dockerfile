@@ -19,7 +19,7 @@ RUN dnf install --nogpgcheck -y mmc-utils || dnf install --nogpgcheck -y $BASE_U
 
 RUN rpm -ihv --force bootimages/mlxbf-bootimages-*.aarch64.rpm || true
 
-RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
+RUN echo 'excludepkgs=OpenIPMI,anolis-release*,anolis-repos*,anolis-gpg-keys*' >> /etc/dnf/dnf.conf && \
     dnf -y clean all && \
     dnf install -y epel-release && \
     dnf --exclude='mlxbf-bootimages*,kernel*' -y update && \

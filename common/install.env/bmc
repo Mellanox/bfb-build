@@ -91,7 +91,7 @@ export BMC_TOKEN=""
 export task_id=""
 export task_state=""
 export task_status=""
-BMC_EXTRACTION_DONE=0
+export BMC_EXTRACTION_DONE=0
 
 SSH="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
 SCP="scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
@@ -410,7 +410,14 @@ wait_bmc_task_complete()
 
 wait_no_bmc_tasks()
 {
-	bmc_get_task_id
+	local tid=$1
+
+	if [ ! -z "$tid" ]; then
+		task_id=$tid
+		ilog "Received Task id: $task_id"
+	else
+		bmc_get_task_id
+	fi
 	if [ -z "${task_id}" ]; then
 		ilog "No active BMC task"
 		return 0
@@ -463,9 +470,10 @@ extract_images()
 		return
 	fi
 
+	BMC_EXTRACTION_DONE=1
+
 	if [ -d ./usr/lib/firmware/mellanox/bmc ]; then
 		ilog "BMC and CEC files are already extracted"
-		BMC_EXTRACTION_DONE=1
 		return
 	fi
 
@@ -476,15 +484,13 @@ extract_images()
 	fi
 
 	if [ ! -f $fspath/image.tar.xz ]; then
-		# No image.tar.xz file found (bf-fwbindl case)
-		BMC_EXTRACTION_DONE=1
+		# No image.tar.xz file found (bf-fwbundle case)
 		return
 	fi
 
 	ilog "Extracting BMC files from $fspath/image.tar.xz"
 	ilog "$(tar Jxf $fspath/image.tar.xz --warning=no-timestamp ./usr/lib/firmware/mellanox/{bmc,cec}/ 2>&1)"
 	ilog "Extracted BMC files to $(readlink -f ./usr/lib/firmware/mellanox/ 2>&1)"
-	BMC_EXTRACTION_DONE=1
 	if [ "$distro" == "Debian" ]; then
 		cd -
 	fi
@@ -858,7 +864,7 @@ update_dpu_golden_image()
 
 			tid=$(echo $output | jq -r '."@odata.id"')
 			ilog "DPU Golden Image update task id: $tid"
-			wait_bmc_task_complete $tid
+			wait_no_bmc_tasks $tid
 
 		else
 			ilog "DPU Golden Image update is not supported for BMC firmware version $BMC_INSTALLED_VERSION"
@@ -968,7 +974,7 @@ update_nic_firmware_golden_image()
 
 			tid=$(echo $output | jq -r '."@odata.id"')
 			ilog "NIC Firmware Golden Image update task id: $tid"
-			wait_bmc_task_complete $tid
+			wait_no_bmc_tasks $tid
 
 		else
 			ilog "NIC Firmware Golden Image update is not supported for BMC firmware version $BMC_INSTALLED_VERSION"

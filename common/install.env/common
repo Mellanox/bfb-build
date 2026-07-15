@@ -3,18 +3,18 @@ RC=0
 err_msg=""
 export LC_ALL=C
 
-logfile=${distro}.installation.log
-LOG=/tmp/$logfile
+export logfile=${distro}.installation.log
+export LOG=/tmp/$logfile
 
-fspath=$(readlink -f "$(dirname $0)")
+export fspath=$(readlink -f "$(dirname $0)")
 
-cx_pcidev=$(lspci -nD 2> /dev/null | grep 15b3:a2d[26cf] | awk '{print $1}' | head -1)
-cx_dev_id=$(lspci -nD -s ${cx_pcidev} 2> /dev/null | awk -F ':' '{print strtonum("0x" $NF)}')
-pciids=$(lspci -nD 2> /dev/null | grep 15b3:a2d[26cf] | awk '{print $1}')
-dpu_part_number=$(mstflint -d $cx_pcidev q full | grep "Part Number:" | awk '{print $NF}')
-PSID=$(mstflint -d $cx_pcidev q | grep PSID | awk '{print $NF}')
-BD_PSIDS=${BD_PSIDS:-"BD_0000000004 BD_0000000005"}
-OCI_PSIDS=${OCI_PSIDS:-"ORC0000000012"}
+export cx_pcidev=$(lspci -nD 2> /dev/null | grep 15b3:a2d[26cf] | awk '{print $1}' | head -1)
+export cx_dev_id=$(lspci -nD -s ${cx_pcidev} 2> /dev/null | awk -F ':' '{print strtonum("0x" $NF)}')
+export pciids=$(lspci -nD 2> /dev/null | grep 15b3:a2d[26cf] | awk '{print $1}')
+export dpu_part_number=$(mstflint -d $cx_pcidev q full | grep "Part Number:" | awk '{print $NF}')
+export PSID=$(mstflint -d $cx_pcidev q | grep PSID | awk '{print $NF}')
+export BD_PSIDS=${BD_PSIDS:-"BD_0000000004 BD_0000000005"}
+export OCI_PSIDS=${OCI_PSIDS:-"ORC0000000012"}
 BSP_MIN_DDR_VERSION=${MIN_BSP_DDR_VERSION:-"4.13.0.13925"}
 SYS_ENABLE_DDR5600=${SYS_ENABLE_DDR5600:-"FALSE"}
 DEVICE_TIMEOUT=${DEVICE_TIMEOUT:-30}
@@ -1062,7 +1062,7 @@ UPDATE_ATF_UEFI=${UPDATE_ATF_UEFI:-"yes"}
 UPDATE_DPU_OS=${UPDATE_DPU_OS:-"yes"}
 UPGRADE_EMMC_FIRMWARE=${UPGRADE_EMMC_FIRMWARE:-"yes"}
 WITH_NIC_FW_UPDATE=${WITH_NIC_FW_UPDATE:-"yes"}
-NIC_FW_UPDATE_PASSED=0
+export NIC_FW_UPDATE_PASSED=0
 
 total_weight=0
 current_progress=0

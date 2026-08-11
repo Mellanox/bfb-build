@@ -1,0 +1,1240 @@
+rshimlog=$(which bfrshlog 2> /dev/null)
+RC=0
+err_msg=""
+export LC_ALL=C
+
+logfile=${distro}.installation.log
+LOG=/tmp/$logfile
+
+fspath=$(readlink -f "$(dirname $0)")
+
+SUPPORTED_DEVICES=${SUPPORTED_DEVICES:-"a2d[26cf]"}
+
+cx_pcidev=$(lspci -nD 2> /dev/null | grep -E "$SUPPORTED_DEVICES" | awk '{print $1}' | head -1)
+cx_dev_id=$(lspci -nD -s ${cx_pcidev} 2> /dev/null | awk -F ':' '{print strtonum("0x" $NF)}')
+pciids=$(lspci -nD 2> /dev/null | grep -E "$SUPPORTED_DEVICES" | awk '{print $1}')
+dpu_part_number=$(mstflint -d $cx_pcidev q full | grep "Part Number:" | awk '{print $NF}')
+PSID=$(mstflint -d $cx_pcidev q | grep PSID | awk '{print $NF}')
+BD_PSIDS=${BD_PSIDS:-"BD_0000000004 BD_0000000005"}
+DEVICE_TIMEOUT=${DEVICE_TIMEOUT:-30}
+FSTAB_USE_DEV_NAME=${FSTAB_USE_DEV_NAME:-"no"}
+
+rlog()
+{
+	msg=$(echo "$*" | sed 's/INFO://;s/ERROR:/ERR/;s/WARNING:/WARN/')
+	if [ -n "$rshimlog" ]; then
+		$rshimlog "$msg"
+	fi
+}
+
+ilog()
+{
+	msg="[$(date +%H:%M:%S)] $*"
+	echo "$msg" >> $LOG
+	echo "$msg" > /dev/ttyAMA0
+	echo "$msg" > /dev/hvc0
+}
+
+log()
+{
+	ilog "$*"
+	rlog "$*"
+}
+
+fail()
+{
+	log "$@"
+	log "ERR Installation failed"
+	sleep 3
+	reboot -f
+}
+
+bind_partitions()
+{
+	mount --bind /proc /mnt/proc
+	mount --bind /dev /mnt/dev
+	mount --bind /dev/pts /mnt/dev/pts
+	mount --bind /sys /mnt/sys
+	mount -t efivarfs none /mnt/sys/firmware/efi/efivars
+}
+
+unmount_partition()
+{
+	if (grep -wq $1 /proc/mounts); then
+		ilog "Unmounting $1"
+		ilog "$(umount $1)"
+		sync
+	fi
+}
+
+wait_for_device()
+{
+	if [ -b $1 ]; then
+		return
+	fi
+
+	log "Waiting for $1 to be ready\n"
+
+	SECONDS=0
+	while [ ! -b $1 ]; do
+		if [ $SECONDS -gt $DEVICE_TIMEOUT ]; then
+			fail "Failed to access target device: $1"
+		fi
+		sleep 1
+	done
+}
+
+unmount_partitions()
+{
+	ilog "Unmount partitions"
+	for part in \
+		/mnt/boot/efi \
+		/mnt/boot \
+		/mnt/sys/fs/fuse/connections \
+		/mnt/sys/firmware/efi/efivars \
+		/mnt/sys \
+		/mnt/dev/pts \
+		/mnt/dev \
+		/mnt/proc \
+		/mnt/var \
+		/mnt/home \
+		/mnt
+	do
+		unmount_partition $part
+	done
+
+	sync
+
+	UNMOUNT_RETRIES=${UNMOUNT_RETRIES:-"3"}
+	unmount_retry=1
+	while grep -qwE '/mnt|/loop' /proc/mounts
+	do
+		if [ $unmount_retry -gt $UNMOUNT_RETRIES ]; then
+			break
+		fi
+		for mp in $(grep -w '/mnt' /proc/mounts | awk '{print $2}' | sort -r)
+		do
+			unmount_partition $mp
+		done
+		unmount_retry=$((unmount_retry+1))
+	done
+}
+
+configure_services()
+{
+	ilog "Configure Services:"
+	ilog "$(chroot /mnt /bin/systemctl unmask dev-hugepages.mount sys-fs-fuse-connections.mount console-getty.service dbus-org.freedesktop.login1.service systemd-logind.service systemd-remount-fs.service getty.target 2>&1)"
+	ilog "$(chroot /mnt /bin/systemctl enable serial-getty@ttyAMA0.service serial-getty@ttyAMA1.service serial-getty@hvc0.service 2>&1)"
+	ilog "$(chroot /mnt /bin/systemctl disable getty@tty0.service rshim-getty.service 2>&1)"
+	ilog "$(chroot /mnt /bin/systemctl add-wants default.target getty.target 2>&1)"
+
+	# Disable Firewall services
+	/bin/rm -f /mnt/etc/systemd/system/multi-user.target.wants/firewalld.service
+	/bin/rm -f /mnt/etc/systemd/system/dbus-org.fedoraproject.FirewallD1.service
+}
+
+create_initramfs()
+{
+	ilog "Build initramfs:"
+	kver=$(uname -r)
+	if [ -d /mnt/lib/modules/$kver ]; then
+	    kdir=/mnt/lib/modules/$kver
+	else
+	    kdir=$(/bin/ls -1d /mnt/lib/modules/4.18* /mnt/lib/modules/4.19* /mnt/lib/modules/4.20* /mnt/lib/modules/5.* 2> /dev/null)
+	fi
+	if [ -n "$kdir" ]; then
+	    kver=${kdir##*/}
+	    DRACUT_CMD=$(chroot /mnt /bin/ls -1 /sbin/dracut /usr/bin/dracut 2> /dev/null | head -n 1 | tr -d '\n')
+	    ilog "$(chroot /mnt grub2-set-default 0)"
+	    ilog "$(chroot /mnt env SYSTEMCTL=systemctl $DRACUT_CMD --kver ${kver} --force --add-drivers 'sdhci-of-dwcmshc dw_mmc-bluefield dw_mmc dw_mmc-pltfm mmc_block mlxbf_tmfifo virtio_console nvme' /boot/initramfs-${kver}.img 2>&1)"
+	else
+	    kver=$(/bin/ls -1 /mnt/lib/modules/ | head -1)
+	fi
+}
+
+cleanup_target_os()
+{
+	if [ -e /mnt/etc/debian_version ]; then
+		return
+	fi
+
+	# Clean up logs
+	echo > /mnt/var/log/messages
+	echo > /mnt/var/log/maillog
+	echo > /mnt/var/log/secure
+	echo > /mnt/var/log/firewalld
+	echo > /mnt/var/log/audit/audit.log
+	/bin/rm -f /mnt/var/log/yum.log
+	/bin/rm -f /mnt/root/anaconda-ks.cfg
+	/bin/rm -rf /mnt/tmp/*
+}
+
+save_log()
+{
+cat >> $LOG << EOF
+
+########################## DMESG ##########################
+$(dmesg -x)
+EOF
+	sync
+	for pw in $(grep "PASSWORD=" $LOG | cut -d '=' -f 2- | sed 's/["'\'']//'g)
+	do
+		sed -i -e "s,$pw,xxxxxx,g" $LOG
+	done
+	sync
+
+	if [ "$UPDATE_DPU_OS" != "yes" ]; then
+		return
+	fi
+
+	if [ ! -d /mnt/root ]; then
+		mount -t $ROOTFS $ROOT_PARTITION /mnt
+	fi
+	cp $LOG /mnt/root
+	umount /mnt
+}
+
+function_exists()
+{
+	declare -f -F "$1" > /dev/null
+	return $?
+}
+
+is_bf4()
+{
+	# Check if the device is a BF4
+	if [ "$(lspci -nD 2> /dev/null | grep -w "15b3:a2df" | awk '{print $1}' | head -1)" != "" ]; then
+		return 0
+	fi
+
+	return 1
+}
+
+upgrade_emmc_fw()
+{
+	# Check that the eMMC is from Swissbit
+	if [ "$(cat /sys/block/mmcblk0/device/cid 2> /dev/null | cut -c 1-4)" != "fb01" ]; then
+		ilog "eMMC device does not require firmware update"
+		return
+	fi
+
+	if [ "$(cat /sys/block/mmcblk0/device/fwrev 2> /dev/null)" != "0x1100000000000000" ]; then
+		ilog "Swissbit eMMC device does not require firmware update"
+		return
+	fi
+
+	if [ ! -e "$EMMC_SWISSBIT_FIRMWARE" ]; then
+		ilog "eMMC Firmware file was not found: $EMMC_SWISSBIT_FIRMWARE"
+		return
+	fi
+
+	if [ "$(md5sum $EMMC_SWISSBIT_FIRMWARE | awk '{print $1}')" != "$EMMC_SWISSBIT_FIRMWARE_MD5SUM" ]; then
+		ilog "eMMC Firmware file is corrupted: $EMMC_SWISSBIT_FIRMWARE"
+		return
+	fi
+
+	ilog "Unmount any partitions on mmcblk0"
+	for p in /dev/mmcblk0p*i
+	do
+		[ -e "$p" ] || continue
+		if findmnt -rn "$p" >/dev/null 2>&1; then
+			ilog "Unmounting $p"
+			umount -R "$p" || ilog "WARN: umount $p failed"
+		fi
+	done
+	sync
+
+	ilog "Setting /dev/mmcblk0 read-only"
+	blockdev --setro /dev/mmcblk0 || ilog "WARN: setro failed"
+
+	ilog "Pausing udev rule execution"
+	udevadm control --stop-exec-queue || true
+	trap 'udevadm control --start-exec-queue || true' EXIT
+
+	# Update eMMC Firmware
+	cmd="mmc ffu $EMMC_SWISSBIT_FIRMWARE /dev/mmcblk0"
+	ilog "Runnning: $cmd"
+	output=$(eval $cmd 2>&1)
+	rc=$?
+	ilog "$output"
+	if [ $rc -eq 0 ]; then
+		ilog "eMMC Firmware was updated successfully"
+		sync
+		rmmod sdhci_of_dwcmshc
+		modprobe sdhci_of_dwcmshc
+	else
+		ilog "ERROR: Failed to update eMMC Firmware. Status: $rc"
+	fi
+
+	return
+}
+extract_os_image()
+{
+	if [ ! -e $fspath/image.tar.xz ]; then
+		ilog "No OS image found"
+		return
+	fi
+	ilog "Extracting /..."
+	export EXTRACT_UNSAFE_SYMLINKS=1
+	tar Jxf $fspath/image.tar.xz --warning=no-timestamp -C /mnt
+	sync
+}
+
+configure_sfs()
+{
+	: > /mnt/etc/mellanox/mlnx-sf.conf
+
+	# Get all PCI IDs for BlueField devices
+	all_pciids=$(lspci -nD 2> /dev/null | grep -E "$SUPPORTED_DEVICES" | awk '{print $1}')
+
+	if [ -z "$all_pciids" ]; then
+		return
+	fi
+
+	# Check if Socket Direct mode is active (PF_SD_GROUP=1 in mlxconfig)
+	sd_mode=0
+	local mftcfg=mstconfig
+	if [ -x /usr/bin/mlxconfig ]; then
+		mftcfg=mlxconfig
+	fi
+	for pciid in $all_pciids; do
+		if ($mftcfg -d ${pciid} -e q PF_SD_GROUP 2>/dev/null | grep -o 'PF_SD_GROUP.*' | awk '{print $3}' | grep -q "^1$"); then
+			sd_mode=1
+			break
+		fi
+	done
+
+	if [ $sd_mode -eq 1 ]; then
+		# Socket Direct: create one SF per PCI domain on function 0.
+		# Result: one SF on 0002:01:00.0 and one on 0006:01:00.0
+		declare -A sd_domains
+		for pciid in $all_pciids; do
+			domain="${pciid%%:*}"
+			sd_domains[$domain]=1
+		done
+		sorted_domains=($(echo "${!sd_domains[@]}" | tr ' ' '\n' | sort))
+		for domain in "${sorted_domains[@]}"; do
+			pciid="${domain}:01:00.0"
+			# Verify this PCI ID actually exists
+			if echo "$all_pciids" | grep -q "^${pciid}$"; then
+				cat >> /mnt/etc/mellanox/mlnx-sf.conf << EOF
+/sbin/mlnx-sf --action create --device $pciid --sfnum 0 --hwaddr $(uuidgen | sed -e 's/-//;s/^\(..\)\(..\)\(..\)\(..\)\(..\).*$/02:\1:\2:\3:\4:\5/')
+EOF
+			fi
+		done
+	else
+		# Non-SD: one SF per PCI device (original behavior)
+		for pciid in $all_pciids
+		do
+			cat >> /mnt/etc/mellanox/mlnx-sf.conf << EOF
+/sbin/mlnx-sf --action create --device $pciid --sfnum 0 --hwaddr $(uuidgen | sed -e 's/-//;s/^\(..\)\(..\)\(..\)\(..\)\(..\).*$/02:\1:\2:\3:\4:\5/')
+EOF
+		done
+	fi
+}
+
+configure_ovs()
+{
+	if (lspci -n -d 15b3: | grep -wq 'a2df'); then
+		case "${distro,,}" in
+			"ubuntu")
+			if [ -e /etc/mellanox/mlnx-ovs.conf ]; then
+					ilog "Enable OVS DOCA on BlueField-4"
+					sed -i -e "s/OVS_DOCA=.*/OVS_DOCA=yes/" /mnt/etc/mellanox/mlnx-ovs.conf
+			else
+					ilog "OVS configuration file was not found: /mnt/etc/mellanox/mlnx-ovs.conf"
+			fi
+			;;
+		esac
+	fi
+}
+
+update_uefi_boot_entries()
+{
+	ilog "Updating EFI boot entries:"
+	efivars_mount=0
+	if [ ! -d /sys/firmware/efi/efivars ]; then
+		mount -t efivarfs none /sys/firmware/efi/efivars
+		efivars_mount=1
+	fi
+
+	ilog "Remove old boot entries"
+	ilog "$(bfbootmgr --cleanall 2>&1)"
+	/bin/rm -f /sys/firmware/efi/efivars/Boot* > /dev/null 2>&1
+	/bin/rm -f /sys/firmware/efi/efivars/dump-* > /dev/null 2>&1
+
+	BFCFG=$(which bfcfg 2> /dev/null)
+if [ -n "$BFCFG" ]; then
+	# Create PXE boot entries
+	if [ -e /etc/bf.cfg ]; then
+		mv /etc/bf.cfg /etc/bf.cfg.orig
+	fi
+
+if (echo "${BD_PSIDS}" | grep -qw "${PSID}"); then
+	if [ "${distro,,}" == "debian" ]; then
+		cat > /etc/bf.cfg << EOF
+BOOT0=DISK
+BOOT0_DESC='velinux1'
+BOOT0_DEVPATH='\\EFI\\velinux\\grubaa64.efi'
+BOOT1=DISK
+BOOT1_DESC='debian0'
+BOOT1_DEVPATH='\\EFI\\debian\\grubaa64.efi'
+BOOT2=NET-NIC_P0-IPV6
+BOOT3=NET-NIC_P1-IPV6
+BOOT4=NET-OOB-IPV6
+BOOT5=NET-NIC_P0-IPV4
+BOOT6=NET-NIC_P1-IPV4
+BOOT7=NET-OOB-IPV4
+BOOT8=UEFI_SHELL
+BOOT8_ARGS='ATTR=INACTIVE'
+PXE_DHCP_CLASS_ID=$DHCP_CLASS_ID
+EOF
+	else
+		cat > /etc/bf.cfg << EOF
+BOOT0=NET-NIC_P0-IPV6
+BOOT1=NET-NIC_P1-IPV6
+BOOT2=NET-NIC_P0-IPV4
+BOOT3=NET-NIC_P1-IPV4
+BOOT4=UEFI_SHELL
+PXE_DHCP_CLASS_ID=$DHCP_CLASS_ID
+EOF
+	fi
+else
+	cat > /etc/bf.cfg << EOF
+BOOT0=DISK
+BOOT1=NET-NIC_P0-IPV4
+BOOT2=NET-NIC_P0-IPV6
+BOOT3=NET-NIC_P1-IPV4
+BOOT4=NET-NIC_P1-IPV6
+BOOT5=NET-OOB-IPV4
+BOOT6=NET-OOB-IPV6
+BOOT7=NET-NIC_P0-IPV4-HTTP
+BOOT8=NET-NIC_P1-IPV4-HTTP
+BOOT9=NET-OOB-IPV4-HTTP
+PXE_DHCP_CLASS_ID=$DHCP_CLASS_ID
+EOF
+fi
+
+	$BFCFG
+	rc=$?
+	if [ $rc -ne 0 ]; then
+		if (grep -q "boot: failed to get MAC" /tmp/bfcfg.log > /dev/null 2>&1); then
+			err_msg="Failed to add PXE boot entries"
+		fi
+	fi
+
+	RC=$((RC+rc))
+	cat >> $LOG << EOF
+
+### Adding PXE boot entries: ###
+$(cat /etc/bf.cfg)
+### bfcfg LOG: ###
+$(cat /tmp/bfcfg.log)
+### bfcfg log End ###
+EOF
+	# Restore the original bf.cfg
+	/bin/rm -f /etc/bf.cfg
+	if [ -e /etc/bf.cfg.orig ]; then
+		grep -v PXE_DHCP_CLASS_ID= /etc/bf.cfg.orig > /etc/bf.cfg
+	fi
+fi
+
+	if [[ -n "$BFCFG" && -e /etc/bf.cfg ]]; then
+		$BFCFG
+		rc=$?
+		if [ $rc -ne 0 ]; then
+			if (grep -q "boot: failed to get MAC" /tmp/bfcfg.log > /dev/null 2>&1); then
+				err_msg="Failed to add PXE boot entries"
+			fi
+		fi
+
+		RC=$((RC+rc))
+		cat >> $LOG << EOF
+
+### Applying original bf.cfg: ###
+$(cat /etc/bf.cfg)
+### bfcfg LOG: ###
+$(cat /tmp/bfcfg.log)
+### bfcfg log End ###
+EOF
+	fi
+
+	if [ $efivars_mount -eq 1 ]; then
+		umount /sys/firmware/efi/efivars
+	fi
+}
+
+erase_partitions()
+{
+	if [ "X$ERASE_EMMC" == "Xyes" ]; then
+		if [ -b /dev/mmcblk0 ]; then
+			log "INFO: Erasing eMMC drive: /dev/mmcblk0"
+			wipefs -a /dev/mmcblk0
+		fi
+	fi
+
+	if [ "X$ERASE_SSD" == "Xyes" ]; then
+		if [[ $device == *"nvme"* ]]; then
+			log "INFO: Erasing NVME drive: $device"
+			nvme format -s1 $device -f
+		else
+			nvme_device="$(cd /sys/block; /bin/ls -1d nvme* | sort -V | tail -1)"
+			if [ ! -z "$nvme_device" ]; then
+				log "INFO: Erasing NVME drive: /dev/$nvme_device"
+				nvme format -s1 /dev/$nvme_device -f
+			fi
+		fi
+	fi
+}
+
+prepare_target_partitions()
+{
+	ilog "Installation target: $device"
+	ilog "Preparing target partitions"
+
+	if [ "$SHRED_DRIVES" == "yes" ]; then
+		if [ -x /usr/bin/shred ]; then
+			if [ -b /dev/nvme0n1 ]; then
+				log "Shredding /dev/$(cd /sys/block; /bin/ls -1d nvme* | sort -V | tail -1)"
+				shred -n 1 -v "/dev/$(cd /sys/block; /bin/ls -1d nvme* | sort -V | tail -1)" &
+			fi
+			if [ -b /dev/mmcblk0 ]; then
+				log "Shredding /dev/mmcblk0"
+				shred -n 1 -v /dev/mmcblk0 &
+			fi
+			wait
+		else
+			log "WARNING: shred utility was not found. Skipping shredding."
+		fi
+	fi
+
+	dd if=/dev/zero of=$device bs=512 count=1
+
+	parted --script $device -- \
+		mklabel gpt \
+		mkpart primary 1MiB 201MiB set 1 esp on \
+		mkpart primary 201MiB 1225MiB \
+		mkpart primary 1225MiB 100%
+
+	sync
+
+	partprobe "$device" > /dev/null 2>&1
+
+	sleep 1
+	blockdev --rereadpt "$device" > /dev/null 2>&1
+
+	# Generate some entropy
+	mke2fs  ${device}p2 >> /dev/null
+}
+
+mount_target_partition()
+{
+	ilog "Creating file systems:"
+	(
+	mkdosfs ${device}p1 -n system-boot
+	mkfs.${ROOTFS} -f ${device}p2 -L local-boot
+	mkfs.${ROOTFS} -f ${device}p3 -L writable
+	) >> $LOG 2>&1
+	sync
+	sleep 1
+
+	fsck.vfat -a ${device}p1
+
+	root_device=${device/\/dev\/}p3
+	mount ${device}p3 /mnt
+	mkdir -p /mnt/boot
+	mount ${device}p2 /mnt/boot
+	mkdir -p /mnt/boot/efi
+	mount ${device}p1 /mnt/boot/efi
+}
+
+get_part_id()
+{
+	local part_id=$1
+	if [ -n "$(lsblk -o UUID ${part_id} 2> /dev/null | tail -1)" ]; then
+		echo $(lsblk -o UUID -P ${part_id})
+	elif [ -n "$(blkid -o value -s UUID ${part_id} 2> /dev/null)" ]; then
+		echo "UUID=$(blkid -o value -s UUID ${part_id})"
+	else
+		echo "${part_id}"
+	fi
+}
+
+configure_target_os()
+{
+	ilog "Configuring target OS:"
+	ROOT_LABEL=${device}p3
+	BOOT_LABEL=${device}p2
+	BOOT_EFI_LABEL=${device}p1
+
+	if [ "${FSTAB_USE_DEV_NAME}" == "yes" ]; then
+		cat > /mnt/etc/fstab << EOF
+$ROOT_LABEL  /           ${ROOTFS}     defaults                   0 1
+$BOOT_LABEL  /boot       ${ROOTFS}     defaults                   0 2
+$BOOT_EFI_LABEL  /boot/efi   vfat    umask=0077,shortname=winnt 0 2
+EOF
+	else
+		cat > /mnt/etc/fstab << EOF
+$(get_part_id $ROOT_LABEL)  /           ${ROOTFS}     defaults                   0 1
+$(get_part_id $BOOT_LABEL)  /boot       ${ROOTFS}     defaults                   0 2
+$(get_part_id $BOOT_EFI_LABEL)  /boot/efi   vfat    umask=0077,shortname=winnt 0 2
+EOF
+	fi
+
+	memtotal=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+	if [ $memtotal -gt 16000000 ]; then
+		sed -i -r -e "s/(net.netfilter.nf_conntrack_max).*/\1 = 1000000/" /mnt/usr/lib/sysctl.d/90-bluefield.conf
+	fi
+
+	cat > /mnt/etc/udev/rules.d/50-dev-root.rules << EOF
+# If the system was booted without an initramfs, grubby
+# will look for the symbolic link "/dev/root" to figure
+# out the root file system block device.
+SUBSYSTEM=="block", KERNEL=="$root_device", SYMLINK+="root"
+EOF
+
+	if [[ "${PART_SCHEME}" == "SCHEME_B" ]]; then
+		sed -r -i -e "s@(^LOG_DIR=).*@\1/home/snap/log@" /mnt/usr/bin/rotate_nvme_snap_logs.sh
+		sed -i -e "s@^\$outchannel@# \$outchannel@" /mnt/etc/rsyslog.d/nvme_snap_logs.conf
+		sed -i -e "s@^## \$outchannel@\$outchannel@" /mnt/etc/rsyslog.d/nvme_snap_logs.conf
+	fi
+
+	if [ -e /mnt/usr/sbin/mlnx_snap_check_emulation.sh ]; then
+		sed -r -i -e "s@(NVME_SF_ECPF_DEV=).*@\1${cx_pcidev}@" /mnt/usr/sbin/mlnx_snap_check_emulation.sh
+	fi
+
+	ilog "PSID: $PSID"
+	case "${PSID}" in
+		MT_0000000634)
+		sed -r -i -e 's@(EXTRA_ARGS=).*@\1"--mem-size 1200"@' /mnt/etc/default/mlnx_snap
+		;;
+	esac
+
+	# Update HW-dependant files
+	if [ -e /mnt/etc/debian_version ]; then
+		if (lspci -n -d 15b3: | grep -wq 'a2d2'); then
+			# BlueField-1
+			ln -snf snap_rpc_init_bf1.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
+			# OOB interface does not exist on BlueField-1
+			sed -i -e '/oob_net0/,+1d' /mnt/var/lib/cloud/seed/nocloud-net/network-config
+			/bin/rm -f /mnt/etc/network/interfaces.d/*oob_net0
+			packages_to_remove=$(chroot /mnt env PATH=$CHROOT_PATH dpkg -S /lib/firmware/mellanox/{bmc,cec}/* | cut -d: -f1 | tr -s '\n' ' ')
+		elif (lspci -n -d 15b3: | grep -wq 'a2d6'); then
+			# BlueField-2
+			ln -snf snap_rpc_init_bf2.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
+			chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge libxlio libxlio-dev libxlio-utils || true
+			#chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge dpa-compiler dpacc dpa-resource-mgmt flexio || true
+			packages_to_remove=$(chroot /mnt env PATH=$CHROOT_PATH dpkg -S /lib/firmware/mellanox/{bmc,cec}/* | grep "bf3" | cut -d: -f1 | tr -s '\n' ' ')
+		elif (lspci -n -d 15b3: | grep -wq 'a2dc'); then
+			# BlueField-3
+			chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge mlnx-snap mlnx-libsnap spdk spdk-rpc spdk-dev || true
+			packages_to_remove=$(chroot /mnt env PATH=$CHROOT_PATH dpkg -S /lib/firmware/mellanox/{bmc,cec}/* | grep -viE "bf3-cec-fw|bf3-bmc-fw|bf3-bmc-gi|${dpu_part_number//_/-}" | cut -d: -f1 | tr -s '\n' ' ')
+		elif (lspci -n -d 15b3: | grep -wq 'a2df'); then
+			# BlueField-4
+			chroot /mnt env PATH=$CHROOT_PATH apt remove -y --purge mlnx-snap || true
+			packages_to_remove=$(chroot /mnt env PATH=$CHROOT_PATH dpkg -S /lib/firmware/mellanox/{bmc,cec}/* | grep -E "bf2|bf3" | cut -d: -f1 | tr -s '\n' ' ')
+		fi
+		if [ -n "$packages_to_remove" ]; then
+			ilog "Removing packages: $packages_to_remove"
+			chroot /mnt env PATH=$CHROOT_PATH  apt remove -y --purge $packages_to_remove || true
+		fi
+	else
+		if (lspci -n -d 15b3: | grep -wq 'a2d2'); then
+			# BlueField-1
+			ln -snf snap_rpc_init_bf1.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
+			# OOB interface does not exist on BlueField-1
+			/bin/rm -f /mnt/etc/sysconfig/network-scripts/ifcfg-oob_net0
+			packages_to_remove=$(chroot /mnt /bin/bash -c "/usr/bin/rpm -qf /lib/firmware/mellanox/{bmc,cec}/* 2>&1" | tr -s '\n' ' ')
+		elif (lspci -n -d 15b3: | grep -wq 'a2d6'); then
+			# BlueField-2
+			ln -snf snap_rpc_init_bf2.conf /mnt/etc/mlnx_snap/snap_rpc_init.conf
+			chroot /mnt bash -c "/usr/bin/yum remove -y libxlio libxlio-devel libxlio-utils" || true
+			packages_to_remove=$(chroot /mnt /bin/bash -c "/usr/bin/rpm -qf /lib/firmware/mellanox/{bmc,cec}/* 2>&1" | grep "bf3" | tr -s '\n' ' ')
+		elif (lspci -n -d 15b3: | grep -wq 'a2dc'); then
+			# BlueField-3
+			chroot /mnt rpm -e mlnx-snap mlnx-libsnap spdk || true
+			packages_to_remove=$(chroot /mnt /bin/bash -c "/usr/bin/rpm -qf /lib/firmware/mellanox/{bmc,cec}/* 2>&1" | grep -viE "bf3-cec-fw|bf3-bmc-fw|bf3-bmc-gi|${dpu_part_number//_/-}" | tr -s '\n' ' ')
+		elif (lspci -n -d 15b3: | grep -wq 'a2df'); then
+			# BlueField-4
+			chroot /mnt rpm -e mlnx-snap || true
+			packages_to_remove=$(chroot /mnt /bin/bash -c "/usr/bin/rpm -qf /lib/firmware/mellanox/{bmc,cec}/* 2>&1" | grep -E "bf2|bf3" | tr -s '\n' ' ')
+		fi
+		if [ -n "$packages_to_remove" ]; then
+			ilog "Removing packages: $packages_to_remove"
+			ilog "$(chroot /mnt bash -c "/usr/bin/yum remove -y $packages_to_remove" || true)"
+		fi
+	fi
+
+	chmod 600 /mnt/etc/ssh/*
+
+	update_default_bfb
+
+	if [ "$distro" != "RedHat" ]; then
+		# Disable SELINUX
+		sed -i -e "s/^SELINUX=.*/SELINUX=disabled/" /mnt/etc/selinux/config
+	fi
+
+	/bin/rm -f /mnt/etc/hostname
+
+	cat > /mnt/etc/hosts << EOF
+127.0.0.1       localhost
+::1     localhost ip6-localhost ip6-loopback
+fe00::0 ip6-localnet
+ff00::0 ip6-mcastprefix
+ff02::1 ip6-allnodes
+ff02::2 ip6-allrouters
+EOF
+
+	cat > /mnt/etc/resolv.conf << EOF
+nameserver 192.168.100.1
+EOF
+
+	/bin/rm -f /mnt/boot/vmlinux-*.bz2
+}
+
+configure_network()
+{
+	ilog "Configure network for SF interfaces:"
+	num_ports=$(lspci -nD 2> /dev/null | grep -E "$SUPPORTED_DEVICES" | wc -l)
+	if [ $num_ports -lt 1 ]; then
+		ilog "No network interfaces found"
+		return
+	fi
+	for port in $(seq 1 $num_ports); do
+		p=$((port - 1))
+		interface="enp3s0f${p}s0"
+		ilog "Configuring network interface $port"
+		if [ -d /mnt/etc/sysconfig/network-scripts/ ]; then
+			cat > /mnt/etc/sysconfig/network-scripts/ifcfg-${interface} << EOF
+NAME="${interface}"
+DEVICE="${interface}"
+NM_CONTROLLED="no"
+DEVTIMEOUT=30
+PEERDNS="yes"
+ONBOOT="yes"
+BOOTPROTO="dhcp"
+TYPE=Ethernet
+EOF
+			chmod 600 /mnt/etc/sysconfig/network-scripts/ifcfg-${interface}
+			ilog "Created configuration for network interface ${interface}: /etc/sysconfig/network-scripts/ifcfg-${interface}"
+		elif [ -d /mnt/etc/netplan/ ]; then
+			cat > /mnt/etc/netplan/60-mlnx-${p}.yaml << EOF
+network:
+  version: 2
+  ethernets:
+    ${interface}:
+      renderer: networkd
+      dhcp4: 'true'
+EOF
+			chmod 600 /mnt/etc/netplan/60-mlnx-${p}.yaml
+			ilog "Created configuration for network interface ${interface}: /etc/netplan/60-mlnx-${p}.yaml"
+		elif [ -d /mnt/etc/network/interfaces.d/ ]; then
+			cat > /mnt/etc/network/interfaces.d/${interface} << EOF
+auto ${interface}
+iface ${interface} inet dhcp
+EOF
+			chmod 600 /mnt/etc/network/interfaces.d/${interface}
+			ilog "Created configuration for network interface ${interface}: /etc/network/interfaces.d/${interface}"
+		else
+			ilog "Unknown network configuration environment"
+			return 1
+		fi
+	done
+
+	if [ $num_ports -eq 1 ]; then
+		ilog "Removing configuration for the second network interface on one port devices"
+		if [ -f /mnt/etc/sysconfig/network-scripts/ifcfg-enp3s0f1s0 ]; then
+			/bin/rm -f /mnt/etc/sysconfig/network-scripts/ifcfg-enp3s0f1s0
+			ilog "Removed configuration for network interface enp3s0f1s0: /etc/sysconfig/network-scripts/ifcfg-enp3s0f1s0"
+		fi
+		if [ -f /mnt/etc/network/interfaces.d/enp3s0f1s0 ]; then
+			/bin/rm -f /mnt/etc/network/interfaces.d/enp3s0f1s0
+			ilog "Removed configuration for network interface enp3s0f1s0: /etc/network/interfaces.d/enp3s0f1s0"
+		fi
+		if [ -f /mnt/etc/netplan/60-mlnx-1.yaml ]; then
+			/bin/rm -f /mnt/etc/netplan/60-mlnx-1.yaml
+			ilog "Removed configuration for network interface enp3s0f1s0: /etc/netplan/60-mlnx-1.yaml"
+		fi
+	fi
+
+	if [ -f /mnt/etc/netplan/60-mlnx.yaml ]; then
+		/bin/rm -f /mnt/etc/netplan/60-mlnx.yaml
+		ilog "Removed deprectated configuration file: /etc/netplan/60-mlnx.yaml"
+	fi
+
+	return 0
+}
+
+configure_dhcp()
+{
+	ilog "Configure dhcp:"
+	mkdir -p /mnt/etc/dhcp
+	cat >> /mnt/etc/dhcp/dhclient.conf << EOF
+send vendor-class-identifier "$DHCP_CLASS_ID_DP";
+interface "oob_net0" {
+  send vendor-class-identifier "$DHCP_CLASS_ID_OOB";
+}
+EOF
+	cat >> /mnt/etc/dhcp/dhclient6.conf << EOF
+option dhcp6.vendor-opts code 16 = string;
+send dhcp6.vendor-opts $DHCP_CLASS_ID_DP_IPV6;
+
+interface "oob_net0" {
+  send dhcp6.vendor-opts $DHCP_CLASS_ID_OOB_IPV6;
+}
+EOF
+
+if [[ "X$ENABLE_SFC_HBN" == "Xyes" || "X$ENABLE_BR_HBN" == "Xyes" ]]; then
+	cat >> /mnt/etc/dhcp/dhclient.conf << EOF
+
+interface "mgmt" {
+  send vendor-class-identifier "$DHCP_CLASS_ID_OOB";
+}
+EOF
+	cat >> /mnt/etc/dhcp/dhclient6.conf << EOF
+interface "mgmt" {
+  send dhcp6.vendor-opts $DHCP_CLASS_ID_OOB_IPV6;
+}
+EOF
+fi
+
+if [ -e /mnt/etc/dhcpcd.conf ]; then
+	if ! (grep -q "^noipv4ll" /mnt/etc/dhcpcd.conf); then
+		cat >> /mnt/etc/dhcpcd.conf << EOF
+
+# Disable IPv4 Link-Local
+noipv4ll
+EOF
+	fi
+fi
+}
+
+update_default_bfb()
+{
+	# Update default.bfb
+	bfb_location=/lib/firmware/mellanox/default.bfb
+
+	if [ -f "$bfb_location" ]; then
+		/bin/rm -f /mnt/lib/firmware/mellanox/boot/default.bfb
+		cp $bfb_location /mnt/lib/firmware/mellanox/boot/default.bfb
+	fi
+}
+
+configure_default_grub()
+{
+	ilog "Configure /etc/default/grub:"
+	# Then, set boot arguments: Read current 'console' and 'earlycon'
+	# parameters, and append the root filesystem parameters.
+	bootarg="$(cat /proc/cmdline | sed 's/initrd=initramfs//;s/console=.*//')"
+	redfish_osarg="$(bfcfg --dump-osarg 2> /dev/null)"
+	if [ -n "$redfish_osarg" ]; then
+		bootarg="$bootarg $redfish_osarg"
+	fi
+	if (lscpu 2>&1 | grep -wq Grace); then
+		sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=1024M $bootarg keep_bootcon earlycon modprobe.blacklist=mlx5_core,mlx5_ib selinux=0 biosdevname=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
+	else
+		sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=1024M $bootarg console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 modprobe.blacklist=mlx5_core,mlx5_ib selinux=0 biosdevname=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
+	fi
+	if (grep -q MLNXBF33 /sys/firmware/acpi/tables/SSDT*); then
+		# BlueField-3
+		sed -i -e "s/0x01000000/0x13010000/g" /mnt/etc/default/grub
+		if /bin/ls /mnt/boot/loader/entries/*.conf > /dev/null 2>&1; then
+			sed -i -e "s/0x01000000/0x13010000/g" /mnt/boot/loader/entries/*.conf
+		fi
+	fi
+
+	if (lspci -vv | grep -wq SimX); then
+		# Remove earlycon from grub parameters on SimX
+		sed -i -r -e 's/earlycon=[^ ]* //g' /mnt/etc/default/grub
+	fi
+
+	ilog "GRUB /etc/default/grub:"
+	ilog "$(cat /mnt/etc/default/grub)"
+}
+
+os_installation_flow()
+{
+	mount_target_partition
+
+	extract_os_image
+
+	bind_partitions
+
+	configure_target_os
+
+	configure_dhcp
+
+	configure_network
+
+	configure_sfs
+
+	configure_ovs
+
+	configure_services
+
+	set_root_password
+
+	create_initramfs
+
+	configure_grub
+
+	update_uefi_boot_entries
+
+	if [ "X$ENABLE_SFC_HBN" == "Xyes" ]; then
+		enable_sfc_hbn
+	fi
+
+	if [ "X$ENABLE_BR_HBN" == "Xyes" ]; then
+		enable_sfc_hbn
+	fi
+
+	cleanup_target_os
+
+	update_efi_bootmgr
+
+	if function_exists bfb_modify_os; then
+		log "INFO: Running bfb_modify_os from bf.cfg"
+		bfb_modify_os
+	fi
+
+	sync
+}
+
+install_dpu_os()
+{
+	if [ "X${ERASE_PARTITIONS}" == "Xyes" ]; then
+		erase_partitions
+	fi
+
+	log "INFO: $distro installation started"
+
+	prepare_target_partitions
+
+	if function_exists bfb_pre_install; then
+		log "INFO: Running bfb_pre_install from bf.cfg"
+		bfb_pre_install
+	fi
+
+	os_installation_flow
+	log "INFO: $distro installation completed"
+}
+
+calculate_total_weight()
+{
+	step_weights["install_setup"]=1
+
+	if [ "$UPDATE_DPU_OS" == "yes" ]; then
+		step_weights["dpu_os"]=40
+	fi
+
+	if [ "$UPDATE_ATF_UEFI" == "yes" ]; then
+		step_weights["atf_uefi"]=1
+	fi
+
+	if [ "$WITH_NIC_FW_UPDATE" == "yes" ]; then
+		step_weights["nic_firmware"]=10
+	fi
+
+	if [[ ! -z "$BMC_USER" && ! -z "$BMC_PASSWORD" ]]; then
+		if [[ ! -z "$UEFI_PASSWORD" && ! -z "$NEW_UEFI_PASSWORD" ]]; then
+			step_weights["uefi_password"]=5
+		fi
+		if [ ! -z "$NEW_BMC_PASSWORD" ]; then
+			step_weights["bmc_password"]=5
+		fi
+		if [ "$UPDATE_BMC_FW" == "yes" ]; then
+			step_weights["bmc_fw"]=200
+		fi
+		if [ "$UPDATE_CEC_FW" == "yes" ]; then
+			step_weights["cec_fw"]=5
+		fi
+		if [ "$UPDATE_DPU_GOLDEN_IMAGE" == "yes" ]; then
+			step_weights["dpu_golden_image"]=60
+		fi
+		if [ "$UPDATE_NIC_FW_GOLDEN_IMAGE" == "yes" ]; then
+			step_weights["nic_firmware_golden_image"]=60
+		fi
+		if [ "$UPDATE_CERTIFICATES" == "yes" ]; then
+			step_weights["certificates"]=10
+		fi
+	fi
+
+	for weight in "${step_weights[@]}"; do
+		((total_weight += weight))
+	done
+}
+
+step2str()
+{
+	case "$1" in
+	"install_setup")
+		echo "BFB Installation Environment"
+	;;
+	"dpu_os")
+		echo "DPU OS"
+	;;
+	"atf_uefi")
+		echo "ARM Capsule"
+	;;
+	"nic_firmware")
+		echo "NIC FW"
+	;;
+	"uefi_password")
+		echo "UEFI Password"
+	;;
+	"bmc_password")
+		echo "BMC Password"
+	;;
+	"bmc_fw")
+		echo "BMC Image"
+	;;
+	"cec_fw")
+		echo "Glacier Image"
+	;;
+	"dpu_golden_image")
+		echo "DPU Golden Image"
+	;;
+	"nic_firmware_golden_image")
+		echo "NIC FW Golden Image"
+	;;
+	"certificates")
+		echo "Certificates"
+	;;
+	esac
+}
+
+update_progress()
+{
+    local step=$1
+	local status=$2
+    local weight=${step_weights[$step]}
+
+	if [ $weight -eq 0 ]; then
+		return
+	fi
+    ((current_progress += weight))
+    local percentage=$((current_progress * 100 / total_weight))
+
+	if [ $status -eq 0 ]; then
+		status_str="passed"
+	else
+		status_str="failed"
+	fi
+
+	step_str=$(step2str $step)
+	printf "BFB-Installer: Installing %s %s, total %d%% complete" "$step_str" "$status_str" $percentage
+	ilog "BFB-Installer: Installing ${step_str} ${status_str}, total ${percentage}% complete"
+}
+
+global_installation_flow()
+{
+	if is_bf4; then
+		UPDATE_ATF_UEFI="no"
+		UPDATE_NIC_FW_GOLDEN_IMAGE="no"
+		UPDATE_DPU_GOLDEN_IMAGE="no"
+		UPDATE_CERTIFICATES="no"
+		UPDATE_BMC_FW="no"
+		UPDATE_CEC_FW="no"
+		UPDATE_BMC_PASSWORD="no"
+		UPDATE_UEFI_PASSWORD="no"
+		WITH_NIC_FW_UPDATE="no"
+		UPGRADE_EMMC_FIRMWARE="no"
+	fi
+
+	calculate_total_weight
+	update_progress install_setup 0
+
+	if [ "$UPDATE_DPU_OS" == "yes" ]; then
+		install_dpu_os
+		update_progress dpu_os $?
+	fi
+
+	if function_exists bfb_custom_action1; then
+		log "INFO: Running bfb_custom_action1 from bf.cfg"
+		bfb_custom_action1
+	fi
+
+	if [ "$UPDATE_ATF_UEFI" == "yes" ]; then
+		update_atf_uefi
+		update_progress atf_uefi $?
+	fi
+
+	if function_exists bmc_components_update; then
+		bmc_components_update
+	fi
+
+	if [ "$WITH_NIC_FW_UPDATE" == "yes" ]; then
+		update_nic_firmware
+		update_progress nic_firmware $?
+	fi
+
+	unmount_partitions
+
+	if function_exists bfb_post_install; then
+		log "INFO: Running bfb_post_install from bf.cfg"
+		bfb_post_install
+	fi
+
+	if [ "$UPGRADE_EMMC_FIRMWARE" == "yes" ]; then
+		upgrade_emmc_fw
+	fi
+
+	log "INFO: Installation finished"
+}
+
+if [ -z "${dpu_part_number}" ]; then
+	# Secure boot
+	ilog "Secure Boot is enabled"
+	mst start > /dev/null 2>&1
+	cx_pcidev=$(/bin/ls -1 /dev/mst/mt*pciconf0 2> /dev/null)
+	if [ -z "${cx_pcidev}" ]; then
+		ilog "ERROR: Np MST device found"
+	else
+		dpu_part_number=$(flint -d $cx_pcidev q full | grep "Part Number:" | awk '{print $NF}')
+		PSID=$(flint -d $cx_pcidev q | grep PSID | awk '{print $NF}')
+	fi
+fi
+
+#
+# Set the Hardware Clock from the System Clock
+#
+hwclock -w
+
+#
+# Check auto configuration passed from boot-fifo
+#
+boot_fifo_path="/sys/bus/platform/devices/MLNXBF04:00/bootfifo"
+if [ -e "${boot_fifo_path}" ]; then
+	cfg_file=$(mktemp)
+	dd if=${boot_fifo_path} of=${cfg_file} bs=4096 > /dev/null 2>&1
+
+	#
+	# Check the .xz signature {0xFD, '7', 'z', 'X', 'Z', 0x00} and extract the
+	# config file from it. Then start decompression in the background.
+	#
+	offset=$(strings -a -t d ${cfg_file} | grep -m 1 "7zXZ" | awk '{print $1}')
+	if [ -s "${cfg_file}" -a ."${offset}" != ."1" ]; then
+		log "INFO: Found bf.cfg"
+		cat ${cfg_file} | tr -d '\0' > /tmp/bf.cfg
+		if ( bash -n /tmp/bf.cfg ); then
+			mv /tmp/bf.cfg /etc/bf.cfg
+		fi
+	fi
+	rm -f $cfg_file
+fi
+
+if [ -e /etc/bf.cfg ]; then
+	cat >> $LOG << EOF
+
+############ bf.cfg ###############
+$(cat /etc/bf.cfg)
+########## END of bf.cfg ##########
+EOF
+else
+	echo "No bf.cfg provided" >> $LOG
+fi
+
+ilog "Starting mst:"
+ilog "$(mst start)"
+
+cat >> $LOG << EOF
+
+############ DEBUG INFO (pre-install) ###############
+KERNEL: $(uname -r)
+
+LSMOD:
+$(lsmod)
+
+NETWORK:
+$(ip addr show)
+
+CMDLINE:
+$(cat /proc/cmdline)
+
+PARTED:
+$(parted -l -s 2> /dev/null)
+
+LSPCI:
+$(lspci)
+
+NIC FW INFO:
+$(flint -d /dev/mst/mt*_pciconf0 q full)
+
+DPU Part Number:
+$dpu_part_number
+
+MLXCONFIG:
+$(mlxconfig -d /dev/mst/mt*_pciconf0 -e q)
+########### DEBUG INFO END ############
+
+EOF
+if [ -e /etc/bf.cfg ]; then
+	if ( bash -n /etc/bf.cfg ); then
+		. /etc/bf.cfg
+	else
+		log "INFO: Invalid bf.cfg"
+	fi
+fi
+
+if (echo "${BD_PSIDS}" | grep -qw "${PSID}"); then
+	case "${distro,,}" in
+		"debian"|"ubuntu")
+		;;
+		*)
+			fail "$distro is not supported on this DPU"
+		;;
+	esac
+fi
+
+if [ "X${DEBUG}" == "Xyes" ]; then
+	log_output=/dev/kmsg
+	if [ -n "$log_output" ]; then
+		exec >$log_output 2>&1
+		unset log_output
+	fi
+fi
+
+EMMC_SWISSBIT_FIRMWARE="/lib/firmware/swissbit/emmc/FW_SFEM040GByED1TO-I-7G-11P-NVI.bin"
+EMMC_SWISSBIT_FIRMWARE_MD5SUM="4bc1c5a09bc778f1e7c1eae8c656779c"
+UPDATE_ATF_UEFI=${UPDATE_ATF_UEFI:-"yes"}
+UPDATE_DPU_OS=${UPDATE_DPU_OS:-"yes"}
+UPGRADE_EMMC_FIRMWARE=${UPGRADE_EMMC_FIRMWARE:-"yes"}
+WITH_NIC_FW_UPDATE=${WITH_NIC_FW_UPDATE:-"yes"}
+NIC_FW_UPDATE_PASSED=0
+
+total_weight=0
+current_progress=0
+declare -A step_weights
+step_weights["install_setup"]=0
+step_weights["dpu_os"]=0
+step_weights["atf_uefi"]=0
+step_weights["nic_firmware"]=0
+step_weights["uefi_password"]=0
+step_weights["bmc_password"]=0
+step_weights["bmc_fw"]=0
+step_weights["cec_fw"]=0
+step_weights["dpu_golden_image"]=0
+step_weights["nic_firmware_golden_image"]=0
+step_weights["certificates"]=0
+
+DHCP_CLASS_ID=${PXE_DHCP_CLASS_ID:-""}
+DHCP_CLASS_ID_OOB=${DHCP_CLASS_ID_OOB:-"NVIDIA/BF/OOB"}
+DHCP_CLASS_ID_DP=${DHCP_CLASS_ID_DP:-"NVIDIA/BF/DP"}
+# 00:00:16:47 represents the IANA-assigned Enterprise Number for NVIDIA (5703 in decimal) NVIDIA/BF/OOB
+DHCP_CLASS_ID_OOB_IPV6=${DHCP_CLASS_ID_OOB_IPV6:-"00:00:16:47:00:0d:4E:56:49:44:49:41:2F:42:46:2F:4F:4F:42"}
+# 00:00:16:47 represents the IANA-assigned Enterprise Number for NVIDIA (5703 in decimal) NVIDIA/BF/DP
+DHCP_CLASS_ID_DP_IPV6=${DHCP_CLASS_ID_DP_IPV6:-"00:00:16:47:00:0c:4E:56:49:44:49:41:2f:42:46:2f:44:50"}
+FACTORY_DEFAULT_DHCP_BEHAVIOR=${FACTORY_DEFAULT_DHCP_BEHAVIOR:-"true"}
+
+if [ "${FACTORY_DEFAULT_DHCP_BEHAVIOR}" == "true" ]; then
+	# Set factory defaults
+	DHCP_CLASS_ID="NVIDIA/BF/PXE"
+	DHCP_CLASS_ID_OOB="NVIDIA/BF/OOB"
+	DHCP_CLASS_ID_DP="NVIDIA/BF/DP"
+	DHCP_CLASS_ID_OOB_IPV6="00:00:16:47:00:0d:4E:56:49:44:49:41:2F:42:46:2F:4F:4F:42"
+	DHCP_CLASS_ID_DP_IPV6="00:00:16:47:00:0c:4E:56:49:44:49:41:2f:42:46:2f:44:50"
+fi
+
+ERASE_PARTITIONS=${ERASE_PARTITIONS:-"no"}
+ERASE_EMMC=${ERASE_EMMC:-"yes"}
+ERASE_SSD=${ERASE_SSD:-"yes"}

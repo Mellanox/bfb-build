@@ -1,0 +1,6 @@
+[ol9_developer_CODEREADY]
+name=Oracle Linux $releasever CodeReady Packages for Development ($basearch)
+baseurl=https://yum$ociregion.$ocidomain/repo/OracleLinux/OL9/codeready/builder/$basearch/
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-oracle
+gpgcheck=1
+enabled=1

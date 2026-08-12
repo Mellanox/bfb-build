@@ -1,0 +1,162 @@
+FROM --platform=linux/arm64 oraclelinux:9
+
+ADD qemu-aarch64-static /usr/bin/
+
+ADD 10-mlx-console-messages.conf /etc/sysctl.d/
+ADD install.env /root/workspace/install.env/
+ADD install.sh create_bfb /root/workspace/
+
+ADD repos/ /etc/yum.repos.d/
+
+RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
+    dnf -y install \
+        acpid \
+        annobin \
+        audit \
+        bc \
+        binutils \
+        chkconfig \
+        chrony \
+        containerd.io \
+        coreutils \
+        cri-tools \
+        crypto-policies \
+        cryptsetup \
+        curl \
+        dbus-tools \
+        dhcp-client \
+        device-mapper-persistent-data \
+        dmidecode \
+        docker-ce-cli \
+        dosfstools \
+        dracut \
+        dracut-network \
+        dracut-tools \
+        e2fsprogs \
+        efibootmgr \
+        gawk \
+        grub2 \
+        grub2-tools grubby grub2-tools-minimal grub2-efi-aa64 \
+        grub2-efi-aa64-modules grub2-common grub2-tools-extra shim-aa64 \
+        grub2-efi-aa64-cdboot \
+        i2c-tools \
+        ibacm \
+        infiniband-diags \
+        initscripts \
+        ipcalc \
+        iperf3 \
+        ipmitool \
+        iproute-tc \
+        iputils \
+        iwpmd \
+        jq \
+        kexec-tools \
+        kernel-rpm-macros \
+        kmod \
+        kubeadm \
+        kubelet \
+        kubernetes-cni \
+        libbsd \
+        libibverbs \
+        libibverbs-utils \
+        libibumad \
+        librdmacm \
+        librdmacm-utils \
+        libmnl \
+        libnghttp2 \
+        libnl3 \
+        libreswan \
+        libunwind \
+        lm_sensors \
+        lsof \
+        ltrace \
+        lvm2 \
+        mtools \
+        mstflint \
+        nano \
+        net-tools \
+        lsb-release \
+        NetworkManager \
+        NetworkManager-initscripts-updown \
+        nfs-utils \
+        nvme-cli \
+        openssl \
+        openssh-server \
+        parted \
+        passwd \
+        pciutils \
+        pciutils-devel \
+        perf \
+        perl \
+        plymouth \
+        popt-devel \
+        python3-pip \
+        python3-pyverbs  \
+        python3-six \
+        rasdaemon \
+        rdma-core \
+        rdma-core-devel \
+        rng-tools \
+        rsync \
+        sg3_utils \
+        shadow-utils \
+        shim \
+        spdk \
+        srp_daemon \
+        sshpass \
+        sudo \
+        systemd-udev \
+        systemd-timesyncd \
+        tar \
+        tcpdump \
+        unzip \
+        usbutils \
+        util-linux \
+        vim \
+        vim-common \
+        watchdog \
+        wget \
+        which \
+        xfsprogs \
+        xorriso \
+        yum-utils \
+        zip \
+#DOCA Packages
+        doca-runtime \
+        doca-devel \
+        mlnx-snap \
+        mlnx-libsnap \
+        ibacm \
+        infiniband-diags \
+        infiniband-diags-compat \
+        iwpmd \
+        libibumad \
+        libibverbs \
+        libibverbs-unsupported \
+        libibverbs-unsupported-devel \
+        libibverbs-utils \
+        librdmacm \
+        librdmacm-utils \
+        python3-pyverbs \
+        rdma-core \
+        rdma-core-devel \
+        srp_daemon \
+        https://linux.mellanox.com/public/repo/doca/2.2.1/extras/addons/dracut-sshd-0.6.5-1.el8.noarch.rpm \
+    && \
+    dnf -y clean all && \
+    rm -rf /var/cache/* && \
+    mkdir -p /etc/ssh/sshd_config.d && \
+    echo "PermitRootLogin yes" >> /etc/ssh/sshd_config
+
+RUN rm -f /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf
+
+# Manage services
+RUN systemctl disable mlx_ipmid.service || true
+RUN systemctl enable kdump || true
+RUN systemctl disable kubelet || true
+RUN systemctl disable containerd || true
+RUN systemctl disable bfvcheck || true
+
+RUN systemctl enable openvswitch || true
+RUN systemctl enable mlnx_snap || true
+RUN systemctl enable watchdog || true

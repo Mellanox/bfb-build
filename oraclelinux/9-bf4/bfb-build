@@ -1,0 +1,134 @@
+#!/bin/bash -e
+###############################################################################
+#
+# Copyright 2022 NVIDIA Corporation
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+###############################################################################
+
+cd ${0%*/*}
+
+if ! (which wget > /dev/null 2>&1); then
+	echo "wget is required to build BFB"
+	exit 1
+fi
+
+if ! (which docker > /dev/null 2>&1); then
+	echo "docker is required to build BFB"
+	exit 1
+fi
+
+DISTRO="oraclelinux"
+DISTRO_DISPLAY_NAME="ol"
+DISTRO_VERSION="9"
+DISTRO_KERNEL=${DISTRO_KERNEL:-""}
+RELEASE_DIR_SUFFIX=${RELEASE_DIR_SUFFIX:-""}
+ARCH=${ARCH:-"arm64-dpu"}
+LEAVE_CONTAINER=${LEAVE_CONTAINER:-"no"}
+
+DOCA_REPO_URL=${DOCA_REPO_URL:-"https://linux.mellanox.com/public/repo/doca/3.3.0-bf4-beta1/ol9/arm64-dpu/"}
+
+if [ -z "$RDMA_REPO_URL" ]; then
+	cat << EOF
+ERROR: RDMA_REPO_URL is required.
+
+Set RDMA_REPO_URL to a repository URL that provides the following OL9 RDMA
+packages (version 63.0-1.0.0, aarch64):
+
+  ibacm
+  infiniband-diags
+  infiniband-diags-compat
+  iwpmd
+  libibumad
+  libibverbs
+  libibverbs-unsupported
+  libibverbs-unsupported-devel
+  libibverbs-utils
+  librdmacm
+  librdmacm-utils
+  python3-pyverbs
+  rdma-core
+  rdma-core-devel
+  srp_daemon
+
+Example:
+  RDMA_REPO_URL=http://example/rdma-core-63.0-el9-aarch64/ ./bfb-build oraclelinux 9-bf4
+
+This replaces <FILL YOUR BASE URL HERE> in
+oraclelinux/9-bf4/repos/rdma-core-63.0-1.0.0-el9-aarch64.repo
+EOF
+	exit 1
+fi
+
+WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
+
+mkdir -p $WDIR
+
+cp -a \
+	Dockerfile \
+	create_bfb \
+	install.sh \
+	repos \
+	10-mlx-console-messages.conf \
+	../../common-bf4/tools/qemu-aarch64-static \
+	$WDIR
+
+sed -i "s|<FILL YOUR BASE URL HERE>|${RDMA_REPO_URL}|" $WDIR/repos/rdma-core-63.0-1.0.0-el9-aarch64.repo
+
+cp -a ../../common-bf4/install.env $WDIR
+
+cd $WDIR
+
+echo -e "[doca] \n\
+name=Nvidia DOCA repository \n\
+baseurl=$DOCA_REPO_URL \n\
+gpgcheck=0 \n\
+enabled=1" > $WDIR/repos/doca.repo
+
+docker_image=bfb_runtime_${DISTRO,,}${DISTRO_VERSION,,}
+
+docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION} 2> /dev/null || true
+
+
+docker build -t ${docker_image} \
+	-f Dockerfile .
+
+DOCKER_RUN_PARAMS="--privileged -e container=docker \
+	-v $PWD:/workspace \
+	--name BlueField_OS_${DISTRO}_${DISTRO_VERSION}${DISTRO_KERNEL} \
+	--mount type=bind,source=/dev,target=/dev \
+	--mount type=bind,source=/sys,target=/sys \
+	--mount type=bind,source=/proc,target=/proc"
+
+if [ "X${LEAVE_CONTAINER}" == "Xyes" ]; then
+	DOCKER_RUN_PARAMS="-d -it ${DOCKER_RUN_PARAMS}"
+	docker_id=$(docker run ${DOCKER_RUN_PARAMS} \
+		${docker_image} /bin/bash)
+	docker exec -it ${docker_id} /bin/bash -x /root/workspace/create_bfb
+else
+	DOCKER_RUN_PARAMS="-t --rm ${DOCKER_RUN_PARAMS}"
+	docker run ${DOCKER_RUN_PARAMS} \
+		${docker_image} /bin/bash -x /root/workspace/create_bfb
+fi
+
+echo "Default root password is: oracle"
+
+if [ "X${LEAVE_CONTAINER}" == "Xyes" ]; then
+	echo "Container name: BlueField_OS_${DISTRO}_${DISTRO_VERSION} id: ${docker_id}"
+fi

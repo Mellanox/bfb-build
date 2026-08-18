@@ -43,7 +43,7 @@ download_files_by_pattern() {
         if [[ -n "$filename" ]]; then
             echo "Downloading: $filename"
             if wget -q -P "$target_dir" "${base_url}/${filename}"; then
-                ((download_count++))
+                ((++download_count))
             else
                 echo "Warning: Failed to download $filename" >&2
             fi

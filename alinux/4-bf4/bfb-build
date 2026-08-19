@@ -1,0 +1,150 @@
+#!/bin/bash -e
+###############################################################################
+#
+# Copyright 2026 NVIDIA Corporation
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+###############################################################################
+
+cd ${0%*/*}
+
+if ! (which wget > /dev/null 2>&1); then
+	echo "wget is required to build ISO"
+	exit 1
+fi
+
+if ! (which docker > /dev/null 2>&1); then
+	echo "docker is required to build ISO"
+	exit 1
+fi
+
+DISTRO="alinux"
+DISTRO_DISPLAY_NAME="alinux"
+DISTRO_VERSION="4"
+DISTRO_KERNEL=${DISTRO_KERNEL:-""}
+RELEASE_DIR_SUFFIX=${RELEASE_DIR_SUFFIX:-""}
+ARCH=${ARCH:-"arm64-dpu"}
+LEAVE_CONTAINER=${LEAVE_CONTAINER:-"no"}
+
+DOCA_REPO_URL=${DOCA_REPO_URL:-"https://linux.mellanox.com/public/repo/doca/3.3.0-bf4-beta1/alinux4/arm64-dpu/"}
+
+if [ -z "$KERNEL_REPO_URL" ]; then
+	cat << EOF
+ERROR: KERNEL_REPO_URL is required.
+
+Set KERNEL_REPO_URL to a repository URL that provides the 6.6.102-cbp.git.cfc9c473f.alnx4.aarch64 kernel packages:
+
+kernel-6.6.102-cbp.git.cfc9c473f.alnx4.aarch64.rpm
+kernel-debug-6.6.102-cbp.git.cfc9c473f.alnx4.aarch64.rpm
+kernel-debug-debuginfo-6.6.102-cbp.git.cfc9c473f.alnx4.aarch64.rpm
+kernel-debug-devel-6.6.102-cbp.git.cfc9c473f.alnx4.aarch64.rpm
+kernel-debuginfo-6.6.102-cbp.git.cfc9c473f.alnx4.aarch64.rpm
+kernel-debuginfo-common-aarch64-6.6.102-cbp.git.cfc9c473f.alnx4.aarch64.rpm
+kernel-devel-6.6.102-cbp.git.cfc9c473f.alnx4.aarch64.rpm
+kernel-headers-6.6.102-cbp.git.cfc9c473f.alnx4.aarch64.rpm
+kernel-tools-6.6.102-cbp.git.cfc9c473f.alnx4.aarch64.rpm
+kernel-tools-debuginfo-6.6.102-cbp.git.cfc9c473f.alnx4.aarch64.rpm
+kernel-tools-libs-6.6.102-cbp.git.cfc9c473f.alnx4.aarch64.rpm
+kernel-tools-libs-devel-6.6.102-cbp.git.cfc9c473f.alnx4.aarch64.rpm
+perf-6.6.102-cbp.git.cfc9c473f.alnx4.aarch64.rpm
+perf-debuginfo-6.6.102-cbp.git.cfc9c473f.alnx4.aarch64.rpm
+python3-perf-6.6.102-cbp.git.cfc9c473f.alnx4.aarch64.rpm
+python3-perf-debuginfo-6.6.102-cbp.git.cfc9c473f.alnx4.aarch64.rpm
+
+Example:
+  KERNEL_REPO_URL=http://example/alinux4-kernel/aarch64/ ./bfb-build alinux 9-bf4
+EOF
+	exit 1
+fi
+
+if [ -z "$DOCKER_IMAGE_URL" ]; then
+	cat << EOF
+ERROR: DOCKER_IMAGE_URL is required.
+
+Set DOCKER_IMAGE_URL to the aarch64 base container image used as FROM in the Dockerfile
+
+Example:
+  DOCKER_IMAGE_URL=/path/to/alinux:4.0-no-kernel ./bfb-build alinux 4-bf4
+EOF
+	exit 1
+fi
+
+WDIR=/tmp/${DISTRO}${DISTRO_VERSION}.$$
+
+mkdir -p $WDIR
+
+cp -a \
+	Dockerfile \
+	create_bfb \
+	install.sh \
+	repos \
+	10-mlx-console-messages.conf \
+	../../common-bf4/tools/qemu-aarch64-static \
+	$WDIR
+
+cp -a ../../common-bf4/install.env $WDIR
+
+cd $WDIR
+
+echo -e "[doca] \n\
+name=Nvidia DOCA repository \n\
+baseurl=$DOCA_REPO_URL \n\
+gpgcheck=0 \n\
+enabled=1 \n\
+priority=1" > $WDIR/repos/doca.repo
+
+echo -e "[kernel] \n\
+name=Alinux4-BF4 kernel repository \n\
+baseurl=$KERNEL_REPO_URL \n\
+gpgcheck=0 \n\
+enabled=1 \n\
+priority=1" > $WDIR/repos/kernel.repo
+
+docker_image=bfb_runtime_${DISTRO,,}${DISTRO_VERSION,,}
+
+docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION} 2> /dev/null || true
+
+
+docker build -t ${docker_image} \
+	--build-arg DOCKER_IMAGE_URL=${DOCKER_IMAGE_URL} \
+	-f Dockerfile .
+
+DOCKER_RUN_PARAMS="--privileged -e container=docker \
+	-v $PWD:/workspace \
+	--name BlueField_OS_${DISTRO}_${DISTRO_VERSION}${DISTRO_KERNEL} \
+	--mount type=bind,source=/dev,target=/dev \
+	--mount type=bind,source=/sys,target=/sys \
+	--mount type=bind,source=/proc,target=/proc"
+
+if [ "X${LEAVE_CONTAINER}" == "Xyes" ]; then
+	DOCKER_RUN_PARAMS="-d -it ${DOCKER_RUN_PARAMS}"
+	docker_id=$(docker run ${DOCKER_RUN_PARAMS} \
+		${docker_image} /bin/bash)
+	docker exec -it ${docker_id} /bin/bash -x /root/workspace/create_bfb
+else
+	DOCKER_RUN_PARAMS="-t --rm ${DOCKER_RUN_PARAMS}"
+	docker run ${DOCKER_RUN_PARAMS} \
+		${docker_image} /bin/bash -x /root/workspace/create_bfb
+fi
+
+echo "Default root password is: alinux"
+
+if [ "X${LEAVE_CONTAINER}" == "Xyes" ]; then
+	echo "Container name: BlueField_OS_${DISTRO}_${DISTRO_VERSION} id: ${docker_id}"
+fi

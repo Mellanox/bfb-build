@@ -1,6 +1,178 @@
 #!/bin/bash
 
+###############################################################################
+#
+# Copyright 2026 NVIDIA Corporation
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+###############################################################################
 
-kernel=`/bin/ls -1tr /lib/modules | tail -1`
+# Values below are substituted by ubuntu/24.04/bfb-build before the image is built.
+CUSTOM_KERNEL="@CUSTOM_KERNEL@"
+CUSTOM_KERNEL_VERSION="@CUSTOM_KERNEL_VERSION@"
+OFED_SRC_TARBALL="@OFED_SRC_TARBALL@"
+OFED_KERNEL_EXTRA_ARGS='@OFED_KERNEL_EXTRA_ARGS@'
+OFED_INSTALL_EXTRA_ARGS='@OFED_INSTALL_EXTRA_ARGS@'
 
-/root/workspace/create_bfb -k $kernel
+SDIR=/root/workspace
+
+# Build MLNX_OFED under /tmp: create_bfb excludes ./tmp/* from the shipped
+# rootfs, so the source tree and build artifacts never reach the BFB.
+OFED_BUILD_DIR=${OFED_BUILD_DIR:-/tmp/ofed-rebuild}
+
+# Execute command w/ echo and exit if it fails
+ex()
+{
+	echo "+ $@"
+	if ! "$@"; then
+		printf "\nFailed executing $@\n\n"
+		exit 1
+	fi
+}
+
+# Pick the kernel the BFB will be built for.
+if [ -n "${CUSTOM_KERNEL_VERSION}" ]; then
+	kernel="${CUSTOM_KERNEL_VERSION}"
+else
+	kernel=`/bin/ls -1tr /lib/modules | tail -1`
+fi
+
+if [ "X${CUSTOM_KERNEL}" != "Xyes" ]; then
+	/root/workspace/create_bfb -k $kernel
+	exit $?
+fi
+
+###############################################################################
+# Custom kernel build
+#
+# The Dockerfile installed the customer's kernel .debs instead of the NVIDIA
+# BlueField kernel, and pulled doca-runtime-user / doca-devel-user so that no
+# prebuilt (kernel-version-pinned) DOCA kernel modules were installed.
+#
+# MLNX_OFED must now be rebuilt from source against that kernel. BlueField SoC
+# drivers (tmfifo, mlxbf-gige, gpio-mlxbf, i2c-mlxbf, mlxbf-pmc, pinctrl-mlxbf3,
+# pwr-mlxbf, sdhci-of-dwcmshc, ...) are NOT rebuilt here: on Ubuntu 22.04/24.04
+# they ship inside the kernel itself, so a kernel derived from the BlueField
+# kernel source already carries them.
+###############################################################################
+
+echo "==============================================================="
+echo " Custom kernel BFB build"
+echo " kernel          : ${kernel}"
+echo " MLNX_OFED source: ${OFED_SRC_TARBALL}"
+echo "==============================================================="
+
+if [ ! -d /lib/modules/${kernel} ]; then
+	echo "ERROR: /lib/modules/${kernel} does not exist."
+	echo "Kernels present in this image:"
+	/bin/ls -1 /lib/modules
+	echo "Set CUSTOM_KERNEL_VERSION to select one explicitly."
+	exit 1
+fi
+
+if [ ! -e /lib/modules/${kernel}/build ]; then
+	echo "ERROR: kernel build tree missing: /lib/modules/${kernel}/build"
+	echo "MLNX_OFED cannot be compiled without it. Make sure the matching"
+	echo "linux-headers .deb is included in CUSTOM_KERNEL_DEBS."
+	exit 1
+fi
+
+nkernels=`/bin/ls -1 /lib/modules | wc -l`
+if [ "$nkernels" != "1" ]; then
+	echo "WARNING: more than one kernel is present in /lib/modules:"
+	/bin/ls -1 /lib/modules
+	echo "WARNING: building MLNX_OFED against '${kernel}'."
+	echo "WARNING: set CUSTOM_KERNEL_VERSION if that is not the intended one."
+fi
+
+if [ ! -e "${SDIR}/${OFED_SRC_TARBALL}" ]; then
+	echo "ERROR: MLNX_OFED source tarball not found: ${SDIR}/${OFED_SRC_TARBALL}"
+	exit 1
+fi
+
+mkdir -p ${OFED_BUILD_DIR}
+cd ${OFED_BUILD_DIR}
+
+ex tar xzf ${SDIR}/${OFED_SRC_TARBALL}
+
+# NOTE: MLNX_OFED_SRC-debian-<ver>.tgz extracts into a directory WITHOUT
+# 'debian' in its name (MLNX_OFED_SRC-<ver>/), so discover it rather than
+# deriving it from the tarball filename.
+ofed_srcdir=`/bin/ls -1d ${OFED_BUILD_DIR}/MLNX_OFED_SRC-* ${OFED_BUILD_DIR}/OFED-internal-* 2>/dev/null | head -1`
+
+if [ -z "${ofed_srcdir}" ] || [ ! -x "${ofed_srcdir}/install.pl" ]; then
+	echo "ERROR: could not find install.pl in the extracted MLNX_OFED source."
+	echo "Contents of ${OFED_BUILD_DIR}:"
+	/bin/ls -1 ${OFED_BUILD_DIR}
+	exit 1
+fi
+
+echo "MLNX_OFED source directory: ${ofed_srcdir}"
+
+# Build (do not install) the kernel-space DEBs against the custom kernel.
+#   --kernel-only   build kernel space packages only
+#   --without-dkms  build binaries for this exact kernel instead of DKMS
+#   --build-only    produce DEBs without installing them
+ex ${ofed_srcdir}/install.pl \
+	--kernel-only \
+	--without-dkms \
+	--build-only \
+	-k ${kernel} \
+	-s /lib/modules/${kernel}/build \
+	--kernel-extra-args "${OFED_KERNEL_EXTRA_ARGS}" \
+	${OFED_INSTALL_EXTRA_ARGS}
+
+ofed_debs=`find ${ofed_srcdir}/DEBS -name '*.deb' ! -name '*dbg*' ! -name '*debuginfo*' 2>/dev/null`
+
+if [ -z "${ofed_debs}" ]; then
+	echo "ERROR: MLNX_OFED build produced no .deb packages under ${ofed_srcdir}/DEBS"
+	exit 1
+fi
+
+echo "Installing rebuilt MLNX_OFED packages:"
+echo "${ofed_debs}" | sed -e 's|.*/|  |'
+
+dpkg -i --force-overwrite ${ofed_debs} || apt install -y -f
+if [ $? -ne 0 ]; then
+	echo "ERROR: failed to install the rebuilt MLNX_OFED packages"
+	exit 1
+fi
+
+ex depmod -a ${kernel}
+
+# openibd must load the freshly built MLNX_OFED modules.
+if [ -e /etc/infiniband/openib.conf ]; then
+	ex sed -i -e "s/FORCE_MODE=.*/FORCE_MODE=yes/" /etc/infiniband/openib.conf
+fi
+
+# Guard: nothing built for a different kernel may ship in the BFB. Such modules
+# would silently fail to load on the DPU, so fail the build loudly instead.
+stale=$(dpkg-query -W -f='${Package} ${Version}\n' 2>/dev/null | grep 'kver\.' | grep -v "kver\.${kernel}\b" || true)
+if [ -n "${stale}" ]; then
+	echo "ERROR: packages built for a different kernel are installed:"
+	echo "${stale}" | sed -e 's/^/  /'
+	echo ""
+	echo "These would not load on '${kernel}'. Either add them to the MLNX_OFED"
+	echo "rebuild set, or prevent them from being installed in the Dockerfile."
+	exit 1
+fi
+
+/usr/sbin/update-pciids || true
+
+ex /root/workspace/create_bfb -k ${kernel}

@@ -30,6 +30,25 @@ BFB="${BFB:-/lib/firmware/mellanox/boot/default.bfb}"
 CAPSULE="${CAPSULE:-/lib/firmware/mellanox/boot/capsule/boot_update2.cap}"
 kernel=$(/bin/ls -1 /lib/modules/ | head -1)
 
+# build_ubuntu_bfb has always passed '-k <kernel>' here, but the option was not
+# parsed and the alphabetically-first entry above was used instead. That is
+# harmless while exactly one kernel is installed, but selects the wrong one for
+# custom kernel builds, so honour the argument.
+while [ $# -gt 0 ]; do
+	case "$1" in
+		-k|--kernel)
+			if [ -n "${2:-}" ]; then
+				kernel="$2"
+				shift
+			fi
+			shift
+			;;
+		*)
+			shift
+			;;
+	esac
+done
+
 SCRIPTS_DIR=$(dirname $0)
 
 WDIR=${WDIR:-/root/workspace/bfb}

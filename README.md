@@ -106,6 +106,62 @@ MLNX_OFED driver packages and other BlueField SoC drivers.
 The relevant source packages are available under
 https://linux.mellanox.com/public/repo/bluefield/latest/extras/.
 
+### Ubuntu 24.04: built-in custom kernel support
+
+`ubuntu/24.04` can do this for you. Put your kernel `.deb` packages in a
+directory and set `CUSTOM_KERNEL=yes`:
+
+````
+CUSTOM_KERNEL=yes \
+CUSTOM_KERNEL_DEBS=/path/to/my-kernel-debs \
+./bfb-build ubuntu 24.04
+````
+
+The directory must contain at least `linux-image-*`, `linux-modules-*` and the
+matching `linux-headers-*` packages. The headers are required: MLNX_OFED is
+compiled against `/lib/modules/<kernel>/build`.
+
+What this changes compared to a default build:
+
+- the NVIDIA BlueField kernel pinned in `ubuntu/24.04/kernel-packages` is not
+  installed; your packages are installed instead
+- `doca-runtime-user` / `doca-devel-user` are installed instead of
+  `doca-runtime` / `doca-devel`. These pull the complete DOCA user space but
+  none of the prebuilt, kernel-version-pinned DOCA kernel modules
+  (`doca-runtime = doca-runtime-kernel + doca-runtime-user`)
+- MLNX_OFED is rebuilt from source against your kernel and installed, before
+  `create_bfb` packs the root filesystem
+
+BlueField SoC drivers (`mlxbf-tmfifo`, `mlxbf-gige`, `gpio-mlxbf*`, `i2c-mlxbf`,
+`mlxbf-pmc`, `pinctrl-mlxbf3`, `pwr-mlxbf`, `sdhci-of-dwcmshc`, ...) are **not**
+rebuilt. On Ubuntu 22.04 and 24.04 they are part of the kernel itself, so a
+kernel derived from the BlueField kernel source already contains them. This is
+the main difference from the RPM based flow described below.
+
+Additional variables:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CUSTOM_KERNEL` | `no` | set to `yes` to enable the custom kernel flow |
+| `CUSTOM_KERNEL_DEBS` | - | directory holding the kernel `.deb` files |
+| `CUSTOM_KERNEL_VERSION` | auto-detect | kernel release string, e.g. `6.8.0-1022-bluefield`. Set it when more than one kernel ends up installed |
+| `MLNX_OFED_SRC_URL` | `<BASE_URL>/bluefield/<BSP>/extras/mlnx_ofed/MLNX_OFED_SRC-debian-<ver>.tgz` | MLNX_OFED debian sources |
+| `MLNX_OFED_SRC_LOCAL` | - | use an already-downloaded tarball instead of fetching it |
+| `OFED_KERNEL_EXTRA_ARGS` | BlueField DPU flag set | passed to the MLNX_OFED kernel configure script |
+| `OFED_INSTALL_EXTRA_ARGS` | - | extra `install.pl` flags, e.g. `--without-depcheck` |
+
+MLNX_OFED sources are not published for every BSP version. If the download
+fails, point `MLNX_OFED_SRC_URL` at a version that is published under
+`https://linux.mellanox.com/public/repo/bluefield/<bsp>/extras/mlnx_ofed/`, or
+supply a local copy with `MLNX_OFED_SRC_LOCAL`.
+
+The resulting image and container are suffixed with `_custom_kernel`, so a
+custom kernel build does not overwrite a default one.
+
+The two modes are generated from a single `ubuntu/24.04/Dockerfile.j2` template.
+The committed `ubuntu/24.04/Dockerfile` is the default-mode rendering of that
+template, so default builds work unchanged and do not require Jinja2. Rendering
+the custom kernel variant requires `python3-jinja2`.
 
 **Example for RPM based Distros:**
 The following steps can be added to the Dockerfile based on the real kernel and

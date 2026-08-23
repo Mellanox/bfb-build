@@ -101,8 +101,9 @@ RUN dnf -y install systemd && \
     && \
     dnf -y clean all && \
     rm -rf /var/cache/* && \
-    echo "PasswordAuthentication yes" >> /etc/ssh/sshd_config && \
-    echo "PermitRootLogin yes" >> /etc/ssh/sshd_config
+    mkdir -p /etc/ssh/sshd_config.d && \
+    echo 'PermitRootLogin yes' > /etc/ssh/sshd_config.d/00-nvidia-bf.conf && \
+    echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config.d/00-nvidia-bf.conf
 
 # Manage services
 RUN systemctl enable set_emu_param.service || true

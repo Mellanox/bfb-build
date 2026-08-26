@@ -42,7 +42,8 @@ RELEASE_DIR_SUFFIX=${RELEASE_DIR_SUFFIX:-""}
 ARCH=${ARCH:-"arm64-dpu"}
 LEAVE_CONTAINER=${LEAVE_CONTAINER:-"no"}
 
-DOCA_REPO_URL=${DOCA_REPO_URL:-"https://linux.mellanox.com/public/repo/doca/3.3.0-bf4-beta1/ol9/arm64-dpu/"}
+DOCA_REPO_URL=${DOCA_REPO_URL:-"https://linux.mellanox.com/public/repo/doca/3.3.0-bf4-dev-drop1/ol9/arm64-dpu/"}
+echo "DOCA_REPO_URL: ${DOCA_REPO_URL}"
 
 if [ -z "$RDMA_REPO_URL" ]; then
 	cat << EOF

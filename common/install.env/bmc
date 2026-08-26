@@ -29,6 +29,7 @@ UPDATE_CEC_FW=${UPDATE_CEC_FW:-"yes"}
 BMC_INSTALLED_VERSION=""
 BMC_MIN_MULTIPART_VERSION="24.04"
 BMC_MIN_MULTIPART_VERSION_PLDM="25.10"
+GI_INVENTORY_TIMEOUT=${GI_INVENTORY_TIMEOUT:-300}
 CEC_MIN_RESET_VERSION="00.02.0180.0000"
 UPDATE_DPU_GOLDEN_IMAGE=${UPDATE_DPU_GOLDEN_IMAGE:-"yes"}
 UPDATE_NIC_FW_GOLDEN_IMAGE=${UPDATE_NIC_FW_GOLDEN_IMAGE:-"yes"}
@@ -102,7 +103,7 @@ export BMC_TOKEN=""
 export task_id=""
 export task_state=""
 export task_status=""
-BMC_EXTRACTION_DONE=0
+export BMC_EXTRACTION_DONE=0
 
 SSH="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
 SCP="scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
@@ -240,17 +241,33 @@ create_vlan()
 			sleep 1
 		done
 		ilog "VLAN4040 interface is UP."
-		ilog "Running: dhclient -e METRIC=1025 -e IF_METRIC=1025 vlan4040"
-		output=$(dhclient -e METRIC=1025 -e IF_METRIC=1025 vlan4040 2>&1)
-		rc=$?
-		ilog "$output"
+		if command -v dhclient > /dev/null 2>&1; then
+			ilog "Running: dhclient -e METRIC=1025 -e IF_METRIC=1025 vlan4040"
+			output=$(dhclient -e METRIC=1025 -e IF_METRIC=1025 vlan4040 2>&1)
+			rc=$?
+			ilog "$output"
+		elif command -v dhcpcd > /dev/null 2>&1; then
+			# RHEL 10 dropped ISC dhclient; dhcpcd is its replacement.
+			# --noipv4ll: never self-assign a 169.254.x.x link-local address --
+			# otherwise dhcpcd "succeeds" with IPv4LL when the BMC's DHCP is slow,
+			# $BMC_IP stays unreachable and create_vlan times out (Redmine #5153053).
+			# -1: one-shot -- exit once configured so the daemon does not linger
+			# and reconfigure vlan4040 after the static-IP fallback below.
+			ilog "Running: dhcpcd -1 -m 1025 --noipv4ll vlan4040"
+			output=$(dhcpcd -1 -m 1025 --noipv4ll vlan4040 2>&1)
+			rc=$?
+			ilog "$output"
+		else
+			ilog "no DHCP client (dhclient/dhcpcd) available; using static IP for vlan4040"
+			rc=1
+		fi
 		sleep 5
 		ilog "$(ip addr show vlan4040 2>&1)"
 		if (ping -c 3 $BMC_IP > /dev/null 2>&1); then
 			break
 		fi
 		if [ $rc -ne 0 ]; then
-			ilog "dhclient failed"
+			ilog "DHCP client failed; falling back to static IP"
 			ilog "Configuring static IP: ${OOB_IP}/${OOB_NETPREFIX} for vlan4040"
 			ip addr add ${OOB_IP}/${OOB_NETPREFIX} brd + dev vlan4040
 			ilog "$(ip addr show vlan4040 2>&1)"
@@ -508,31 +525,26 @@ extract_images()
 		return
 	fi
 
-	if [ -d ./usr/lib/firmware/mellanox/bmc ]; then
+	BMC_EXTRACTION_DONE=1
+
+	if [ -d ${BMC_BASE_DIR}/usr/lib/firmware/mellanox/bmc ]; then
 		ilog "BMC and CEC files are already extracted"
-		BMC_EXTRACTION_DONE=1
 		return
 	fi
 
 	if [ "$distro" == "Debian" ]; then
 		ilog "Extracting BMC files to /tmp"
 		BMC_BASE_DIR=/tmp
-		cd $BMC_BASE_DIR
 	fi
 
 	if [ ! -f $fspath/image.tar.xz ]; then
-		# No image.tar.xz file found (bf-fwbindl case)
-		BMC_EXTRACTION_DONE=1
+		# No image.tar.xz file found (bf-fwbundle case)
 		return
 	fi
 
 	ilog "Extracting BMC files from $fspath/image.tar.xz"
-	ilog "$(tar Jxf $fspath/image.tar.xz --warning=no-timestamp ./usr/lib/firmware/mellanox/{bmc,cec}/ 2>&1)"
-	ilog "Extracted BMC files to $(readlink -f ./usr/lib/firmware/mellanox/ 2>&1)"
-	BMC_EXTRACTION_DONE=1
-	if [ "$distro" == "Debian" ]; then
-		cd -
-	fi
+	ilog "$(tar Jxf $fspath/image.tar.xz --warning=no-timestamp -C ${BMC_BASE_DIR} ./usr/lib/firmware/mellanox/{bmc,cec}/ 2>&1)"
+	ilog "Extracted BMC files to $(readlink -f ${BMC_BASE_DIR}/usr/lib/firmware/mellanox/ 2>&1)"
 }
 
 get_bmc_firmware_version()
@@ -547,6 +559,29 @@ get_bmc_firmware_version()
 		return 1
 	fi
 	ilog "Running BMC firmware version: $BMC_INSTALLED_VERSION"
+}
+
+# Wait for a golden-image device in FirmwareInventory before update
+wait_for_fw_inventory_device()
+{
+	local device="$1"
+	local timeout="${2:-$GI_INVENTORY_TIMEOUT}"
+	ilog "Waiting for FW inventory device '$device' (timeout ${timeout}s)"
+	SECONDS=0
+	while true; do
+		get_bmc_token
+		if curl -sSk -H "X-Auth-Token: $BMC_TOKEN" -X GET \
+			https://${BMC_IP}/redfish/v1/UpdateService/FirmwareInventory 2>/dev/null \
+			| jq -r '.Members[]."@odata.id"' | grep -q "/${device}$"; then
+			ilog "FW inventory device '$device' present after ${SECONDS}s"
+			return 0
+		fi
+		if [ $SECONDS -gt $timeout ]; then
+			log "ERR Timeout waiting for FW inventory device '$device' after ${SECONDS}s"
+			return 1
+		fi
+		sleep 10
+	done
 }
 
 update_bmc_fw()
@@ -902,6 +937,7 @@ update_dpu_golden_image()
 
 		if [[ $(echo -e "${BMC_MIN_MULTIPART_VERSION_PLDM}\n${BMC_INSTALLED_VERSION}" | sort -V | head -n1) == "${BMC_MIN_MULTIPART_VERSION_PLDM}" ]]; then
 			ilog "curl -k -H \"X-Auth-Token: <BMC_TOKEN>\" -X POST https://${BMC_IP}/redfish/v1/UpdateService/update-multipart  -F 'UpdateParameters={};type=application/json'  -F \"UpdateFile=@${image};type=application/octet-stream\""
+			wait_for_fw_inventory_device golden_image_arm
 			output=$(curl -sSk -H "X-Auth-Token: $BMC_TOKEN" -X POST https://${BMC_IP}/redfish/v1/UpdateService/update-multipart  -F 'UpdateParameters={};type=application/json'  -F "UpdateFile=@${image};type=application/octet-stream" 2>&1)
 			ilog "DPU Golden Image update: $output"
 			if (echo $output | grep -q "internal service error"); then
@@ -1015,6 +1051,7 @@ update_nic_firmware_golden_image()
 
 		if [[ $(echo -e "${BMC_MIN_MULTIPART_VERSION_PLDM}\n${BMC_INSTALLED_VERSION}" | sort -V | head -n1) == "${BMC_MIN_MULTIPART_VERSION_PLDM}" ]]; then
 			ilog "curl -k -H \"X-Auth-Token: <BMC_TOKEN>\" -X POST https://${BMC_IP}/redfish/v1/UpdateService/update-multipart  -F 'UpdateParameters={};type=application/json'  -F \"UpdateFile=@${image};type=application/octet-stream\""
+			wait_for_fw_inventory_device golden_image_nic
 			output=$(curl -sSk -H "X-Auth-Token: $BMC_TOKEN" -X POST https://${BMC_IP}/redfish/v1/UpdateService/update-multipart  -F 'UpdateParameters={};type=application/json'  -F "UpdateFile=@${image};type=application/octet-stream" 2>&1)
 			ilog "NIC firmware Golden Image update: $output"
 			if (echo $output | grep -q "internal service error"); then

@@ -128,9 +128,6 @@ RUN apt-get clean -y && \
 #DOCA Packages
         doca-runtime \
         doca-devel \
-        libxlio \
-        libxlio-dev \
-        libxlio-utils \
         strongswan \
         ${MLNX_FW_UPDATER} \
         ${BMC_FW_PACKAGES} \

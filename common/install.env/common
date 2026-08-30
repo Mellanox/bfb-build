@@ -3,20 +3,45 @@ RC=0
 err_msg=""
 export LC_ALL=C
 
-logfile=${distro}.installation.log
-LOG=/tmp/$logfile
+# Get the local (inbox) NVMe device on BlueField.
+# On JBOF systems, multiple external NVMe drives are connected via a PCIe
+# switch with longer PCI topology paths. The local NVMe is directly attached
+# to the SoC root complex and has the shortest PCI device path (fewest hops).
+# Falls back to the traditional sort-by-name if sysfs paths are unavailable.
+get_local_nvme()
+{
+	local shortest=""
+	local min_depth=999
+	for ctrl in /sys/class/nvme/nvme*; do
+		[ -e "$ctrl/device" ] || continue
+		local devpath=$(readlink -f "$ctrl/device")
+		local depth=$(echo "$devpath" | grep -o "0000:" | wc -l)
+		if [ "$depth" -lt "$min_depth" ]; then
+			min_depth=$depth
+			shortest=$(basename "$ctrl")
+		fi
+	done
+	if [ -n "$shortest" ] && [ -b "/dev/${shortest}n1" ]; then
+		echo "${shortest}n1"
+	else
+		echo "$(cd /sys/block; /bin/ls -1d nvme* 2>/dev/null | sort -V | tail -1)"
+	fi
+}
 
-fspath=$(readlink -f "$(dirname $0)")
+logfile=${distro}.installation.log
+export LOG=/tmp/$logfile
+
+export fspath=$(readlink -f "$(dirname $0)")
 
 SUPPORTED_DEVICES=${SUPPORTED_DEVICES:-"a2d[26cf]"}
 
-cx_pcidev=$(lspci -nD 2> /dev/null | grep -E "$SUPPORTED_DEVICES" | awk '{print $1}' | head -1)
-cx_dev_id=$(lspci -nD -s ${cx_pcidev} 2> /dev/null | awk -F ':' '{print strtonum("0x" $NF)}')
-pciids=$(lspci -nD 2> /dev/null | grep -E "$SUPPORTED_DEVICES" | awk '{print $1}')
-dpu_part_number=$(mstflint -d $cx_pcidev q full | grep "Part Number:" | awk '{print $NF}')
-PSID=$(mstflint -d $cx_pcidev q | grep PSID | awk '{print $NF}')
-BD_PSIDS=${BD_PSIDS:-"BD_0000000004 BD_0000000005"}
-OCI_PSIDS=${OCI_PSIDS:-"ORC0000000012"}
+export cx_pcidev=$(lspci -nD 2> /dev/null | grep -E "$SUPPORTED_DEVICES" | awk '{print $1}' | head -1)
+export cx_dev_id=$(lspci -nD -s ${cx_pcidev} 2> /dev/null | awk -F ':' '{print strtonum("0x" $NF)}')
+export pciids=$(lspci -nD 2> /dev/null | grep -E "$SUPPORTED_DEVICES" | awk '{print $1}')
+export dpu_part_number=$(mstflint -d $cx_pcidev q full | grep "Part Number:" | awk '{print $NF}')
+export PSID=$(mstflint -d $cx_pcidev q | grep PSID | awk '{print $NF}')
+export BD_PSIDS=${BD_PSIDS:-"BD_0000000004 BD_0000000005"}
+export OCI_PSIDS=${OCI_PSIDS:-"ORC0000000012"}
 BSP_MIN_DDR_VERSION=${MIN_BSP_DDR_VERSION:-"4.13.0.13925"}
 SYS_ENABLE_DDR5600=${SYS_ENABLE_DDR5600:-"FALSE"}
 DEVICE_TIMEOUT=${DEVICE_TIMEOUT:-30}
@@ -384,6 +409,11 @@ fi
 				# Set ENABLE_DDR5600 to False
 				ilog "Setting SYS_ENABLE_DDR5600=${SYS_ENABLE_DDR5600}"
 				echo SYS_ENABLE_DDR5600=${SYS_ENABLE_DDR5600} >> /etc/bf.cfg
+				# Create /boot/efi/DisableDdr5600 for ATF/UEFI to pickup on the first boot
+				if [ "${SYS_ENABLE_DDR5600}" == "FALSE" ]; then
+					ilog "Creating /boot/efi/DisableDdr5600"
+					touch /mnt/boot/efi/DisableDdr5600
+				fi
 			fi
 		fi
 	fi
@@ -451,7 +481,7 @@ erase_partitions()
 			log "INFO: Erasing NVME drive: $device"
 			nvme format -s1 $device -f
 		else
-			nvme_device="$(cd /sys/block; /bin/ls -1d nvme* | sort -V | tail -1)"
+			nvme_device="$(get_local_nvme)"
 			if [ ! -z "$nvme_device" ]; then
 				log "INFO: Erasing NVME drive: /dev/$nvme_device"
 				nvme format -s1 /dev/$nvme_device -f
@@ -468,8 +498,8 @@ prepare_target_partitions()
 	if [ "$SHRED_DRIVES" == "yes" ]; then
 		if [ -x /usr/bin/shred ]; then
 			if [ -b /dev/nvme0n1 ]; then
-				log "Shredding /dev/$(cd /sys/block; /bin/ls -1d nvme* | sort -V | tail -1)"
-				shred -n 1 -v "/dev/$(cd /sys/block; /bin/ls -1d nvme* | sort -V | tail -1)" &
+				log "Shredding /dev/$(get_local_nvme)"
+				shred -n 1 -v "/dev/$(get_local_nvme)" &
 			fi
 			if [ -b /dev/mmcblk0 ]; then
 				log "Shredding /dev/mmcblk0"
@@ -665,14 +695,73 @@ EOF
 	/bin/rm -f /mnt/boot/vmlinux-*.bz2
 }
 
+# RHEL 10 removed NetworkManager's ifcfg-rh plugin and the ISC dhclient, so the
+# legacy ifcfg / dhclient.conf config for the OOB management interface is silently
+# ignored: oob_net0 never gets a connection profile, never receives a DHCP lease,
+# and the SoC boots with the systemd default hostname "localhost". Emit an NM
+# keyfile for oob_net0 so NetworkManager's internal DHCP client brings it up and
+# sets the hostname from DHCP (static /etc/hostname is removed at install time).
+nm_keyfiles_required()
+{
+	[ "$distro" = "RedHat" ] || return 1
+	local ver
+	ver=$( . /mnt/etc/os-release 2>/dev/null; echo "${VERSION_ID%%.*}" )
+	[ "${ver:-0}" -ge 10 ] 2>/dev/null
+}
+
+write_nm_keyfile()
+{
+	local interface="$1"
+	# Default to DHCP (oob_net0); callers may override the [ipv4]/[ipv6] bodies
+	# (e.g. tmfifo_net0's static RShim address).
+	local ipv4_body="${2:-method=auto}"
+	local ipv6_body="${3:-method=auto
+addr-gen-mode=eui64}"
+	local dir=/mnt/etc/NetworkManager/system-connections
+	mkdir -p "$dir"
+	cat > "${dir}/${interface}.nmconnection" << EOF
+[connection]
+id=${interface}
+type=ethernet
+interface-name=${interface}
+autoconnect=true
+
+[ipv4]
+${ipv4_body}
+
+[ipv6]
+${ipv6_body}
+EOF
+	chmod 600 "${dir}/${interface}.nmconnection"
+	ilog "Created NM keyfile for ${interface}: /etc/NetworkManager/system-connections/${interface}.nmconnection"
+}
+
 configure_network()
 {
 	ilog "Configure network for SF interfaces:"
+
+	# RHEL 10: NetworkManager only honors keyfiles, so the legacy ifcfg for the
+	# management interfaces is ignored. Emit keyfiles so they come up: oob_net0
+	# DHCPs (and supplies the hostname); tmfifo_net0 uses its static RShim address
+	# (Redmine #5125303). These are management interfaces, independent of the SF
+	# data ports, so emit them before the num_ports early return. The SF/data
+	# interfaces' managed policy is left as-is.
+	if nm_keyfiles_required; then
+		write_nm_keyfile oob_net0
+		write_nm_keyfile tmfifo_net0 \
+"method=manual
+address1=192.168.100.2/30,192.168.100.1
+dns=192.168.100.1;
+route-metric=1025" \
+"method=disabled"
+	fi
+
 	num_ports=$(lspci -nD 2> /dev/null | grep -E "$SUPPORTED_DEVICES" | wc -l)
 	if [ $num_ports -lt 1 ]; then
 		ilog "No network interfaces found"
 		return
 	fi
+
 	for port in $(seq 1 $num_ports); do
 		p=$((port - 1))
 		interface="enp3s0f${p}s0"
@@ -1179,7 +1268,7 @@ UPDATE_ATF_UEFI=${UPDATE_ATF_UEFI:-"yes"}
 UPDATE_DPU_OS=${UPDATE_DPU_OS:-"yes"}
 UPGRADE_EMMC_FIRMWARE=${UPGRADE_EMMC_FIRMWARE:-"yes"}
 WITH_NIC_FW_UPDATE=${WITH_NIC_FW_UPDATE:-"yes"}
-NIC_FW_UPDATE_PASSED=0
+export NIC_FW_UPDATE_PASSED=0
 
 total_weight=0
 current_progress=0

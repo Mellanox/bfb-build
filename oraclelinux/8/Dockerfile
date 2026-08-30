@@ -61,8 +61,8 @@ RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
         kexec-tools \
         kernel-rpm-macros \
         kmod \
-        kubeadm \
-        kubelet \
+        kubeadm-1.34.1 \
+        kubelet-1.34.1 \
         kubernetes-cni \
         libbsd \
         libibverbs \
@@ -142,7 +142,8 @@ RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
         iwpmd \
         libibumad \
         libibverbs \
-        libibverbs-devel \
+        libibverbs-unsupported \
+        libibverbs-unsupported-devel \
         libibverbs-utils \
         librdmacm \
         librdmacm-utils \

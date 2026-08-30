@@ -31,19 +31,19 @@ RUN apt remove -y --purge $(dpkg --list "*openipmi*" | grep openipmi | awk '{pri
 RUN mkdir -p /run/systemd; echo docker > /run/systemd/container
 
 RUN apt install -y -f \
-	linux-bluefield=5.15.0.1093.95 \
-	linux-bluefield-cloud-tools-common=5.15.0-1093.95 \
-	linux-bluefield-headers-5.15.0-1093=5.15.0-1093.95 \
-	linux-bluefield-tools-5.15.0-1093=5.15.0-1093.95 \
-	linux-buildinfo-5.15.0-1093-bluefield=5.15.0-1093.95 \
-	linux-headers-5.15.0-1093-bluefield=5.15.0-1093.95 \
-	linux-headers-bluefield=5.15.0.1093.95 \
-	linux-image-5.15.0-1093-bluefield=5.15.0-1093.95 \
-	linux-image-bluefield=5.15.0.1093.95 \
-	linux-modules-5.15.0-1093-bluefield=5.15.0-1093.95 \
-	linux-modules-extra-5.15.0-1093-bluefield=5.15.0-1093.95 \
-	linux-tools-5.15.0-1093-bluefield=5.15.0-1093.95 \
-	linux-tools-bluefield=5.15.0.1093.95
+	linux-bluefield=5.15.0.1099.101 \
+	linux-bluefield-cloud-tools-common=5.15.0-1099.101 \
+	linux-bluefield-headers-5.15.0-1099=5.15.0-1099.101 \
+	linux-bluefield-tools-5.15.0-1099=5.15.0-1099.101 \
+	linux-buildinfo-5.15.0-1099-bluefield=5.15.0-1099.101 \
+	linux-headers-5.15.0-1099-bluefield=5.15.0-1099.101 \
+	linux-headers-bluefield=5.15.0.1099.101 \
+	linux-image-5.15.0-1099-bluefield=5.15.0-1099.101 \
+	linux-image-bluefield=5.15.0.1099.101 \
+	linux-modules-5.15.0-1099-bluefield=5.15.0-1099.101 \
+	linux-modules-extra-5.15.0-1099-bluefield=5.15.0-1099.101 \
+	linux-tools-5.15.0-1099-bluefield=5.15.0-1099.101 \
+	linux-tools-bluefield=5.15.0.1099.101
 
 RUN apt-get clean -y && \
     apt-get update -o "Acquire::https::Verify-Peer=false" -y && \
@@ -64,6 +64,7 @@ RUN apt-get clean -y && \
         bridge-utils \
         bsdextrautils \
         build-essential \
+        cd-boot-images-arm64 \
         conntrack \
         containerd \
         cri-tools \
@@ -138,6 +139,7 @@ RUN apt-get clean -y && \
         uuid-runtime \
         vim \
         watchdog \
+        xorriso \
         xxd \
         zip \
         zstd \

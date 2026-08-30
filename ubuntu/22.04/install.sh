@@ -60,6 +60,7 @@ if [ ! -e /tmp/bfpxe.done ]; then touch /tmp/bfpxe.done; bfpxe; fi
 
 DUAL_BOOT="no"
 ROOTFS=${ROOTFS:-"ext4"}
+SET_EXT4_JOURNAL_DATA=${SET_EXT4_JOURNAL_DATA:-"yes"}
 
 if [ -e ${BDIR}/install.env/common ]; then
 	. ${BDIR}/install.env/common
@@ -87,7 +88,7 @@ fi
 
 default_device=/dev/mmcblk0
 if [ -b /dev/nvme0n1 ]; then
-	default_device="/dev/$(cd /sys/block; /bin/ls -1d nvme* | sort -V | tail -1)"
+	default_device="/dev/$(get_local_nvme)"
 fi
 device=${device:-"$default_device"}
 BOOT_PARTITION=${device}p1
@@ -243,7 +244,9 @@ mount_target_partition()
 	sync
 	sleep 1
 
-	tune2fs -o journal_data $ROOT_PARTITION
+	if [[ "X$ROOTFS" == "Xext4" && "X$SET_EXT4_JOURNAL_DATA" == "Xyes" ]]; then
+		tune2fs -o journal_data $ROOT_PARTITION
+	fi
 
 	mkdir -p /mnt
 	mount -t ${ROOTFS} $ROOT_PARTITION /mnt
@@ -320,7 +323,7 @@ EOF
 	# Remove /etc/hostname to get hostname from DHCP server
 	/bin/rm -f /mnt/etc/hostname
 
-	/bin/rm -f /mnt/var/lib/dbus/machine-id /etc/machine-id
+	/bin/rm -f /mnt/var/lib/dbus/machine-id /mnt/etc/machine-id
 	touch /mnt/var/lib/dbus/machine-id /mnt/etc/machine-id
 
 	perl -ni -e 'print unless /PasswordAuthentication no/' /mnt/etc/ssh/sshd_config
@@ -478,8 +481,11 @@ enable_sfc_hbn()
 	HUGEPAGE_COUNT=${HUGEPAGE_COUNT:-""}
 	CLOUD_OPTION=${CLOUD_OPTION:-""}
 	HBN_PROFILE=${HBN_PROFILE:-"default"}
+	HBN_CPU_CORE=${HBN_CPU_CORE:-""}
+	HBN_RAM_MEMORY=${HBN_RAM_MEMORY:-""}
+	OVS_CPU_CORE=${OVS_CPU_CORE:-""}
 	log "INFO: Installing SFC HBN environment"
-	ilog "$(BR_HBN_UPLINKS=${BR_HBN_UPLINKS} BR_HBN_REPS=${BR_HBN_REPS} BR_HBN_SFS=${BR_HBN_SFS} BR_SFC_UPLINKS=${BR_SFC_UPLINKS} BR_SFC_REPS=${BR_SFC_REPS} BR_SFC_SFS=${BR_SFC_SFS} BR_HBN_SFC_PATCH_PORTS=${BR_HBN_SFC_PATCH_PORTS} LINK_PROPAGATION=${LINK_PROPAGATION} ENABLE_BR_SFC=${ENABLE_BR_SFC} ENABLE_BR_SFC_DEFAULT_FLOWS=${ENABLE_BR_SFC_DEFAULT_FLOWS} HUGEPAGE_SIZE=${HUGEPAGE_SIZE} HUGEPAGE_COUNT=${HUGEPAGE_COUNT} CLOUD_OPTION=${CLOUD_OPTION} HBN_PROFILE=${HBN_PROFILE} chroot /mnt /opt/mellanox/sfc-hbn/install.sh ${ARG_PORT0} ${ARG_PORT1} 2>&1)"
+	ilog "$(BR_HBN_UPLINKS=${BR_HBN_UPLINKS} BR_HBN_REPS=${BR_HBN_REPS} BR_HBN_SFS=${BR_HBN_SFS} BR_SFC_UPLINKS=${BR_SFC_UPLINKS} BR_SFC_REPS=${BR_SFC_REPS} BR_SFC_SFS=${BR_SFC_SFS} BR_HBN_SFC_PATCH_PORTS=${BR_HBN_SFC_PATCH_PORTS} LINK_PROPAGATION=${LINK_PROPAGATION} ENABLE_BR_SFC=${ENABLE_BR_SFC} ENABLE_BR_SFC_DEFAULT_FLOWS=${ENABLE_BR_SFC_DEFAULT_FLOWS} HUGEPAGE_SIZE=${HUGEPAGE_SIZE} HUGEPAGE_COUNT=${HUGEPAGE_COUNT} CLOUD_OPTION=${CLOUD_OPTION} HBN_PROFILE=${HBN_PROFILE} HBN_CPU_CORE=${HBN_CPU_CORE} HBN_RAM_MEMORY=${HBN_RAM_MEMORY} OVS_CPU_CORE=${OVS_CPU_CORE} chroot /mnt /opt/mellanox/sfc-hbn/install.sh ${ARG_PORT0} ${ARG_PORT1} 2>&1)"
 	NIC_FW_RESET_REQUIRED=1
 }
 

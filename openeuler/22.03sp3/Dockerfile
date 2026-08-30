@@ -28,7 +28,7 @@ RUN echo 'excludepkgs=OpenIPMI network-scripts-openvswitch' >> /etc/dnf/dnf.conf
         audit \
         chrony \
         containerd.io \
-        cri-tools \
+        cri-tools-1.34.0 \
         cryptsetup \
         curl \
         dosfstools \

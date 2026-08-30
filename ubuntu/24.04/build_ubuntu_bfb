@@ -195,11 +195,18 @@ if [ -n "${missing}" ]; then
 	exit 1
 fi
 
-# Advisory: the rest of the initramfs driver list comes from the kernel itself.
-# Report anything absent rather than letting create_bfb drop it without a word.
+# Advisory: BlueField SoC drivers are not rebuilt here - on Ubuntu they ship
+# inside the kernel. Most are upstream, so a stock Ubuntu kernel carries them,
+# but not all: comparing linux-modules{,-extra} of 6.8.0-1022-bluefield against
+# stock 6.8.0-31-generic, the generic kernel lacks mlxbf-pka and ipmb_host.
+# (The OCP layer rebuilds exactly those two for RHCOS - same delta.)
+#
+# create_bfb and install.sh both drop unresolvable modules from the initramfs
+# without a word, so report them here instead of letting that happen silently.
 advisory=""
 for mod in mlxbf-bootctl mlxbf-tmfifo mlxbf-gige gpio-mlxbf2 gpio-mlxbf3 \
-	pinctrl-mlxbf3 i2c-mlxbf sdhci-of-dwcmshc dw_mmc-bluefield ipmb_host \
+	pinctrl-mlxbf3 i2c-mlxbf sdhci-of-dwcmshc dw_mmc-bluefield \
+	ipmb_host mlxbf_pka \
 	nvme nvme-rdma nvme-tcp ib_ipoib ib_iser ib_umad mlxfw
 do
 	if ! (modinfo -k ${kernel} $mod > /dev/null 2>&1); then
@@ -209,6 +216,10 @@ done
 if [ -n "${advisory}" ]; then
 	echo "WARNING: not provided by kernel ${kernel}:${advisory}"
 	echo "WARNING: create_bfb will omit these from the installer initramfs."
+	echo "WARNING: BlueField SoC driver sources are published per DOCA release at"
+	echo "WARNING:   ${BASE_URL:-https://linux.mellanox.com/public/repo}/doca/<doca>-<bsp>/SOURCES/SoC/"
+	echo "WARNING: each .src.rpm carries a source tarball with debian/ packaging,"
+	echo "WARNING: so it can be rebuilt for this kernel with dpkg-buildpackage."
 fi
 
 /usr/sbin/update-pciids || true

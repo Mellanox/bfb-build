@@ -90,7 +90,7 @@ for mod in mlxbf-bootctl dw_mmc dw_mmc-pltfm mmc_block dw_mmc-bluefield \
 	gpio-mlxbf2 gpio-mlxbf3 mlxbf-gige \
 	pinctrl-mlxbf3 8021q \
 	ipmi_devintf ipmb_host ipmi_ssif i2c-mlxbf \
-	nls_iso8859-1 $ADDON_KERNEL_MODULES
+	nls_iso8859-1 btrfs raid6_pq xor async_xor xor-neon $ADDON_KERNEL_MODULES
 do
 	if (modinfo -k $kernel $mod 2>/dev/null | grep "filename:" | grep -q builtin); then
 		continue
@@ -189,6 +189,9 @@ libpython3_minimal=$(dpkg -S /usr/lib/python3*/os.py | head -1 | cut -d ':' -f 1
 libpython3=$(dpkg -S /usr/lib/aarch64-linux-gnu/libpython3.*.so.1 | head -1 | cut -d ':' -f 1 | tr -d ',')
 python3_distutils=$(dpkg -S /usr/lib/python3.*/distutils | head -1 | cut -d ':' -f 1 | tr -d ',')
 python3_lib2to3=$(dpkg -S /usr/lib/python3.*/lib2to3 | head -1 | cut -d ':' -f 1 | tr -d ',')
+# python3.12+ removed distutils (and 3.13 removed lib2to3), so the lookups above
+# no longer resolve to the package holding the full stdlib. Resolve it directly:
+libpython3_stdlib=$(dpkg -S /usr/lib/python3*/shutil.py | head -1 | cut -d ':' -f 1 | tr -d ',')
 python_bin=$(readlink -f /usr/bin/python)
 python_deb=$(dpkg -S $python_bin | head -1 | cut -d ':' -f 1 | tr -d ',')
 python_ver=$(python -V | cut -d ' ' -f 2 | cut -d '.' -f1,2)
@@ -197,8 +200,8 @@ for deb in mlxbf-scripts mft mft-oem mft-nvredfish mft-mlx5 dosfstools e2fsprogs
 		   usbutils tar coreutils nvme-cli mmc-utils iputils-ping uuid-runtime \
 		   sshpass openssh-client util-linux ipmitool procps debianutils \
 		   iproute2 findutils perl-base $libperl $perl_modules \
-		   $libpython3_minimal $python3_distutils $python3_lib2to3 $python3 $python_deb \
-		   $libpython3 bsdutils libexpat1 wget net-tools isc-dhcp-client hostname zip $ADDON_DEBS
+		   $libpython3_minimal $libpython3_stdlib $python3_distutils $python3_lib2to3 $python3 $python_deb \
+		   $libpython3 bsdutils libexpat1 wget net-tools isc-dhcp-client hostname zip btrfs-progs $ADDON_DEBS
 do
 	for pfile in $(dpkg -L $deb 2>/dev/null)
 	do
@@ -312,6 +315,7 @@ printf_msg()
 
 modprobe nls_iso8859-1 > /dev/null 2>&1
 modprobe -a sdhci-of-dwcmshc dw_mmc-bluefield > /dev/null 2>&1
+modprobe btrfs > /dev/null 2>&1
 modprobe mlxbf_tmfifo > /dev/null 2>&1
 modprobe -a ipmi_msghandler ipmi_devintf i2c-mlxbf
 modprobe ipmb_host slave_add=0x10
@@ -695,7 +699,14 @@ ex $mkbfb \
 	${BFB} /workspace/${ubuntu_BFB}
 
 # Create ISO image
-ISO_DIR="/workspace/ISO"
+if [ "$(cat /etc/mlnx-release | grep -i bf4)" ]; then
+	type="bf4"
+else
+	type=$(cat /etc/mlnx-release | grep -o "unsigned\|dev\|prod")
+fi
+ISO_DIR=/workspace/iso_$type
+mkdir -p $ISO_DIR
+
 mkdir -p "$ISO_DIR/bfb"
 cp /boot/vmlinuz-$kernel "$ISO_DIR/bfb/vmlinuz"
 cp $initramfs "$ISO_DIR/bfb/initrd"
@@ -711,7 +722,7 @@ set default=0
 set timeout=3
 
 menuentry "${ubuntu_IMAGE/.iso/} Installation" {
-  linux /bfb/vmlinuz net.ifnames=0 keep_bootcon biosdevname=0 ip=dhcp
+  linux /bfb/vmlinuz keep_bootcon biosdevname=0 ip=dhcp
   initrd /bfb/initrd
 }
 EOF
@@ -732,6 +743,8 @@ ex xorriso -as mkisofs \
   "$ISO_DIR" \
   -output "/workspace/${ubuntu_ISO}"
 cd ..
+
+rm -r $ISO_DIR
 
 echo "BFB is ready: $(readlink -f /workspace/${ubuntu_BFB})"
 echo "ISO is ready: $(readlink -f /workspace/${ubuntu_ISO})"

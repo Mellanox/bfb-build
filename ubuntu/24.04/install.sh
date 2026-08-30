@@ -60,6 +60,7 @@ if [ ! -e /tmp/bfpxe.done ]; then touch /tmp/bfpxe.done; bfpxe; fi
 
 DUAL_BOOT="no"
 ROOTFS=${ROOTFS:-"ext4"}
+SET_EXT4_JOURNAL_DATA=${SET_EXT4_JOURNAL_DATA:-"yes"}
 
 if [ -e ${BDIR}/install.env/common ]; then
 	. ${BDIR}/install.env/common
@@ -87,7 +88,7 @@ fi
 
 default_device=/dev/mmcblk0
 if [ -b /dev/nvme0n1 ]; then
-	default_device="/dev/$(cd /sys/block; /bin/ls -1d nvme* | sort -V | tail -1)"
+	default_device="/dev/$(get_local_nvme)"
 fi
 device=${device:-"$default_device"}
 BOOT_PARTITION=${device}p1
@@ -235,52 +236,95 @@ mount_target_partition()
 	COMMON_PARTITION=${device}p5
 
 	ilog "Creating file systems:"
-	(
-	mke2fs -O 64bit -O extents -F $ROOT_PARTITION
-	mkfs.fat -F32 -n "EFI$OS_IMAGE" $BOOT_PARTITION
-	mkfs.${ROOTFS} -F $ROOT_PARTITION -L "OS$OS_IMAGE"
-	) >> $LOG 2>&1
+	ilog "mke2fs -O 64bit -O extents -F $ROOT_PARTITION"
+	ilog "$(mke2fs -O 64bit -O extents -F $ROOT_PARTITION 2>&1)"
+	ilog "mkfs.fat -F32 -n EFI$OS_IMAGE $BOOT_PARTITION"
+	ilog "$(mkfs.fat -F32 -n EFI$OS_IMAGE $BOOT_PARTITION 2>&1)"
+	if [ "X$ROOTFS" == "Xbtrfs" ]; then
+		ilog "mkfs.btrfs -f $ROOT_PARTITION -L OS$OS_IMAGE"
+		ilog "$(mkfs.btrfs -f $ROOT_PARTITION -L OS$OS_IMAGE 2>&1)"
+	else
+		ilog "mkfs.${ROOTFS} -F $ROOT_PARTITION -L OS$OS_IMAGE"
+		ilog "$(mkfs.${ROOTFS} -F $ROOT_PARTITION -L OS$OS_IMAGE 2>&1)"
+	fi
 	sync
 	sleep 1
 
-	if (echo "$ROOT_PARTITION" | grep -q "nvme"); then
-		tune2fs -o journal_data $ROOT_PARTITION
+	if [[ "X$ROOTFS" == "Xext4" && "X$SET_EXT4_JOURNAL_DATA" == "Xyes" ]]; then
+		ilog "tune2fs -o journal_data $ROOT_PARTITION"
+		ilog "$(tune2fs -o journal_data $ROOT_PARTITION 2>&1)"
 	fi
 
 	mkdir -p /mnt
-	mount -t ${ROOTFS} $ROOT_PARTITION /mnt
+	if [ "X$ROOTFS" == "Xbtrfs" ]; then
+		ilog "mount -t ${ROOTFS} -o subvolid=5 $ROOT_PARTITION /mnt"
+		ilog "$(mount -t ${ROOTFS} -o subvolid=5 $ROOT_PARTITION /mnt 2>&1)"
+		cd /mnt
+		ilog "btrfs subvolume create @"
+		ilog "$(btrfs subvolume create @ 2>&1)"
+		# Set @ as default subvolume so it mounts without subvol= option
+		local subvol_id=$(btrfs subvolume show /mnt/@ | grep "Subvolume ID" | awk '{print $3}')
+		ilog "btrfs subvolume set-default $subvol_id $ROOT_PARTITION"
+		ilog "$(btrfs subvolume set-default $subvol_id /mnt 2>&1)"
+		cd -
+		ilog "umount /mnt"
+		ilog "$(umount /mnt 2>&1)"
+		ilog "mount -o compress=zstd $ROOT_PARTITION /mnt"
+		ilog "$(mount -o compress=zstd $ROOT_PARTITION /mnt 2>&1)"
+	else
+		ilog "mount -t ${ROOTFS} $ROOT_PARTITION /mnt"
+		ilog "$(mount -t ${ROOTFS} $ROOT_PARTITION /mnt 2>&1)"
+	fi
+
 	mkdir -p /mnt/boot/efi
-	mount -t vfat $BOOT_PARTITION /mnt/boot/efi
+	ilog "mount -t vfat $BOOT_PARTITION /mnt/boot/efi"
+	ilog "$(mount -t vfat $BOOT_PARTITION /mnt/boot/efi 2>&1)"
 
 } # End of prepare_target_partitions
+
+get_fstab_mount_options()
+{
+	if [ "X$ROOTFS" == "Xbtrfs" ]; then
+		echo "auto rw,relatime,compress=zstd,ssd,space_cache=v2"
+	else
+		echo "auto defaults"
+	fi
+}
 
 configure_target_os()
 {
 	if [ "${FSTAB_USE_DEV_NAME}" == "yes" ]; then
 		cat > /mnt/etc/fstab << EOF
-$ROOT_PARTITION / auto defaults 0 1
+$ROOT_PARTITION / $(get_fstab_mount_options $ROOT_PARTITION) 0 1
 $BOOT_PARTITION /boot/efi vfat umask=0077 0 2
 EOF
 	else
 		cat > /mnt/etc/fstab << EOF
-$(get_part_id $ROOT_PARTITION) / auto defaults 0 1
+$(get_part_id $ROOT_PARTITION) / $(get_fstab_mount_options $ROOT_PARTITION) 0 1
 $(get_part_id $BOOT_PARTITION) /boot/efi vfat umask=0077 0 2
 EOF
 	fi
 
 	if [ "X$DUAL_BOOT" == "Xyes" ]; then
+		mkdir -p /mnt/common
+		mkdir -p /tmp/common
 		if [ "${FSTAB_USE_DEV_NAME}" == "yes" ]; then
 			cat >> /mnt/etc/fstab << EOF
-$COMMON_PARTITION /common auto defaults 0 2
+$COMMON_PARTITION /common $(get_fstab_mount_options $COMMON_PARTITION) 0 2
 EOF
 		else
 			cat >> /mnt/etc/fstab << EOF
-$(get_part_id $COMMON_PARTITION) /common auto defaults 0 2
+$(get_part_id $COMMON_PARTITION) /common $(get_fstab_mount_options $COMMON_PARTITION) 0 2
 EOF
 		fi
-		mkdir -p /mnt/common
-		mkdir -p /tmp/common
-		mount $COMMON_PARTITION /tmp/common
+
+		if [ "X$ROOTFS" == "Xbtrfs" ]; then
+			ilog "mount -t ${ROOTFS} -o subvolid=5 $COMMON_PARTITION /tmp/common"
+			ilog "$(mount -t ${ROOTFS} -o subvolid=5 $COMMON_PARTITION /tmp/common 2>&1)"
+		else
+			ilog "mount -t ${ROOTFS} $COMMON_PARTITION /tmp/common"
+			ilog "$(mount -t ${ROOTFS} $COMMON_PARTITION /tmp/common 2>&1)"
+		fi
 		if [ -e /mnt/etc/bfb_version.json ]; then
 			/bin/rm -f /tmp/common/$((2 + 2*$OS_IMAGE)).version.json
 			cp /mnt/etc/bfb_version.json /tmp/common/$((2 + 2*$OS_IMAGE)).version.json
@@ -322,7 +366,7 @@ EOF
 	# Remove /etc/hostname to get hostname from DHCP server
 	/bin/rm -f /mnt/etc/hostname
 
-	/bin/rm -f /mnt/var/lib/dbus/machine-id /etc/machine-id
+	/bin/rm -f /mnt/var/lib/dbus/machine-id /mnt/etc/machine-id
 	touch /mnt/var/lib/dbus/machine-id /mnt/etc/machine-id
 
 	perl -ni -e 'print unless /PasswordAuthentication no/' /mnt/etc/ssh/sshd_config
@@ -480,8 +524,11 @@ enable_sfc_hbn()
 	HUGEPAGE_COUNT=${HUGEPAGE_COUNT:-""}
 	HBN_PROFILE=${HBN_PROFILE:-"default"}
 	CLOUD_OPTION=${CLOUD_OPTION:-""}
+	HBN_CPU_CORE=${HBN_CPU_CORE:-""}
+	HBN_RAM_MEMORY=${HBN_RAM_MEMORY:-""}
+	OVS_CPU_CORE=${OVS_CPU_CORE:-""}
 	log "INFO: Installing SFC HBN environment"
-	ilog "$(BR_HBN_UPLINKS=${BR_HBN_UPLINKS} BR_HBN_REPS=${BR_HBN_REPS} BR_HBN_SFS=${BR_HBN_SFS} BR_SFC_UPLINKS=${BR_SFC_UPLINKS} BR_SFC_REPS=${BR_SFC_REPS} BR_SFC_SFS=${BR_SFC_SFS} BR_HBN_SFC_PATCH_PORTS=${BR_HBN_SFC_PATCH_PORTS} LINK_PROPAGATION=${LINK_PROPAGATION} ENABLE_BR_SFC=${ENABLE_BR_SFC} ENABLE_BR_SFC_DEFAULT_FLOWS=${ENABLE_BR_SFC_DEFAULT_FLOWS} HUGEPAGE_SIZE=${HUGEPAGE_SIZE} HUGEPAGE_COUNT=${HUGEPAGE_COUNT} CLOUD_OPTION=${CLOUD_OPTION} HBN_PROFILE=${HBN_PROFILE} chroot /mnt /opt/mellanox/sfc-hbn/install.sh ${ARG_PORT0} ${ARG_PORT1} 2>&1)"
+	ilog "$(BR_HBN_UPLINKS=${BR_HBN_UPLINKS} BR_HBN_REPS=${BR_HBN_REPS} BR_HBN_SFS=${BR_HBN_SFS} BR_SFC_UPLINKS=${BR_SFC_UPLINKS} BR_SFC_REPS=${BR_SFC_REPS} BR_SFC_SFS=${BR_SFC_SFS} BR_HBN_SFC_PATCH_PORTS=${BR_HBN_SFC_PATCH_PORTS} LINK_PROPAGATION=${LINK_PROPAGATION} ENABLE_BR_SFC=${ENABLE_BR_SFC} ENABLE_BR_SFC_DEFAULT_FLOWS=${ENABLE_BR_SFC_DEFAULT_FLOWS} HUGEPAGE_SIZE=${HUGEPAGE_SIZE} HUGEPAGE_COUNT=${HUGEPAGE_COUNT} CLOUD_OPTION=${CLOUD_OPTION} HBN_PROFILE=${HBN_PROFILE} HBN_CPU_CORE=${HBN_CPU_CORE} HBN_RAM_MEMORY=${HBN_RAM_MEMORY} OVS_CPU_CORE=${OVS_CPU_CORE} chroot /mnt /opt/mellanox/sfc-hbn/install.sh ${ARG_PORT0} ${ARG_PORT1} 2>&1)"
 	NIC_FW_RESET_REQUIRED=1
 }
 
@@ -501,7 +548,7 @@ create_initramfs()
 		gpio-mlxbf2 gpio-mlxbf3 mlxbf-gige \
 		pinctrl-mlxbf3 8021q lan743x \
 		ipmi_devintf ipmb_host ipmi_ssif i2c-mlxbf \
-		cls_flower act_gact \
+		cls_flower act_gact btrfs raid6_pq xor async_xor xor-neon \
 		nls_iso8859-1 $ADDON_KERNEL_MODULES
 	do
 		if (chroot /mnt modinfo -k $kver $mod 2>/dev/null | grep "filename:" | grep -q builtin); then
@@ -516,7 +563,10 @@ create_initramfs()
 
 	ilog "Updating $distro initramfs"
 	initrd=$(cd /mnt/boot; /bin/ls -1 initrd.img-* | tail -1 | sed -e "s/.old-dkms//")
-	ilog "$(chroot /mnt dracut --force --add-drivers "$ADD_DRIVERS" --gzip /boot/$initrd ${kver} 2>&1)"
+	{
+		echo "[$(date +%H:%M:%S)] dracut --force --add-drivers \"$ADD_DRIVERS\" --gzip /boot/$initrd ${kver}"
+		chroot /mnt dracut --force --add-drivers "$ADD_DRIVERS" --gzip /boot/$initrd ${kver}
+	} >> "$LOG" 2>&1
 }
 
 configure_grub()
@@ -608,7 +658,11 @@ install_dpu_os()
 		if [ "X$mode" == "Xmanufacturing" ]; then
 			if [ "X$DUAL_BOOT" == "Xyes" ]; then
 				# Format common partition
-				mkfs.${ROOTFS} -F ${device}p5 -L "common"
+				if [ "X$ROOTFS" == "Xbtrfs" ]; then
+					ilog "$(mkfs.btrfs -f ${device}p5 -L "common" 2>&1)"
+				else
+					ilog "$(mkfs.${ROOTFS} -F ${device}p5 -L "common" 2>&1)"
+				fi
 				for OS_IMAGE in 0 1
 				do
 					install_os_image $OS_IMAGE

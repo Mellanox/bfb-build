@@ -154,20 +154,27 @@ RUN apt-get clean -y && \
         zip \
         zstd \
 {%- if custom_kernel %}
-#Toolchain required to rebuild MLNX_OFED against the custom kernel
+#Toolchain required to rebuild MLNX_OFED and the BlueField SoC modules
+#against the custom kernel. rpm/cpio unpack the SoC .src.rpm sources, which
+#carry debian/ packaging; git/bzip2/lsb-release are their build deps.
         autoconf \
         automake \
         autotools-dev \
         bison \
+        bzip2 \
+        cpio \
         debhelper \
         dh-python \
         diffstat \
         dkms \
         flex \
+        git \
         libelf-dev \
         libssl-dev \
         libtool \
+        lsb-release \
         quilt \
+        rpm \
 {%- endif %}
 #DOCA Packages
 {%- if custom_kernel %}

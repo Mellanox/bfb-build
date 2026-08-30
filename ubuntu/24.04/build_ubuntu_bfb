@@ -164,6 +164,35 @@ if [ -e /etc/infiniband/openib.conf ]; then
 	ex sed -i -e "s/FORCE_MODE=.*/FORCE_MODE=yes/" /etc/infiniband/openib.conf
 fi
 
+# VF interface-naming helpers. create_bfb copies these into the initramfs and
+# does so unconditionally, so a missing file aborts the build.
+#
+# install.pl would place them via copy_udev_rules(), but that is unreachable
+# here: it runs after an early `return 0` taken when --build-only is set, and it
+# targets /etc/udev/rules.d rather than the /lib/udev/rules.d that create_bfb
+# reads. mlnx-ofed-kernel-utils ships both files under examples/, so install
+# them from there.
+ofed_examples=/usr/share/doc/mlnx-ofed-kernel-utils/examples
+if [ -d "${ofed_examples}" ]; then
+	mkdir -p /etc/infiniband /lib/udev/rules.d
+	if [ ! -e /etc/infiniband/vf-net-link-name.sh ]; then
+		cp "${ofed_examples}/vf-net-link-name.sh" /etc/infiniband/
+		chmod 755 /etc/infiniband/vf-net-link-name.sh
+	fi
+	if [ ! -e /lib/udev/rules.d/82-net-setup-link.rules ]; then
+		cp "${ofed_examples}/82-net-setup-link.rules" /lib/udev/rules.d/
+	fi
+fi
+
+for f in /etc/infiniband/vf-net-link-name.sh /lib/udev/rules.d/82-net-setup-link.rules; do
+	if [ ! -e "$f" ]; then
+		echo "ERROR: $f is missing and could not be installed from"
+		echo "       ${ofed_examples}. create_bfb copies it into the initramfs"
+		echo "       unconditionally and will fail."
+		exit 1
+	fi
+done
+
 # Guard: nothing built for a different kernel may ship in the BFB. Such modules
 # would silently fail to load on the DPU, so fail the build loudly instead.
 stale=$(dpkg-query -W -f='${Package} ${Version}\n' 2>/dev/null | grep 'kver\.' | grep -v "kver\.${kernel}\b" || true)

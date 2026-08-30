@@ -65,11 +65,14 @@ fi
 # BlueField kernel, and pulled doca-runtime-user / doca-devel-user so that no
 # prebuilt (kernel-version-pinned) DOCA kernel modules were installed.
 #
-# MLNX_OFED must now be rebuilt from source against that kernel. BlueField SoC
-# drivers (tmfifo, mlxbf-gige, gpio-mlxbf, i2c-mlxbf, mlxbf-pmc, pinctrl-mlxbf3,
-# pwr-mlxbf, sdhci-of-dwcmshc, ...) are NOT rebuilt here: on Ubuntu 22.04/24.04
-# they ship inside the kernel itself, so a kernel derived from the BlueField
-# kernel source already carries them.
+# MLNX_OFED must now be rebuilt from source against that kernel. Its install.pl
+# also builds kernel-mft-modules (mst_pci, mst_pciconf, bf3_livefish), so those
+# are covered too.
+#
+# BlueField SoC drivers (tmfifo, mlxbf-gige, gpio-mlxbf, i2c-mlxbf, mlxbf-pmc,
+# pinctrl-mlxbf3, pwr-mlxbf, sdhci-of-dwcmshc, ...) are NOT rebuilt here: on
+# Ubuntu 22.04/24.04 they ship inside the kernel itself, so a kernel derived
+# from the BlueField kernel source already carries them.
 ###############################################################################
 
 echo "==============================================================="
@@ -171,6 +174,41 @@ if [ -n "${stale}" ]; then
 	echo "These would not load on '${kernel}'. Either add them to the MLNX_OFED"
 	echo "rebuild set, or prevent them from being installed in the Dockerfile."
 	exit 1
+fi
+
+# Guard: create_bfb and install.sh both build their initramfs with a
+# "modinfo <mod> || continue" loop, so a module that failed to build is dropped
+# silently and only shows up as a broken DPU. Assert the ones this script is
+# responsible for providing actually resolve against the target kernel.
+missing=""
+for mod in mst_pci mst_pciconf bf3_livefish mlx5_core mlx5_ib; do
+	if ! (modinfo -k ${kernel} $mod > /dev/null 2>&1); then
+		missing="$missing $mod"
+	fi
+done
+if [ -n "${missing}" ]; then
+	echo "ERROR: modules missing for kernel ${kernel}:${missing}"
+	echo ""
+	echo "MLNX_OFED's install.pl builds all of these, including kernel-mft-modules"
+	echo "(mst_pci, mst_pciconf, bf3_livefish). Without them the BFB would install"
+	echo "and then fail on the DPU."
+	exit 1
+fi
+
+# Advisory: the rest of the initramfs driver list comes from the kernel itself.
+# Report anything absent rather than letting create_bfb drop it without a word.
+advisory=""
+for mod in mlxbf-bootctl mlxbf-tmfifo mlxbf-gige gpio-mlxbf2 gpio-mlxbf3 \
+	pinctrl-mlxbf3 i2c-mlxbf sdhci-of-dwcmshc dw_mmc-bluefield ipmb_host \
+	nvme nvme-rdma nvme-tcp ib_ipoib ib_iser ib_umad mlxfw
+do
+	if ! (modinfo -k ${kernel} $mod > /dev/null 2>&1); then
+		advisory="$advisory $mod"
+	fi
+done
+if [ -n "${advisory}" ]; then
+	echo "WARNING: not provided by kernel ${kernel}:${advisory}"
+	echo "WARNING: create_bfb will omit these from the installer initramfs."
 fi
 
 /usr/sbin/update-pciids || true

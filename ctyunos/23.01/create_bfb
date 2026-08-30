@@ -581,4 +581,67 @@ $mkbfb \
     ${BFB} /workspace/${BFB_FILENAME}
 cd ..
 
-echo "BFB is ready: `readlink -f /workspace/${BFB_FILENAME}`"
+# ISO 9660 image
+type=$(cat /etc/mlnx-release | grep -o "unsigned\|dev\|prod")
+ISO_DIR=/workspace/iso_$type
+mkdir -p $ISO_DIR
+
+ISO_FILENAME=$(cat /etc/mlnx-release)".iso"
+
+# fonts
+mkdir -p $ISO_DIR/boot/grub2/fonts
+cp /boot/efi/EFI/*/fonts/*.pf2 $ISO_DIR/boot/grub2/fonts
+
+# *.mod files, e.g.: http.mod
+mkdir -p $ISO_DIR/boot/grub2/arm64-efi
+cp -r /usr/lib/grub/arm64-efi/*.mod $ISO_DIR/boot/grub2/arm64-efi
+
+# FAT ESP image file on ISO 9660 (mtools: no loop mount; works when /dev/loop* is unavailable, e.g. Docker)
+dd if=/dev/zero of=efi.img bs=1M count=4
+mkfs.vfat -F 12 efi.img -n "ESP"
+mmd -i efi.img ::/efi
+mmd -i efi.img ::/efi/boot
+mcopy -i efi.img /boot/efi/EFI/*/gcdaa64.efi ::/efi/boot/bootaa64.efi
+
+# bootaa64.efi: the EFI firmware used in boot sequence
+# default: /EFI/BOOT/grub.cfg on the ISO9660 tree (see below)
+
+mkdir -p $ISO_DIR/EFI/BOOT
+cat > $ISO_DIR/EFI/BOOT/grub.cfg << EOF
+loadfont unicode
+
+set menu_color_normal=white/black
+set menu_color_highlight=black/light-gray
+
+set default=0
+set timeout=3
+
+menuentry "${ISO_FILENAME/.iso/} installation" {
+  linux /boot/vmlinuz net.ifnames=0 keep_bootcon biosdevname=0 ip=dhcp
+  initrd /boot/initramfs
+}
+EOF
+
+cp /boot/vmlinuz-$kernel $ISO_DIR/boot/vmlinuz
+cp $initramfs $ISO_DIR/boot/initramfs
+
+xorriso -as mkisofs \
+  -iso-level 3 \
+  -allow-lowercase \
+  -volid "BF_BUNDLE_ISO" \
+  -J \
+  -joliet-long \
+  -l \
+  -c boot/boot.cat \
+  -partition_offset 16 \
+  -append_partition 2 0xef efi.img \
+  -e --interval:appended_partition_2:all:: \
+  -no-emul-boot \
+  -partition_cyl_align all \
+  $ISO_DIR \
+  -output /workspace/$ISO_FILENAME
+
+rm -r $ISO_DIR
+
+echo "BFB is ready: $(readlink -f /workspace/${BFB_FILENAME})"
+echo "ISO is ready: $(readlink -f /workspace/${ISO_FILENAME})"

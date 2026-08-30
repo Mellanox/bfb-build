@@ -144,10 +144,15 @@ What this changes compared to a default build:
   DPU
 
 BlueField SoC drivers (`mlxbf-tmfifo`, `mlxbf-gige`, `gpio-mlxbf*`, `i2c-mlxbf`,
-`mlxbf-pmc`, `pinctrl-mlxbf3`, `pwr-mlxbf`, `sdhci-of-dwcmshc`, ...) are **not**
-rebuilt. On Ubuntu 22.04 and 24.04 they are part of the kernel itself, so a
-kernel derived from the BlueField kernel source already contains them. This is
-the main difference from the RPM based flow described below.
+`mlxbf-pmc`, `pinctrl-mlxbf3`, `pwr-mlxbf`, `sdhci-of-dwcmshc`, ...) are part of
+the kernel on Ubuntu 22.04 and 24.04, and most are upstream, so a stock Ubuntu
+kernel already carries them. The few that are not — `mlxbf-pka` and `ipmb_host`
+on a stock `6.8.0-31-generic` — are rebuilt from the SoC sources published at
+`.../SOURCES/SoC/`, which ship `debian/` packaging inside each `.src.rpm`. Only
+the modules the target kernel is actually missing are built; for a kernel
+derived from the BlueField kernel source, none are. Set `BUILD_SOC_MODULES=no`
+to skip this. Anything that still fails to build is reported by the warning
+described above rather than failing the BFB.
 
 Additional variables:
 
@@ -160,6 +165,8 @@ Additional variables:
 | `MLNX_OFED_SRC_LOCAL` | - | use an already-downloaded tarball instead of fetching it |
 | `OFED_KERNEL_EXTRA_ARGS` | BlueField DPU flag set | passed to the MLNX_OFED kernel configure script |
 | `OFED_INSTALL_EXTRA_ARGS` | - | extra `install.pl` flags, e.g. `--without-depcheck` |
+| `BUILD_SOC_MODULES` | `yes` | rebuild BlueField SoC modules the kernel lacks |
+| `SOC_SRC_URL` | `<BASE_URL>/doca/<DOCA_VERSION>-<BSP_VERSION>/SOURCES/SoC` | SoC driver sources |
 
 
 MLNX_OFED sources are published per DOCA release under

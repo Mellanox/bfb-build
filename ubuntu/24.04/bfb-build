@@ -93,6 +93,11 @@ OFED_KERNEL_EXTRA_ARGS=${OFED_KERNEL_EXTRA_ARGS:-"--with-core-mod --with-user_ma
 # Extra flags passed to install.pl itself, e.g. --without-depcheck
 OFED_INSTALL_EXTRA_ARGS=${OFED_INSTALL_EXTRA_ARGS:-""}
 
+# BlueField SoC modules that the target kernel does not provide are rebuilt from
+# the .src.rpm sources published per DOCA release. Set to "no" to skip.
+BUILD_SOC_MODULES=${BUILD_SOC_MODULES:-"yes"}
+SOC_SRC_URL=${SOC_SRC_URL:-"${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/SOURCES/SoC"}
+
 RENDER=$(cd ../../common/tools && pwd)/render_dockerfile.py
 PYTHON=${PYTHON:-python3}
 
@@ -247,6 +252,8 @@ sed -i -e "s|@CUSTOM_KERNEL@|${CUSTOM_KERNEL}|g" \
 	-e "s|@OFED_SRC_TARBALL@|${ofed_src_tarball}|g" \
 	-e "s|@OFED_KERNEL_EXTRA_ARGS@|${OFED_KERNEL_EXTRA_ARGS}|g" \
 	-e "s|@OFED_INSTALL_EXTRA_ARGS@|${OFED_INSTALL_EXTRA_ARGS}|g" \
+	-e "s|@BUILD_SOC_MODULES@|${BUILD_SOC_MODULES}|g" \
+	-e "s|@SOC_SRC_URL@|${SOC_SRC_URL}|g" \
 	build_ubuntu_bfb
 
 docker build -t ${docker_image} \

@@ -37,7 +37,11 @@ RUN dnf install -y \
 		kernel-modules-core-${KERNEL} \
 		kernel-${KERNEL} \
 		kernel-headers-${KERNEL} \
-		kernel-devel-${KERNEL}
+		kernel-devel-${KERNEL} \
+		grubby
+
+# Verify vmlinuz landed in /boot
+RUN test -s /boot/vmlinuz-${KERNEL}
 
 RUN dnf install -y dnf-plugin-versionlock
 RUN dnf versionlock add kernel-${KERNEL}

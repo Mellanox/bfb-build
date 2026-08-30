@@ -17,7 +17,7 @@ ADD repos/ /etc/yum.repos.d/
 
 RUN rpm -ihv --force bootimages/mlxbf-bootimages-*.aarch64.rpm || true
 
-RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
+RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
     rm -f /etc/sysconfig/network-scripts/ifcfg-enp1s0 /etc/NetworkManager/system-connections/enp1s0.nmconnection /etc/yum.repos.d/ubi.repo && \
     dnf -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
     rpm --erase --nodeps systemd && \
@@ -110,6 +110,7 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
         watchdog \
         wget \
         xfsprogs \
+        xorriso \
         yum-utils \
         zip \
 #DOCA Packages
@@ -119,11 +120,12 @@ RUN echo 'excludepkgs=OpenIPMI strongswan*el9' >> /etc/dnf/dnf.conf && \
         mlnx-libsnap \
         mft-autocomplete \
         mstflint \
-        strongswan \
+        https://archives.fedoraproject.org/pub/archive/epel/9.6/Everything/aarch64/Packages/s/strongswan-5.9.11-1.el9.aarch64.rpm \
         ${MLNX_FW_UPDATER} \
         ${BMC_FW_PACKAGES} \
     && \
-    dnf --disablerepo='*' --enablerepo='RH-*,kubernetes,doca' --exclude='mlxbf-bootimages*' -y reinstall bf-release && \
+    rpm -e --nodeps bf-release && \
+    dnf --disablerepo='*' --enablerepo='RH-*,kubernetes,doca' --exclude='mlxbf-bootimages*' -y install bf-release && \
     dnf -y clean all && \
     rm -rf /etc/machine-id /root/anaconda-post.log /root/*.cfg && \
     truncate -s0 /etc/machine-id && \

@@ -86,7 +86,7 @@ CUSTOM_KERNEL=${CUSTOM_KERNEL:-"no"}
 CUSTOM_KERNEL_DEBS=${CUSTOM_KERNEL_DEBS:-""}
 CUSTOM_KERNEL_VERSION=${CUSTOM_KERNEL_VERSION:-""}
 MLNX_OFED_SRC_LOCAL=${MLNX_OFED_SRC_LOCAL:-""}
-MLNX_OFED_SRC_URL=${MLNX_OFED_SRC_URL:-"${BASE_URL}/doca/${DOCA_VERSION}/SOURCES/mlnx_ofed/MLNX_OFED_SRC-debian-${MLNX_OFED_VERSION}.tgz"}
+MLNX_OFED_SRC_URL=${MLNX_OFED_SRC_URL:-"${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/SOURCES/mlnx_ofed/MLNX_OFED_SRC-debian-${MLNX_OFED_VERSION}.tgz"}
 
 # MLNX_OFED kernel configure flags for the BlueField DPU.
 OFED_KERNEL_EXTRA_ARGS=${OFED_KERNEL_EXTRA_ARGS:-"--with-core-mod --with-user_mad-mod --with-user_access-mod --with-addr_trans-mod --with-mlxfw-mod --with-mlx5-mod --with-mlx5-ipsec --with-ipoib-mod --with-mlxdevm-mod --with-srp-mod --with-iser-mod --with-isert-mod --with-gds --with-sf-cfg-drv --with-sf-sfc --without-xdp --without-odp --with-nfsrdma-mod"}
@@ -203,7 +203,7 @@ if [ "X${CUSTOM_KERNEL}" == "Xyes" ]; then
 			echo "ERROR: failed to download ${MLNX_OFED_SRC_URL}"
 			echo ""
 			echo "MLNX_OFED sources for each DOCA release are published under"
-			echo "  ${BASE_URL}/doca/<doca-version>/SOURCES/mlnx_ofed/"
+			echo "  ${BASE_URL}/doca/<doca-version>-<bsp-version>/SOURCES/mlnx_ofed/"
 			echo "Check that MLNX_OFED_VERSION (${MLNX_OFED_VERSION}) matches what is"
 			echo "published for DOCA ${DOCA_VERSION}, point MLNX_OFED_SRC_URL at the"
 			echo "right tarball, or supply a local copy with MLNX_OFED_SRC_LOCAL=<path>."

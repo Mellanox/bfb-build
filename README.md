@@ -145,13 +145,13 @@ Additional variables:
 | `CUSTOM_KERNEL` | `no` | set to `yes` to enable the custom kernel flow |
 | `CUSTOM_KERNEL_DEBS` | - | directory holding the kernel `.deb` files |
 | `CUSTOM_KERNEL_VERSION` | auto-detect | kernel release string, e.g. `6.8.0-1022-bluefield`. Set it when more than one kernel ends up installed |
-| `MLNX_OFED_SRC_URL` | `<BASE_URL>/doca/<DOCA_VERSION>/SOURCES/mlnx_ofed/MLNX_OFED_SRC-debian-<ver>.tgz` | MLNX_OFED debian sources |
+| `MLNX_OFED_SRC_URL` | `<BASE_URL>/doca/<DOCA_VERSION>-<BSP_VERSION>/SOURCES/mlnx_ofed/MLNX_OFED_SRC-debian-<ver>.tgz` | MLNX_OFED debian sources |
 | `MLNX_OFED_SRC_LOCAL` | - | use an already-downloaded tarball instead of fetching it |
 | `OFED_KERNEL_EXTRA_ARGS` | BlueField DPU flag set | passed to the MLNX_OFED kernel configure script |
 | `OFED_INSTALL_EXTRA_ARGS` | - | extra `install.pl` flags, e.g. `--without-depcheck` |
 
 MLNX_OFED sources are published per DOCA release under
-`https://linux.mellanox.com/public/repo/doca/<doca-version>/SOURCES/mlnx_ofed/`,
+`https://linux.mellanox.com/public/repo/doca/<doca-version>-<bsp-version>/SOURCES/mlnx_ofed/`,
 alongside the BlueField SoC driver sources in `../SoC/`. The MLNX_OFED version
 is paired with the DOCA release, so `MLNX_OFED_VERSION` in `bfb-build` must
 match what is published for `DOCA_VERSION` (DOCA 3.4.0 pairs with MLNX_OFED

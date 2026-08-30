@@ -25,10 +25,13 @@ ADD --chown=0:0 --chmod=644 https://prod-cdn.packages.k8s.io/repositories/isv:/k
 {%- if custom_kernel %}
 
 # Custom kernel build inputs, staged into the build context by bfb-build.
-# Both land under /root/workspace, which create_bfb excludes from the shipped
+# These land under /root/workspace, which create_bfb excludes from the shipped
 # rootfs, so they do not bloat the resulting BFB.
 ADD custom-kernel/ /root/workspace/custom-kernel/
 COPY {{ ofed_src_tarball }} /root/workspace/
+
+# Keep prebuilt, kernel-version-pinned DOCA/MFT kernel modules out of the image.
+ADD apt-preferences-custom-kernel /etc/apt/preferences.d/98custom-kernel
 {%- endif %}
 
 RUN apt update

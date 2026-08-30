@@ -159,6 +159,7 @@ cp -a \
 	Dockerfile \
 	Dockerfile.j2 \
 	kernel-packages \
+	apt-preferences-custom-kernel \
 	build_ubuntu_bfb \
 	create_bfb \
 	install.sh \
@@ -210,6 +211,7 @@ if [ "X${CUSTOM_KERNEL}" == "Xyes" ]; then
 			exit 1
 		fi
 	fi
+
 fi
 
 cd $WDIR

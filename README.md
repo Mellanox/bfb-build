@@ -131,6 +131,17 @@ What this changes compared to a default build:
   (`doca-runtime = doca-runtime-kernel + doca-runtime-user`)
 - MLNX_OFED is rebuilt from source against your kernel and installed, before
   `create_bfb` packs the root filesystem
+- `install.pl` also builds `kernel-mft-modules` (`mst_pci`, `mst_pciconf`,
+  `bf3_livefish`), so those are rebuilt for your kernel as well
+- `apt-preferences-custom-kernel` keeps every prebuilt, kernel-version-pinned
+  DOCA/MFT module package out of the image. The `doca-*-user` swap alone is not
+  enough: `ngauge` recommends the virtual package `fwctl-modules`, which
+  `mlnx-ofed-kernel-modules` provides
+- before `create_bfb` runs, the modules this flow is responsible for are
+  asserted to resolve against the target kernel. `create_bfb` and `install.sh`
+  both build their initramfs with `modinfo <mod> || continue`, so without this a
+  module that failed to build is dropped silently and only surfaces as a broken
+  DPU
 
 BlueField SoC drivers (`mlxbf-tmfifo`, `mlxbf-gige`, `gpio-mlxbf*`, `i2c-mlxbf`,
 `mlxbf-pmc`, `pinctrl-mlxbf3`, `pwr-mlxbf`, `sdhci-of-dwcmshc`, ...) are **not**
@@ -149,6 +160,7 @@ Additional variables:
 | `MLNX_OFED_SRC_LOCAL` | - | use an already-downloaded tarball instead of fetching it |
 | `OFED_KERNEL_EXTRA_ARGS` | BlueField DPU flag set | passed to the MLNX_OFED kernel configure script |
 | `OFED_INSTALL_EXTRA_ARGS` | - | extra `install.pl` flags, e.g. `--without-depcheck` |
+
 
 MLNX_OFED sources are published per DOCA release under
 `https://linux.mellanox.com/public/repo/doca/<doca-version>-<bsp-version>/SOURCES/mlnx_ofed/`,

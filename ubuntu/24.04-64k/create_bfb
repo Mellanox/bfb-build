@@ -30,6 +30,25 @@ BFB="${BFB:-/lib/firmware/mellanox/boot/default.bfb}"
 CAPSULE="${CAPSULE:-/lib/firmware/mellanox/boot/capsule/boot_update2.cap}"
 kernel=$(/bin/ls -1 /lib/modules/ | head -1)
 
+# build_ubuntu_bfb has always passed '-k <kernel>' here, but the option was not
+# parsed and the alphabetically-first entry above was used instead. That is
+# harmless while exactly one kernel is installed, but selects the wrong one for
+# custom kernel builds, so honour the argument.
+while [ $# -gt 0 ]; do
+	case "$1" in
+		-k|--kernel)
+			if [ -n "${2:-}" ]; then
+				kernel="$2"
+				shift
+			fi
+			shift
+			;;
+		*)
+			shift
+			;;
+	esac
+done
+
 SCRIPTS_DIR=$(dirname $0)
 
 WDIR=${WDIR:-/root/workspace/bfb}
@@ -249,7 +268,7 @@ bootctl_ko=""
 for driver in mlxbf-bootctl mlx-bootctl
 do
 	bootctl_ko=$(modinfo -F filename -k $kernel $driver || true)
-	if [ ! -z $bootctl_ko ]; then
+	if [ ! -z "$bootctl_ko" ]; then
 		break
 	fi
 done
@@ -257,7 +276,14 @@ if [ -z "$bootctl_ko" ]; then
 	echo "ERROR: Cannot find mlxbf-bootctl or mlx-bootctl drivers"
 	exit 1
 fi
-sudo cp $bootctl_ko ./mlx-bootctl.ko
+if [ "$bootctl_ko" = "(builtin)" ]; then
+	# A kernel with the driver built in reports "(builtin)" instead of a path,
+	# so there is no module to copy. The initramfs runs this same kernel, so
+	# the driver is already present and the insmod below simply does nothing.
+	echo "mlx-bootctl is built into $kernel; no module to add to the initramfs"
+else
+	sudo cp $bootctl_ko ./mlx-bootctl.ko
+fi
 # Find and copy the sbsa_gwdt watchdog driver (handles .ko, .ko.xz, .ko.gz, etc.)
 watchdog_driver=$(find /lib/modules/$kernel/kernel/drivers/ -name "sbsa_gwdt.ko*" -type f | head -1)
 if [ -n "$watchdog_driver" ]; then

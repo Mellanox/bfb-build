@@ -288,6 +288,8 @@ fi
 watchdog_driver=$(find /lib/modules/$kernel/kernel/drivers/ -name "sbsa_gwdt.ko*" -type f | head -1)
 if [ -n "$watchdog_driver" ]; then
 	sudo cp "$watchdog_driver" .
+elif [ "$(modinfo -F filename -k $kernel sbsa_gwdt 2>/dev/null)" = "(builtin)" ]; then
+	echo "sbsa_gwdt is built into $kernel; no module to add to the initramfs"
 else
 	echo "WARNING: sbsa_gwdt watchdog driver not found"
 fi

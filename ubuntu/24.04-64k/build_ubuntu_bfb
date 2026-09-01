@@ -50,10 +50,36 @@ ex()
 }
 
 # Pick the kernel the BFB will be built for.
+#
+# Only consider /lib/modules entries that actually hold a kernel. A
+# linux-headers package creates /lib/modules/<ver>/build with no modules, and
+# such an entry is often the newest by mtime - picking it silently builds
+# everything against a kernel that is not in the image. That is not
+# hypothetical: linux-headers-generic arrives as a dependency during the main
+# package install.
+kernel_candidates=""
+for kdir in /lib/modules/*/; do
+	kver=`basename "${kdir}"`
+	if [ -e "${kdir}/modules.builtin" ] || [ -d "${kdir}/kernel" ] || [ -e "/boot/vmlinuz-${kver}" ]; then
+		kernel_candidates="${kernel_candidates} ${kver}"
+	fi
+done
+
 if [ -n "${CUSTOM_KERNEL_VERSION}" ]; then
 	kernel="${CUSTOM_KERNEL_VERSION}"
 else
-	kernel=`/bin/ls -1tr /lib/modules | tail -1`
+	kernel=""
+	for kver in ${kernel_candidates}; do
+		if [ -z "${kernel}" ] || [ "/lib/modules/${kver}" -nt "/lib/modules/${kernel}" ]; then
+			kernel="${kver}"
+		fi
+	done
+	if [ -z "${kernel}" ]; then
+		echo "ERROR: no usable kernel found under /lib/modules."
+		echo "Entries present (none contain modules or a matching /boot/vmlinuz):"
+		/bin/ls -1 /lib/modules 2>/dev/null | sed -e 's/^/  /'
+		exit 1
+	fi
 fi
 
 if [ "X${CUSTOM_KERNEL}" != "Xyes" ]; then
@@ -99,10 +125,11 @@ if [ ! -e /lib/modules/${kernel}/build ]; then
 	exit 1
 fi
 
-nkernels=`/bin/ls -1 /lib/modules | wc -l`
+nkernels=`echo ${kernel_candidates} | wc -w`
 if [ "$nkernels" != "1" ]; then
 	echo "WARNING: more than one kernel is present in /lib/modules:"
-	/bin/ls -1 /lib/modules
+	/bin/ls -1 /lib/modules | sed -e 's/^/  /'
+	echo "WARNING: usable (non headers-only) candidates:${kernel_candidates}"
 	echo "WARNING: building MLNX_OFED against '${kernel}'."
 	echo "WARNING: set CUSTOM_KERNEL_VERSION if that is not the intended one."
 fi

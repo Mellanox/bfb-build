@@ -22,7 +22,20 @@
 #
 ###############################################################################
 
+# Remember where the user invoked us from so that relative paths given in
+# CUSTOM_KERNEL_DEBS / MLNX_OFED_SRC_LOCAL keep working after the cd below.
+INVOKE_DIR=$(pwd)
+
 cd ${0%*/*}
+
+# Absolute path resolution for user-supplied paths.
+abspath()
+{
+	case "$1" in
+		/*) echo "$1" ;;
+		*)  echo "${INVOKE_DIR}/$1" ;;
+	esac
+}
 
 if [ ! -e Dockerfile ]; then
 	echo "ERROR: Dockerfile is missing."
@@ -52,7 +65,82 @@ INCLUDE_DOCA_SERVICES=${INCLUDE_DOCA_SERVICES:-"yes"}
 BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
 LEAVE_CONTAINER=${LEAVE_CONTAINER:-"no"}
 
-WDIR=/tmp/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}.$$
+###############################################################################
+# Custom kernel support
+#
+# CUSTOM_KERNEL=yes builds the BFB with a customer-supplied kernel instead of
+# the NVIDIA BlueField kernel pinned in ./kernel-packages, and rebuilds
+# MLNX_OFED from source against it.
+#
+#   CUSTOM_KERNEL          yes|no                (default: no)
+#   CUSTOM_KERNEL_DEBS     directory holding the kernel .deb files to install
+#                          (linux-image, linux-modules and the matching
+#                          linux-headers are required)
+#   CUSTOM_KERNEL_VERSION  kernel release string, e.g. 6.8.0-1022-bluefield.
+#                          Optional; auto-detected from /lib/modules when unset.
+#   MLNX_OFED_SRC_URL      URL of MLNX_OFED_SRC-debian-<ver>.tgz
+#   MLNX_OFED_SRC_LOCAL    path to an already-downloaded copy of that tarball
+#                          (takes precedence over MLNX_OFED_SRC_URL)
+###############################################################################
+CUSTOM_KERNEL=${CUSTOM_KERNEL:-"no"}
+CUSTOM_KERNEL_DEBS=${CUSTOM_KERNEL_DEBS:-""}
+CUSTOM_KERNEL_VERSION=${CUSTOM_KERNEL_VERSION:-""}
+MLNX_OFED_SRC_LOCAL=${MLNX_OFED_SRC_LOCAL:-""}
+MLNX_OFED_SRC_URL=${MLNX_OFED_SRC_URL:-"${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/SOURCES/mlnx_ofed/MLNX_OFED_SRC-debian-${MLNX_OFED_VERSION}.tgz"}
+
+# MLNX_OFED kernel configure flags for the BlueField DPU.
+OFED_KERNEL_EXTRA_ARGS=${OFED_KERNEL_EXTRA_ARGS:-"--with-core-mod --with-user_mad-mod --with-user_access-mod --with-addr_trans-mod --with-mlxfw-mod --with-mlx5-mod --with-mlx5-ipsec --with-ipoib-mod --with-mlxdevm-mod --with-srp-mod --with-iser-mod --with-isert-mod --with-gds --with-sf-cfg-drv --with-sf-sfc --without-xdp --without-odp --with-nfsrdma-mod"}
+# Extra flags passed to install.pl itself, e.g. --without-depcheck
+OFED_INSTALL_EXTRA_ARGS=${OFED_INSTALL_EXTRA_ARGS:-""}
+
+# BlueField SoC modules that the target kernel does not provide are rebuilt from
+# the .src.rpm sources published per DOCA release. Set to "no" to skip.
+BUILD_SOC_MODULES=${BUILD_SOC_MODULES:-"yes"}
+SOC_SRC_URL=${SOC_SRC_URL:-"${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/SOURCES/SoC"}
+
+RENDER=$(cd ../../common/tools && pwd)/render_dockerfile.py
+PYTHON=${PYTHON:-python3}
+
+image_suffix=""
+ofed_src_tarball=""
+
+if [ "X${CUSTOM_KERNEL}" == "Xyes" ]; then
+	image_suffix="_custom_kernel"
+
+	if [ -n "${CUSTOM_KERNEL_DEBS}" ]; then
+		CUSTOM_KERNEL_DEBS=$(abspath "${CUSTOM_KERNEL_DEBS}")
+	fi
+	if [ -n "${MLNX_OFED_SRC_LOCAL}" ]; then
+		MLNX_OFED_SRC_LOCAL=$(abspath "${MLNX_OFED_SRC_LOCAL}")
+	fi
+
+	if [ -z "${CUSTOM_KERNEL_DEBS}" ]; then
+		echo "ERROR: CUSTOM_KERNEL=yes requires CUSTOM_KERNEL_DEBS to point at a"
+		echo "       directory containing the kernel .deb packages to install."
+		exit 1
+	fi
+
+	if [ ! -d "${CUSTOM_KERNEL_DEBS}" ]; then
+		echo "ERROR: CUSTOM_KERNEL_DEBS is not a directory: ${CUSTOM_KERNEL_DEBS}"
+		exit 1
+	fi
+
+	if [ -z "$(/bin/ls -1 ${CUSTOM_KERNEL_DEBS}/*.deb 2> /dev/null)" ]; then
+		echo "ERROR: no .deb packages found in ${CUSTOM_KERNEL_DEBS}"
+		exit 1
+	fi
+
+	if ! ($PYTHON -c 'import jinja2' > /dev/null 2>&1); then
+		echo "ERROR: CUSTOM_KERNEL=yes renders Dockerfile.j2 and needs python3 jinja2."
+		echo "       Install it with one of:"
+		echo "           apt install -y python3-jinja2"
+		echo "           dnf install -y python3-jinja2"
+		echo "           pip3 install jinja2"
+		exit 1
+	fi
+fi
+
+WDIR=/tmp/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}${image_suffix}.$$
 
 mkdir -p $WDIR
 
@@ -74,6 +162,9 @@ mv $WDIR/mlxbf-bootimages*arm64.deb $WDIR/mlxbf-bootimages.deb
 
 cp -a \
 	Dockerfile \
+	Dockerfile.j2 \
+	kernel-packages \
+	apt-preferences-custom-kernel \
 	build_ubuntu_bfb \
 	create_bfb \
 	install.sh \
@@ -93,6 +184,41 @@ else
 		$WDIR
 fi
 
+# Stage the custom kernel packages and the MLNX_OFED sources into the build
+# context. Both are placed under /root/workspace inside the image, which
+# create_bfb excludes from the shipped rootfs.
+if [ "X${CUSTOM_KERNEL}" == "Xyes" ]; then
+	mkdir -p $WDIR/custom-kernel
+	cp -a ${CUSTOM_KERNEL_DEBS}/*.deb $WDIR/custom-kernel/
+	echo "Custom kernel packages:"
+	/bin/ls -1 $WDIR/custom-kernel | sed -e 's/^/  /'
+
+	if [ -n "${MLNX_OFED_SRC_LOCAL}" ]; then
+		if [ ! -e "${MLNX_OFED_SRC_LOCAL}" ]; then
+			echo "ERROR: MLNX_OFED_SRC_LOCAL not found: ${MLNX_OFED_SRC_LOCAL}"
+			exit 1
+		fi
+		ofed_src_tarball=$(basename ${MLNX_OFED_SRC_LOCAL})
+		echo "Using local MLNX_OFED sources: ${MLNX_OFED_SRC_LOCAL}"
+		cp -a ${MLNX_OFED_SRC_LOCAL} $WDIR/${ofed_src_tarball}
+	else
+		ofed_src_tarball=$(basename ${MLNX_OFED_SRC_URL})
+		echo "Downloading MLNX_OFED sources: ${MLNX_OFED_SRC_URL}"
+		if ! wget -q -O $WDIR/${ofed_src_tarball} ${MLNX_OFED_SRC_URL}; then
+			rm -f $WDIR/${ofed_src_tarball}
+			echo "ERROR: failed to download ${MLNX_OFED_SRC_URL}"
+			echo ""
+			echo "MLNX_OFED sources for each DOCA release are published under"
+			echo "  ${BASE_URL}/doca/<doca-version>-<bsp-version>/SOURCES/mlnx_ofed/"
+			echo "Check that MLNX_OFED_VERSION (${MLNX_OFED_VERSION}) matches what is"
+			echo "published for DOCA ${DOCA_VERSION}, point MLNX_OFED_SRC_URL at the"
+			echo "right tarball, or supply a local copy with MLNX_OFED_SRC_LOCAL=<path>."
+			exit 1
+		fi
+	fi
+
+fi
+
 cd $WDIR
 
 if [ "$INCLUDE_DOCA_SERVICES" == "yes" ]; then
@@ -101,18 +227,41 @@ if [ "$INCLUDE_DOCA_SERVICES" == "yes" ]; then
 fi
 echo "Downloading $DISTRO base image..."
 wget -q --no-check-certificate $DISTRO_BASE_URL
-docker_image=bfb_runtime_${DISTRO,,}${DISTRO_VERSION,,}
+docker_image=bfb_runtime_${DISTRO,,}${DISTRO_VERSION,,}${image_suffix}
 
-docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION} 2> /dev/null
+docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION}${image_suffix} 2> /dev/null
+
+# Render the Dockerfile from the template. The committed Dockerfile is the
+# default-mode render of Dockerfile.j2, so a host without jinja2 can still run
+# a default build unchanged.
+if [ "X${CUSTOM_KERNEL}" == "Xyes" ]; then
+	$PYTHON $RENDER --template Dockerfile.j2 --output Dockerfile \
+		--kernel-packages kernel-packages \
+		--custom-kernel --ofed-src-tarball ${ofed_src_tarball}
+elif $PYTHON -c 'import jinja2' > /dev/null 2>&1; then
+	$PYTHON $RENDER --template Dockerfile.j2 --output Dockerfile \
+		--kernel-packages kernel-packages
+else
+	echo "python3 jinja2 not available - using the committed Dockerfile as is."
+fi
 
 sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/g;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/g" Dockerfile
+
+sed -i -e "s|@CUSTOM_KERNEL@|${CUSTOM_KERNEL}|g" \
+	-e "s|@CUSTOM_KERNEL_VERSION@|${CUSTOM_KERNEL_VERSION}|g" \
+	-e "s|@OFED_SRC_TARBALL@|${ofed_src_tarball}|g" \
+	-e "s|@OFED_KERNEL_EXTRA_ARGS@|${OFED_KERNEL_EXTRA_ARGS}|g" \
+	-e "s|@OFED_INSTALL_EXTRA_ARGS@|${OFED_INSTALL_EXTRA_ARGS}|g" \
+	-e "s|@BUILD_SOC_MODULES@|${BUILD_SOC_MODULES}|g" \
+	-e "s|@SOC_SRC_URL@|${SOC_SRC_URL}|g" \
+	build_ubuntu_bfb
 
 docker build -t ${docker_image} \
 	-f Dockerfile .
 
 DOCKER_RUN_PARAMS="--privileged -e container=docker \
 	-v $PWD:/workspace \
-	--name BlueField_OS_${DISTRO}_${DISTRO_VERSION} \
+	--name BlueField_OS_${DISTRO}_${DISTRO_VERSION}${image_suffix} \
 	--mount type=bind,source=/dev,target=/dev \
 	--mount type=bind,source=/sys,target=/sys \
 	--mount type=bind,source=/proc,target=/proc"
@@ -134,5 +283,5 @@ readlink -f *.iso
 echo "Default user/password is: ubuntu/ubuntu"
 
 if [ "X${LEAVE_CONTAINER}" == "Xyes" ]; then
-	echo "Container name: BlueField_OS_${DISTRO}_${DISTRO_VERSION} id: ${docker_id}"
+	echo "Container name: BlueField_OS_${DISTRO}_${DISTRO_VERSION}${image_suffix} id: ${docker_id}"
 fi

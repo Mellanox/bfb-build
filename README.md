@@ -106,6 +106,88 @@ MLNX_OFED driver packages and other BlueField SoC drivers.
 The relevant source packages are available under
 https://linux.mellanox.com/public/repo/bluefield/latest/extras/.
 
+### Ubuntu 24.04 / 24.04-64k: built-in custom kernel support
+
+`ubuntu/24.04` and `ubuntu/24.04-64k` can do this for you. Put your kernel
+`.deb` packages in a directory and set `CUSTOM_KERNEL=yes`:
+
+````
+CUSTOM_KERNEL=yes \
+CUSTOM_KERNEL_DEBS=/path/to/my-kernel-debs \
+./bfb-build ubuntu 24.04
+````
+
+The same works for the 64k-page variant with `./bfb-build ubuntu 24.04-64k`.
+
+The directory must contain at least `linux-image-*`, `linux-modules-*` and the
+matching `linux-headers-*` packages. The headers are required: MLNX_OFED is
+compiled against `/lib/modules/<kernel>/build`.
+
+What this changes compared to a default build:
+
+- the NVIDIA BlueField kernel pinned in `ubuntu/24.04/kernel-packages` is not
+  installed; your packages are installed instead
+- `doca-runtime-user` / `doca-devel-user` are installed instead of
+  `doca-runtime` / `doca-devel`. These pull the complete DOCA user space but
+  none of the prebuilt, kernel-version-pinned DOCA kernel modules
+  (`doca-runtime = doca-runtime-kernel + doca-runtime-user`)
+- MLNX_OFED is rebuilt from source against your kernel and installed, before
+  `create_bfb` packs the root filesystem
+- `install.pl` also builds `kernel-mft-modules` (`mst_pci`, `mst_pciconf`,
+  `bf3_livefish`), so those are rebuilt for your kernel as well
+- `apt-preferences-custom-kernel` keeps every prebuilt, kernel-version-pinned
+  DOCA/MFT module package out of the image. The `doca-*-user` swap alone is not
+  enough: `ngauge` recommends the virtual package `fwctl-modules`, which
+  `mlnx-ofed-kernel-modules` provides
+- before `create_bfb` runs, the modules this flow is responsible for are
+  asserted to resolve against the target kernel. `create_bfb` and `install.sh`
+  both build their initramfs with `modinfo <mod> || continue`, so without this a
+  module that failed to build is dropped silently and only surfaces as a broken
+  DPU
+
+BlueField SoC drivers (`mlxbf-tmfifo`, `mlxbf-gige`, `gpio-mlxbf*`, `i2c-mlxbf`,
+`mlxbf-pmc`, `pinctrl-mlxbf3`, `pwr-mlxbf`, `sdhci-of-dwcmshc`, ...) are part of
+the kernel on Ubuntu 22.04 and 24.04, and most are upstream, so a stock Ubuntu
+kernel already carries them. The few that are not — `mlxbf-pka` and `ipmb_host`
+on a stock `6.8.0-31-generic` — are rebuilt from the SoC sources published at
+`.../SOURCES/SoC/`, which ship `debian/` packaging inside each `.src.rpm`. Only
+the modules the target kernel is actually missing are built; for a kernel
+derived from the BlueField kernel source, none are. Set `BUILD_SOC_MODULES=no`
+to skip this. Anything that still fails to build is reported by the warning
+described above rather than failing the BFB.
+
+Additional variables:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CUSTOM_KERNEL` | `no` | set to `yes` to enable the custom kernel flow |
+| `CUSTOM_KERNEL_DEBS` | - | directory holding the kernel `.deb` files |
+| `CUSTOM_KERNEL_VERSION` | auto-detect | kernel release string, e.g. `6.8.0-1022-bluefield`. Set it when more than one kernel ends up installed |
+| `MLNX_OFED_SRC_URL` | `<BASE_URL>/doca/<DOCA_VERSION>-<BSP_VERSION>/SOURCES/mlnx_ofed/MLNX_OFED_SRC-debian-<ver>.tgz` | MLNX_OFED debian sources |
+| `MLNX_OFED_SRC_LOCAL` | - | use an already-downloaded tarball instead of fetching it |
+| `OFED_KERNEL_EXTRA_ARGS` | BlueField DPU flag set | passed to the MLNX_OFED kernel configure script |
+| `OFED_INSTALL_EXTRA_ARGS` | - | extra `install.pl` flags, e.g. `--without-depcheck` |
+| `BUILD_SOC_MODULES` | `yes` | rebuild BlueField SoC modules the kernel lacks |
+| `SOC_SRC_URL` | `<BASE_URL>/doca/<DOCA_VERSION>-<BSP_VERSION>/SOURCES/SoC` | SoC driver sources |
+
+
+MLNX_OFED sources are published per DOCA release under
+`https://linux.mellanox.com/public/repo/doca/<doca-version>-<bsp-version>/SOURCES/mlnx_ofed/`,
+alongside the BlueField SoC driver sources in `../SoC/`. The MLNX_OFED version
+is paired with the DOCA release, so `MLNX_OFED_VERSION` in `bfb-build` must
+match what is published for `DOCA_VERSION` (DOCA 3.4.0 pairs with MLNX_OFED
+26.04-0.8.5.0, DOCA 3.4.1 with 26.04-1.1.0.0). If the download fails, check
+that pairing first, or supply a local copy with `MLNX_OFED_SRC_LOCAL`.
+
+The resulting image and container are suffixed with `_custom_kernel`, so a
+custom kernel build does not overwrite a default one.
+
+The two modes are generated from a single `Dockerfile.j2` template per distro.
+The 24.04 and 24.04-64k templates are identical; they differ only in their
+`kernel-packages` file, which lists the default kernel to install.
+The committed `ubuntu/24.04/Dockerfile` is the default-mode rendering of that
+template, so default builds work unchanged and do not require Jinja2. Rendering
+the custom kernel variant requires `python3-jinja2`.
 
 **Example for RPM based Distros:**
 The following steps can be added to the Dockerfile based on the real kernel and

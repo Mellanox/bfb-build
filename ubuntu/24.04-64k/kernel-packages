@@ -1,0 +1,16 @@
+# NVIDIA BlueField 64k-page kernel packages installed by the default (non custom
+# kernel) build. One package per line; blank lines and # comments are ignored.
+#
+# These are consumed by Dockerfile.j2 via render_dockerfile.py. In custom kernel
+# mode this list is not used at all - the customer's own kernel .debs are
+# installed instead, and MLNX_OFED is rebuilt against them.
+#
+# To move to a different NVIDIA kernel, update every version here together.
+linux-bluefield-headers-6.8.0-1022=6.8.0-1022.26
+linux-bluefield-tools-6.8.0-1022=6.8.0-1022.26
+linux-buildinfo-6.8.0-1022-bluefield-64k=6.8.0-1022.26
+linux-headers-6.8.0-1022-bluefield-64k=6.8.0-1022.26
+linux-image-6.8.0-1022-bluefield-64k=6.8.0-1022.26
+linux-modules-6.8.0-1022-bluefield-64k=6.8.0-1022.26
+linux-modules-extra-6.8.0-1022-bluefield-64k=6.8.0-1022.26
+linux-tools-6.8.0-1022-bluefield-64k=6.8.0-1022.26

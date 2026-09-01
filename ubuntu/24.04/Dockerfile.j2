@@ -157,6 +157,10 @@ RUN apt-get clean -y && \
 #Toolchain required to rebuild MLNX_OFED and the BlueField SoC modules
 #against the custom kernel. rpm/cpio unpack the SoC .src.rpm sources, which
 #carry debian/ packaging; git/bzip2/lsb-release are their build deps.
+#NOTE: do not add dkms here. Nothing needs it (MLNX_OFED is built with
+#--without-dkms and the SoC modules with WITH_DKMS=0) and it pulls in
+#linux-headers-generic, which creates a headers-only /lib/modules entry that
+#the kernel auto-detection below can mistake for the target kernel.
         autoconf \
         automake \
         autotools-dev \
@@ -166,7 +170,6 @@ RUN apt-get clean -y && \
         debhelper \
         dh-python \
         diffstat \
-        dkms \
         flex \
         git \
         libelf-dev \

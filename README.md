@@ -106,16 +106,18 @@ MLNX_OFED driver packages and other BlueField SoC drivers.
 The relevant source packages are available under
 https://linux.mellanox.com/public/repo/bluefield/latest/extras/.
 
-### Ubuntu 24.04: built-in custom kernel support
+### Ubuntu 24.04 / 24.04-64k: built-in custom kernel support
 
-`ubuntu/24.04` can do this for you. Put your kernel `.deb` packages in a
-directory and set `CUSTOM_KERNEL=yes`:
+`ubuntu/24.04` and `ubuntu/24.04-64k` can do this for you. Put your kernel
+`.deb` packages in a directory and set `CUSTOM_KERNEL=yes`:
 
 ````
 CUSTOM_KERNEL=yes \
 CUSTOM_KERNEL_DEBS=/path/to/my-kernel-debs \
 ./bfb-build ubuntu 24.04
 ````
+
+The same works for the 64k-page variant with `./bfb-build ubuntu 24.04-64k`.
 
 The directory must contain at least `linux-image-*`, `linux-modules-*` and the
 matching `linux-headers-*` packages. The headers are required: MLNX_OFED is
@@ -180,7 +182,9 @@ that pairing first, or supply a local copy with `MLNX_OFED_SRC_LOCAL`.
 The resulting image and container are suffixed with `_custom_kernel`, so a
 custom kernel build does not overwrite a default one.
 
-The two modes are generated from a single `ubuntu/24.04/Dockerfile.j2` template.
+The two modes are generated from a single `Dockerfile.j2` template per distro.
+The 24.04 and 24.04-64k templates are identical; they differ only in their
+`kernel-packages` file, which lists the default kernel to install.
 The committed `ubuntu/24.04/Dockerfile` is the default-mode rendering of that
 template, so default builds work unchanged and do not require Jinja2. Rendering
 the custom kernel variant requires `python3-jinja2`.

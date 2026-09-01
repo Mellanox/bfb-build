@@ -1,6 +1,324 @@
 #!/bin/bash
 
+###############################################################################
+#
+# Copyright 2026 NVIDIA Corporation
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+###############################################################################
 
-kernel=`/bin/ls -1tr /lib/modules | tail -1`
+# Values below are substituted by ubuntu/24.04/bfb-build before the image is built.
+CUSTOM_KERNEL="@CUSTOM_KERNEL@"
+CUSTOM_KERNEL_VERSION="@CUSTOM_KERNEL_VERSION@"
+OFED_SRC_TARBALL="@OFED_SRC_TARBALL@"
+OFED_KERNEL_EXTRA_ARGS='@OFED_KERNEL_EXTRA_ARGS@'
+OFED_INSTALL_EXTRA_ARGS='@OFED_INSTALL_EXTRA_ARGS@'
+BUILD_SOC_MODULES="@BUILD_SOC_MODULES@"
+SOC_SRC_URL="@SOC_SRC_URL@"
 
-/root/workspace/create_bfb -k $kernel
+SDIR=/root/workspace
+
+# Build MLNX_OFED under /tmp: create_bfb excludes ./tmp/* from the shipped
+# rootfs, so the source tree and build artifacts never reach the BFB.
+OFED_BUILD_DIR=${OFED_BUILD_DIR:-/tmp/ofed-rebuild}
+SOC_BUILD_DIR=${SOC_BUILD_DIR:-/tmp/soc-rebuild}
+
+# Execute command w/ echo and exit if it fails
+ex()
+{
+	echo "+ $@"
+	if ! "$@"; then
+		printf "\nFailed executing $@\n\n"
+		exit 1
+	fi
+}
+
+# Pick the kernel the BFB will be built for.
+if [ -n "${CUSTOM_KERNEL_VERSION}" ]; then
+	kernel="${CUSTOM_KERNEL_VERSION}"
+else
+	kernel=`/bin/ls -1tr /lib/modules | tail -1`
+fi
+
+if [ "X${CUSTOM_KERNEL}" != "Xyes" ]; then
+	/root/workspace/create_bfb -k $kernel
+	exit $?
+fi
+
+###############################################################################
+# Custom kernel build
+#
+# The Dockerfile installed the customer's kernel .debs instead of the NVIDIA
+# BlueField kernel, and pulled doca-runtime-user / doca-devel-user so that no
+# prebuilt (kernel-version-pinned) DOCA kernel modules were installed.
+#
+# MLNX_OFED must now be rebuilt from source against that kernel. Its install.pl
+# also builds kernel-mft-modules (mst_pci, mst_pciconf, bf3_livefish), so those
+# are covered too.
+#
+# Most BlueField SoC drivers (tmfifo, mlxbf-gige, gpio-mlxbf, i2c-mlxbf,
+# mlxbf-pmc, pinctrl-mlxbf3, pwr-mlxbf, sdhci-of-dwcmshc, ...) are upstream and
+# ship inside the kernel, so they are not rebuilt. The few a given kernel lacks
+# are rebuilt from the SoC sources further down.
+###############################################################################
+
+echo "==============================================================="
+echo " Custom kernel BFB build"
+echo " kernel          : ${kernel}"
+echo " MLNX_OFED source: ${OFED_SRC_TARBALL}"
+echo "==============================================================="
+
+if [ ! -d /lib/modules/${kernel} ]; then
+	echo "ERROR: /lib/modules/${kernel} does not exist."
+	echo "Kernels present in this image:"
+	/bin/ls -1 /lib/modules
+	echo "Set CUSTOM_KERNEL_VERSION to select one explicitly."
+	exit 1
+fi
+
+if [ ! -e /lib/modules/${kernel}/build ]; then
+	echo "ERROR: kernel build tree missing: /lib/modules/${kernel}/build"
+	echo "MLNX_OFED cannot be compiled without it. Make sure the matching"
+	echo "linux-headers .deb is included in CUSTOM_KERNEL_DEBS."
+	exit 1
+fi
+
+nkernels=`/bin/ls -1 /lib/modules | wc -l`
+if [ "$nkernels" != "1" ]; then
+	echo "WARNING: more than one kernel is present in /lib/modules:"
+	/bin/ls -1 /lib/modules
+	echo "WARNING: building MLNX_OFED against '${kernel}'."
+	echo "WARNING: set CUSTOM_KERNEL_VERSION if that is not the intended one."
+fi
+
+if [ ! -e "${SDIR}/${OFED_SRC_TARBALL}" ]; then
+	echo "ERROR: MLNX_OFED source tarball not found: ${SDIR}/${OFED_SRC_TARBALL}"
+	exit 1
+fi
+
+mkdir -p ${OFED_BUILD_DIR}
+cd ${OFED_BUILD_DIR}
+
+ex tar xzf ${SDIR}/${OFED_SRC_TARBALL}
+
+# NOTE: MLNX_OFED_SRC-debian-<ver>.tgz extracts into a directory WITHOUT
+# 'debian' in its name (MLNX_OFED_SRC-<ver>/), so discover it rather than
+# deriving it from the tarball filename.
+ofed_srcdir=`/bin/ls -1d ${OFED_BUILD_DIR}/MLNX_OFED_SRC-* ${OFED_BUILD_DIR}/OFED-internal-* 2>/dev/null | head -1`
+
+if [ -z "${ofed_srcdir}" ] || [ ! -x "${ofed_srcdir}/install.pl" ]; then
+	echo "ERROR: could not find install.pl in the extracted MLNX_OFED source."
+	echo "Contents of ${OFED_BUILD_DIR}:"
+	/bin/ls -1 ${OFED_BUILD_DIR}
+	exit 1
+fi
+
+echo "MLNX_OFED source directory: ${ofed_srcdir}"
+
+# Build (do not install) the kernel-space DEBs against the custom kernel.
+#   --kernel-only   build kernel space packages only
+#   --without-dkms  build binaries for this exact kernel instead of DKMS
+#   --build-only    produce DEBs without installing them
+ex ${ofed_srcdir}/install.pl \
+	--kernel-only \
+	--without-dkms \
+	--build-only \
+	-k ${kernel} \
+	-s /lib/modules/${kernel}/build \
+	--kernel-extra-args "${OFED_KERNEL_EXTRA_ARGS}" \
+	${OFED_INSTALL_EXTRA_ARGS}
+
+ofed_debs=`find ${ofed_srcdir}/DEBS -name '*.deb' ! -name '*dbg*' ! -name '*debuginfo*' 2>/dev/null`
+
+if [ -z "${ofed_debs}" ]; then
+	echo "ERROR: MLNX_OFED build produced no .deb packages under ${ofed_srcdir}/DEBS"
+	exit 1
+fi
+
+echo "Installing rebuilt MLNX_OFED packages:"
+echo "${ofed_debs}" | sed -e 's|.*/|  |'
+
+dpkg -i --force-overwrite ${ofed_debs} || apt install -y -f
+if [ $? -ne 0 ]; then
+	echo "ERROR: failed to install the rebuilt MLNX_OFED packages"
+	exit 1
+fi
+
+ex depmod -a ${kernel}
+
+# openibd must load the freshly built MLNX_OFED modules.
+if [ -e /etc/infiniband/openib.conf ]; then
+	ex sed -i -e "s/FORCE_MODE=.*/FORCE_MODE=yes/" /etc/infiniband/openib.conf
+fi
+
+# VF interface-naming helpers. create_bfb copies these into the initramfs and
+# does so unconditionally, so a missing file aborts the build.
+#
+# install.pl would place them via copy_udev_rules(), but that is unreachable
+# here: it runs after an early `return 0` taken when --build-only is set, and it
+# targets /etc/udev/rules.d rather than the /lib/udev/rules.d that create_bfb
+# reads. mlnx-ofed-kernel-utils ships both files under examples/, so install
+# them from there.
+ofed_examples=/usr/share/doc/mlnx-ofed-kernel-utils/examples
+if [ -d "${ofed_examples}" ]; then
+	mkdir -p /etc/infiniband /lib/udev/rules.d
+	if [ ! -e /etc/infiniband/vf-net-link-name.sh ]; then
+		cp "${ofed_examples}/vf-net-link-name.sh" /etc/infiniband/
+		chmod 755 /etc/infiniband/vf-net-link-name.sh
+	fi
+	if [ ! -e /lib/udev/rules.d/82-net-setup-link.rules ]; then
+		cp "${ofed_examples}/82-net-setup-link.rules" /lib/udev/rules.d/
+	fi
+fi
+
+for f in /etc/infiniband/vf-net-link-name.sh /lib/udev/rules.d/82-net-setup-link.rules; do
+	if [ ! -e "$f" ]; then
+		echo "ERROR: $f is missing and could not be installed from"
+		echo "       ${ofed_examples}. create_bfb copies it into the initramfs"
+		echo "       unconditionally and will fail."
+		exit 1
+	fi
+done
+
+# BlueField SoC drivers ship inside the kernel on Ubuntu, and most are upstream,
+# so a stock kernel carries them. Not all: 6.8.0-31-generic lacks mlxbf-pka and
+# ipmb_host. Their sources are published per DOCA release as .src.rpm, each
+# carrying a tarball with debian/ packaging, so rebuild whichever the target
+# kernel is missing. (The OCP layer does the same for RHCOS, with the same two.)
+#
+# Best effort by design: a package that will not build is reported by the
+# advisory below rather than failing the BFB, since these are not needed to
+# install or boot.
+if [ "X${BUILD_SOC_MODULES}" == "Xyes" ] && [ -n "${SOC_SRC_URL}" ]; then
+	soc_index=""
+	for pair in mlxbf-pka:mlxbf_pka ipmb-host:ipmb_host; do
+		pkg=${pair%%:*}
+		mod=${pair##*:}
+
+		if (modinfo -k ${kernel} $mod > /dev/null 2>&1); then
+			continue
+		fi
+
+		echo "SoC: ${mod} is not provided by ${kernel}, rebuilding ${pkg}"
+
+		if [ -z "${soc_index}" ]; then
+			soc_index=`wget -qO- "${SOC_SRC_URL}/" 2>/dev/null`
+		fi
+		srpm=`echo "${soc_index}" | grep -oE "${pkg}-[0-9][^\"]*\.src\.rpm" | sort -u | head -1`
+		if [ -z "${srpm}" ]; then
+			echo "WARNING: no ${pkg} source rpm found under ${SOC_SRC_URL}/"
+			continue
+		fi
+
+		(
+			set -e
+			rm -rf ${SOC_BUILD_DIR}/${pkg}
+			mkdir -p ${SOC_BUILD_DIR}/${pkg}
+			cd ${SOC_BUILD_DIR}/${pkg}
+			wget -q "${SOC_SRC_URL}/${srpm}"
+			# .src.rpm is an rpm header plus a cpio payload holding the
+			# upstream tarball and the spec; we only want the tarball.
+			rpm2cpio "${srpm}" | cpio -idm --quiet
+			tarball=`/bin/ls -1 ${pkg}-*.tar.gz 2>/dev/null | head -1`
+			[ -n "${tarball}" ]
+			tar xzf "${tarball}"
+			cd `/bin/ls -1d ${pkg}-*/ | head -1`
+			# debian/control declares the -dkms package; control.no_dkms
+			# declares -modules, which is what WITH_DKMS=0 builds.
+			cp debian/control.no_dkms debian/control
+			WITH_DKMS=0 KVER=${kernel} dpkg-buildpackage -us -uc -b
+		)
+		if [ $? -ne 0 ]; then
+			echo "WARNING: failed to build ${pkg} for ${kernel}"
+			continue
+		fi
+
+		soc_debs=`find ${SOC_BUILD_DIR}/${pkg} -maxdepth 1 -name "${pkg}-modules_*.deb" 2>/dev/null`
+		if [ -z "${soc_debs}" ]; then
+			echo "WARNING: ${pkg} built but produced no -modules deb"
+			continue
+		fi
+		echo "Installing rebuilt ${pkg}:"
+		echo "${soc_debs}" | sed -e 's|.*/|  |'
+		dpkg -i --force-overwrite ${soc_debs} || apt install -y -f || true
+	done
+	depmod -a ${kernel} || true
+fi
+
+# Guard: nothing built for a different kernel may ship in the BFB. Such modules
+# would silently fail to load on the DPU, so fail the build loudly instead.
+stale=$(dpkg-query -W -f='${Package} ${Version}\n' 2>/dev/null | grep 'kver\.' | grep -v "kver\.${kernel}\b" || true)
+if [ -n "${stale}" ]; then
+	echo "ERROR: packages built for a different kernel are installed:"
+	echo "${stale}" | sed -e 's/^/  /'
+	echo ""
+	echo "These would not load on '${kernel}'. Either add them to the MLNX_OFED"
+	echo "rebuild set, or prevent them from being installed in the Dockerfile."
+	exit 1
+fi
+
+# Guard: create_bfb and install.sh both build their initramfs with a
+# "modinfo <mod> || continue" loop, so a module that failed to build is dropped
+# silently and only shows up as a broken DPU. Assert the ones this script is
+# responsible for providing actually resolve against the target kernel.
+missing=""
+for mod in mst_pci mst_pciconf bf3_livefish mlx5_core mlx5_ib; do
+	if ! (modinfo -k ${kernel} $mod > /dev/null 2>&1); then
+		missing="$missing $mod"
+	fi
+done
+if [ -n "${missing}" ]; then
+	echo "ERROR: modules missing for kernel ${kernel}:${missing}"
+	echo ""
+	echo "MLNX_OFED's install.pl builds all of these, including kernel-mft-modules"
+	echo "(mst_pci, mst_pciconf, bf3_livefish). Without them the BFB would install"
+	echo "and then fail on the DPU."
+	exit 1
+fi
+
+# Advisory: BlueField SoC drivers are not rebuilt here - on Ubuntu they ship
+# inside the kernel. Most are upstream, so a stock Ubuntu kernel carries them,
+# but not all: comparing linux-modules{,-extra} of 6.8.0-1022-bluefield against
+# stock 6.8.0-31-generic, the generic kernel lacks mlxbf-pka and ipmb_host.
+# (The OCP layer rebuilds exactly those two for RHCOS - same delta.)
+#
+# create_bfb and install.sh both drop unresolvable modules from the initramfs
+# without a word, so report them here instead of letting that happen silently.
+advisory=""
+for mod in mlxbf-bootctl mlxbf-tmfifo mlxbf-gige gpio-mlxbf2 gpio-mlxbf3 \
+	pinctrl-mlxbf3 i2c-mlxbf sdhci-of-dwcmshc dw_mmc-bluefield \
+	ipmb_host mlxbf_pka \
+	nvme nvme-rdma nvme-tcp ib_ipoib ib_iser ib_umad mlxfw
+do
+	if ! (modinfo -k ${kernel} $mod > /dev/null 2>&1); then
+		advisory="$advisory $mod"
+	fi
+done
+if [ -n "${advisory}" ]; then
+	echo "WARNING: not provided by kernel ${kernel}:${advisory}"
+	echo "WARNING: create_bfb will omit these from the installer initramfs."
+	echo "WARNING: BlueField SoC driver sources are published per DOCA release at"
+	echo "WARNING:   ${BASE_URL:-https://linux.mellanox.com/public/repo}/doca/<doca>-<bsp>/SOURCES/SoC/"
+	echo "WARNING: each .src.rpm carries a source tarball with debian/ packaging,"
+	echo "WARNING: so it can be rebuilt for this kernel with dpkg-buildpackage."
+fi
+
+/usr/sbin/update-pciids || true
+
+ex /root/workspace/create_bfb -k ${kernel}

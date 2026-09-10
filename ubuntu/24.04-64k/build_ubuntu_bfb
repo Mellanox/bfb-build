@@ -31,6 +31,7 @@ OFED_KERNEL_EXTRA_ARGS='@OFED_KERNEL_EXTRA_ARGS@'
 OFED_INSTALL_EXTRA_ARGS='@OFED_INSTALL_EXTRA_ARGS@'
 BUILD_SOC_MODULES="@BUILD_SOC_MODULES@"
 SOC_SRC_URL="@SOC_SRC_URL@"
+SOC_MODULES_SKIP="@SOC_MODULES_SKIP@"
 
 SDIR=/root/workspace
 
@@ -98,10 +99,9 @@ fi
 # also builds kernel-mft-modules (mst_pci, mst_pciconf, bf3_livefish), so those
 # are covered too.
 #
-# Most BlueField SoC drivers (tmfifo, mlxbf-gige, gpio-mlxbf, i2c-mlxbf,
-# mlxbf-pmc, pinctrl-mlxbf3, pwr-mlxbf, sdhci-of-dwcmshc, ...) are upstream and
-# ship inside the kernel, so they are not rebuilt. The few a given kernel lacks
-# are rebuilt from the SoC sources further down.
+# The BlueField SoC drivers are then rebuilt from the sources NVIDIA publishes
+# for this DOCA release, all of them, regardless of what the kernel already
+# carries.
 ###############################################################################
 
 echo "==============================================================="
@@ -223,69 +223,113 @@ for f in /etc/infiniband/vf-net-link-name.sh /lib/udev/rules.d/82-net-setup-link
 	fi
 done
 
-# BlueField SoC drivers ship inside the kernel on Ubuntu, and most are upstream,
-# so a stock kernel carries them. Not all: 6.8.0-31-generic lacks mlxbf-pka and
-# ipmb_host. Their sources are published per DOCA release as .src.rpm, each
-# carrying a tarball with debian/ packaging, so rebuild whichever the target
-# kernel is missing. (The OCP layer does the same for RHCOS, with the same two.)
+# BlueField SoC drivers.
 #
-# Best effort by design: a package that will not build is reported by the
-# advisory below rather than failing the BFB, since these are not needed to
-# install or boot.
+# NVIDIA publishes the SoC driver sources per DOCA release as .src.rpm under
+# SOURCES/SoC/. Every kernel module among them is rebuilt here, whether or not
+# the target kernel already provides a driver of the same name. The in-kernel
+# copy is a snapshot of whatever the customer's kernel forked from; these are
+# the versions this DOCA release was validated with. mlxbf-gige shows the gap
+# plainly: the NVIDIA tree carries mlxbf_gige_uphy.c and mlxbf_gige_debug.c,
+# neither of which is in mainline as of v6.16, and BF3 OOB networking needs
+# the first. Rebuilt modules install into /lib/modules/<kernel>/updates, which
+# depmod prefers over kernel/, so they take precedence over the in-box copy.
+#
+# Which sources are kernel modules is discovered, not hardcoded: a kernel
+# module source carries debian/control.no_dkms, declaring the -modules package
+# that WITH_DKMS=0 builds. The userspace sources (libpka, mlx-OpenIPMI,
+# mlxbf-bootctl, rshim) do not. That keeps this loop right when a DOCA release
+# adds or drops a driver.
+#
+# Best effort by design: a driver that will not build against this kernel is
+# reported in the summary rather than failing the BFB. SOC_MODULES_SKIP takes
+# a space separated list of package names to leave out.
 if [ "X${BUILD_SOC_MODULES}" == "Xyes" ] && [ -n "${SOC_SRC_URL}" ]; then
-	soc_index=""
-	for pair in mlxbf-pka:mlxbf_pka ipmb-host:ipmb_host; do
-		pkg=${pair%%:*}
-		mod=${pair##*:}
+	soc_built=""
+	soc_failed=""
+	soc_skipped=""
+	soc_debs=""
 
-		if (modinfo -k ${kernel} $mod > /dev/null 2>&1); then
-			continue
-		fi
+	srpms=`wget -qO- "${SOC_SRC_URL}/" 2>/dev/null | grep -oE '[A-Za-z0-9._+-]+\.src\.rpm' | sort -u`
+	if [ -z "${srpms}" ]; then
+		echo "WARNING: no SoC sources found under ${SOC_SRC_URL}/"
+	fi
 
-		echo "SoC: ${mod} is not provided by ${kernel}, rebuilding ${pkg}"
-
-		if [ -z "${soc_index}" ]; then
-			soc_index=`wget -qO- "${SOC_SRC_URL}/" 2>/dev/null`
-		fi
-		srpm=`echo "${soc_index}" | grep -oE "${pkg}-[0-9][^\"]*\.src\.rpm" | sort -u | head -1`
-		if [ -z "${srpm}" ]; then
-			echo "WARNING: no ${pkg} source rpm found under ${SOC_SRC_URL}/"
-			continue
-		fi
-
-		(
-			set -e
-			rm -rf ${SOC_BUILD_DIR}/${pkg}
-			mkdir -p ${SOC_BUILD_DIR}/${pkg}
-			cd ${SOC_BUILD_DIR}/${pkg}
+	for srpm in ${srpms}; do
+		rm -rf ${SOC_BUILD_DIR}/unpack
+		mkdir -p ${SOC_BUILD_DIR}/unpack
+		# .src.rpm is an rpm header plus a cpio payload holding the
+		# source tarball and the spec. The spec's name is the package
+		# name, which the tarball name carries a version suffix on.
+		if ! ( set -e
+			cd ${SOC_BUILD_DIR}/unpack
 			wget -q "${SOC_SRC_URL}/${srpm}"
-			# .src.rpm is an rpm header plus a cpio payload holding the
-			# upstream tarball and the spec; we only want the tarball.
-			rpm2cpio "${srpm}" | cpio -idm --quiet
-			tarball=`/bin/ls -1 ${pkg}-*.tar.gz 2>/dev/null | head -1`
-			[ -n "${tarball}" ]
-			tar xzf "${tarball}"
-			cd `/bin/ls -1d ${pkg}-*/ | head -1`
-			# debian/control declares the -dkms package; control.no_dkms
-			# declares -modules, which is what WITH_DKMS=0 builds.
-			cp debian/control.no_dkms debian/control
-			WITH_DKMS=0 KVER=${kernel} dpkg-buildpackage -us -uc -b
-		)
-		if [ $? -ne 0 ]; then
-			echo "WARNING: failed to build ${pkg} for ${kernel}"
+			rpm2cpio "${srpm}" | cpio -idm --quiet ); then
+			echo "WARNING: could not unpack ${srpm}"
+			soc_failed="${soc_failed} ${srpm}"
 			continue
 		fi
 
-		soc_debs=`find ${SOC_BUILD_DIR}/${pkg} -maxdepth 1 -name "${pkg}-modules_*.deb" 2>/dev/null`
-		if [ -z "${soc_debs}" ]; then
-			echo "WARNING: ${pkg} built but produced no -modules deb"
-			continue
+		spec=`/bin/ls -1 ${SOC_BUILD_DIR}/unpack/*.spec 2>/dev/null | head -1`
+		[ -n "${spec}" ] || continue
+		pkg=`basename "${spec}" .spec`
+
+		tarball=`/bin/ls -1 ${SOC_BUILD_DIR}/unpack/${pkg}-*.tar.* 2>/dev/null | head -1`
+		[ -n "${tarball}" ] || continue
+
+		rm -rf ${SOC_BUILD_DIR}/${pkg}
+		mkdir -p ${SOC_BUILD_DIR}/${pkg}
+		tar xf "${tarball}" -C ${SOC_BUILD_DIR}/${pkg} || continue
+		srcdir=`/bin/ls -1d ${SOC_BUILD_DIR}/${pkg}/*/ 2>/dev/null | head -1`
+		[ -n "${srcdir}" ] || continue
+
+		[ -e "${srcdir}/debian/control.no_dkms" ] || continue
+
+		case " ${SOC_MODULES_SKIP} " in
+			*" ${pkg} "*)
+				echo "SoC: skipping ${pkg} on request"
+				soc_skipped="${soc_skipped} ${pkg}"
+				continue
+				;;
+		esac
+
+		echo "SoC: building ${pkg} for ${kernel}"
+		if ( set -e
+			cd "${srcdir}"
+			cp debian/control.no_dkms debian/control
+			WITH_DKMS=0 KVER=${kernel} dpkg-buildpackage -us -uc -b ); then
+			# The -modules package is not always named after the
+			# source: tmfifo produces mlxbf-tmfifo-modules.
+			built=`find ${SOC_BUILD_DIR}/${pkg} -maxdepth 2 -name '*-modules_*.deb' 2>/dev/null`
+			if [ -n "${built}" ]; then
+				soc_debs="${soc_debs} ${built}"
+				soc_built="${soc_built} ${pkg}"
+			else
+				echo "WARNING: ${pkg} built but produced no -modules deb"
+				soc_failed="${soc_failed} ${pkg}"
+			fi
+		else
+			soc_failed="${soc_failed} ${pkg}"
 		fi
-		echo "Installing rebuilt ${pkg}:"
-		echo "${soc_debs}" | sed -e 's|.*/|  |'
-		dpkg -i --force-overwrite ${soc_debs} || apt install -y -f || true
 	done
-	depmod -a ${kernel} || true
+
+	if [ -n "${soc_debs}" ]; then
+		echo "Installing rebuilt SoC modules:"
+		echo ${soc_debs} | tr ' ' '\n' | sed -e 's|.*/|  |'
+		dpkg -i --force-overwrite ${soc_debs} || apt install -y -f || true
+		depmod -a ${kernel} || true
+	fi
+
+	echo "SoC modules built: ${soc_built:-none}"
+	if [ -n "${soc_skipped}" ]; then
+		echo "SoC modules skipped:${soc_skipped}"
+	fi
+	if [ -n "${soc_failed}" ]; then
+		echo "WARNING: SoC modules that failed to build for ${kernel}:${soc_failed}"
+		echo "WARNING: the BFB will not carry them. Add a package to"
+		echo "WARNING: SOC_MODULES_SKIP to accept its absence, or enable whatever"
+		echo "WARNING: the kernel config is missing and rebuild."
+	fi
 fi
 
 # Guard: nothing built for a different kernel may ship in the BFB. Such modules
@@ -319,19 +363,13 @@ if [ -n "${missing}" ]; then
 	exit 1
 fi
 
-# Advisory: BlueField SoC drivers are not rebuilt here - on Ubuntu they ship
-# inside the kernel. Most are upstream, so a stock Ubuntu kernel carries them,
-# but not all: comparing linux-modules{,-extra} of 6.8.0-1022-bluefield against
-# stock 6.8.0-31-generic, the generic kernel lacks mlxbf-pka and ipmb_host.
-# (The OCP layer rebuilds exactly those two for RHCOS - same delta.)
-#
-# create_bfb and install.sh both drop unresolvable modules from the initramfs
-# without a word, so report them here instead of letting that happen silently.
+# Advisory: create_bfb and install.sh both build their initramfs with a
+# "modinfo <mod> || continue" loop, so anything unresolvable is dropped without
+# a word. Report the rest of what the DPU expects to find, so a gap shows up
+# here rather than on the card. The SoC drivers are covered by the build
+# summary above.
 advisory=""
-for mod in mlxbf-bootctl mlxbf-tmfifo mlxbf-gige gpio-mlxbf2 gpio-mlxbf3 \
-	pinctrl-mlxbf3 i2c-mlxbf sdhci-of-dwcmshc dw_mmc-bluefield \
-	ipmb_host mlxbf_pka \
-	nvme nvme-rdma nvme-tcp ib_ipoib ib_iser ib_umad mlxfw
+for mod in nvme nvme-rdma nvme-tcp ib_ipoib ib_iser ib_umad mlxfw
 do
 	if ! (modinfo -k ${kernel} $mod > /dev/null 2>&1); then
 		advisory="$advisory $mod"
@@ -340,10 +378,6 @@ done
 if [ -n "${advisory}" ]; then
 	echo "WARNING: not provided by kernel ${kernel}:${advisory}"
 	echo "WARNING: create_bfb will omit these from the installer initramfs."
-	echo "WARNING: BlueField SoC driver sources are published per DOCA release at"
-	echo "WARNING:   ${BASE_URL:-https://linux.mellanox.com/public/repo}/doca/<doca>-<bsp>/SOURCES/SoC/"
-	echo "WARNING: each .src.rpm carries a source tarball with debian/ packaging,"
-	echo "WARNING: so it can be rebuilt for this kernel with dpkg-buildpackage."
 fi
 
 /usr/sbin/update-pciids || true

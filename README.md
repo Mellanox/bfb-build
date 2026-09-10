@@ -145,16 +145,31 @@ What this changes compared to a default build:
   module that failed to build is dropped silently and only surfaces as a broken
   DPU
 
-BlueField SoC drivers (`mlxbf-tmfifo`, `mlxbf-gige`, `gpio-mlxbf*`, `i2c-mlxbf`,
-`mlxbf-pmc`, `pinctrl-mlxbf3`, `pwr-mlxbf`, `sdhci-of-dwcmshc`, ...) are part of
-the kernel on Ubuntu 22.04 and 24.04, and most are upstream, so a stock Ubuntu
-kernel already carries them. The few that are not — `mlxbf-pka` and `ipmb_host`
-on a stock `6.8.0-31-generic` — are rebuilt from the SoC sources published at
-`.../SOURCES/SoC/`, which ship `debian/` packaging inside each `.src.rpm`. Only
-the modules the target kernel is actually missing are built; for a kernel
-derived from the BlueField kernel source, none are. Set `BUILD_SOC_MODULES=no`
-to skip this. Anything that still fails to build is reported by the warning
-described above rather than failing the BFB.
+All BlueField SoC kernel modules are rebuilt against the custom kernel from the
+sources published at `.../SOURCES/SoC/`, one `.src.rpm` per driver, each
+carrying `debian/` packaging. They are rebuilt whether or not the kernel already
+provides a driver of the same name. Most of them are upstream, but the in-kernel
+copy is a snapshot of whatever the customer's kernel forked from, while these
+are the versions the DOCA release was validated with: for DOCA 3.4.0,
+`mlxbf-gige` carries `mlxbf_gige_uphy.c` and `mlxbf_gige_debug.c`, neither of
+which is in mainline as of v6.16, and BF3 OOB networking needs the first. The
+rebuilt modules install into `/lib/modules/<kernel>/updates`, which `depmod`
+prefers over `kernel/`, so they take precedence over the in-box copy.
+
+Which sources are kernel modules is discovered rather than hardcoded: a kernel
+module source carries `debian/control.no_dkms`, the userspace ones (`libpka`,
+`mlx-OpenIPMI`, `mlxbf-bootctl`, `rshim`) do not. For DOCA 3.4.0 that is 20 of
+the 24 published sources. Seven of the twenty are NVIDIA-only and exist in no
+upstream kernel: `ipmb-host`, `mlx-cpld`, `mlx-trio`, `mlxbf-livefish`,
+`mlxbf-pka`, `mlxbf-ptm`, `pwr-mlxbf`. Two more (`gpio-mlxbf3`,
+`pinctrl-mlxbf3`) only reached mainline in v6.6.
+
+Set `BUILD_SOC_MODULES=no` to skip all of them, or name individual packages in
+`SOC_MODULES_SKIP` to leave one out. A driver that will not build is listed in
+the build summary rather than failing the BFB. `sdhci-of-dwcmshc` is the one to
+watch: it links private copies of `sdhci.o` and `sdhci-pltfm.o` into its own
+module, so on a kernel whose eMMC support differs from BlueField's it is the
+first candidate for `SOC_MODULES_SKIP`.
 
 Additional variables:
 
@@ -167,8 +182,9 @@ Additional variables:
 | `MLNX_OFED_SRC_LOCAL` | - | use an already-downloaded tarball instead of fetching it |
 | `OFED_KERNEL_EXTRA_ARGS` | BlueField DPU flag set | passed to the MLNX_OFED kernel configure script |
 | `OFED_INSTALL_EXTRA_ARGS` | - | extra `install.pl` flags, e.g. `--without-depcheck` |
-| `BUILD_SOC_MODULES` | `yes` | rebuild BlueField SoC modules the kernel lacks |
+| `BUILD_SOC_MODULES` | `yes` | rebuild every BlueField SoC kernel module |
 | `SOC_SRC_URL` | `<BASE_URL>/doca/<DOCA_VERSION>-<BSP_VERSION>/SOURCES/SoC` | SoC driver sources |
+| `SOC_MODULES_SKIP` | - | space separated SoC package names to leave out |
 
 
 MLNX_OFED sources are published per DOCA release under

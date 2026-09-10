@@ -365,11 +365,13 @@ fi
 
 # Advisory: create_bfb and install.sh both build their initramfs with a
 # "modinfo <mod> || continue" loop, so anything unresolvable is dropped without
-# a word. Report the rest of what the DPU expects to find, so a gap shows up
-# here rather than on the card. The SoC drivers are covered by the build
-# summary above.
+# a word. The SoC drivers are covered by the build summary above; what is left
+# is the set create_bfb wants that neither MLNX_OFED nor the SoC sources can
+# supply, so it has to come from the customer's kernel config.
 advisory=""
-for mod in nvme nvme-rdma nvme-tcp ib_ipoib ib_iser ib_umad mlxfw
+for mod in nvme nvme-rdma nvme-tcp ib_ipoib ib_iser ib_umad mlxfw \
+	dw_mmc dw_mmc-pltfm mmc_block sdhci 8021q \
+	ipmi_devintf ipmi_ssif nls_iso8859-1 sbsa_gwdt
 do
 	if ! (modinfo -k ${kernel} $mod > /dev/null 2>&1); then
 		advisory="$advisory $mod"

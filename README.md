@@ -171,6 +171,29 @@ watch: it links private copies of `sdhci.o` and `sdhci-pltfm.o` into its own
 module, so on a kernel whose eMMC support differs from BlueField's it is the
 first candidate for `SOC_MODULES_SKIP`.
 
+### What the kernel itself has to provide
+
+The customer supplies a kernel and its headers, nothing else. MLNX_OFED and the
+SoC sources cover every NVIDIA driver the DPU needs. What is left is the set
+`create_bfb` puts in the installer initramfs that comes from upstream and cannot
+be rebuilt out of tree:
+
+| Module | Kernel config |
+|---|---|
+| `dw_mmc`, `dw_mmc-pltfm` | `MMC_DW`, `MMC_DW_PLTFM` |
+| `mmc_block` | `MMC_BLOCK` |
+| `sdhci` | `MMC_SDHCI` |
+| `8021q` | `VLAN_8021Q` |
+| `ipmi_devintf`, `ipmi_ssif` | `IPMI_DEVICE_INTERFACE`, `IPMI_SSIF` |
+| `nls_iso8859-1` | `NLS_ISO8859_1` |
+| `sbsa_gwdt` | `ARM_SBSA_WATCHDOG` |
+
+A stock distro kernel has all of these. An arm64 `defconfig` does not: it misses
+`ARM_SBSA_WATCHDOG` and `IPMI_SSIF`. The build warns about whichever are absent
+rather than failing, since not every deployment needs all of them, but a kernel
+without `mmc_block` or `sdhci` will not boot from eMMC.
+
+
 Additional variables:
 
 | Variable | Default | Purpose |

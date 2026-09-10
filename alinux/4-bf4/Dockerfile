@@ -10,7 +10,6 @@ ADD install.sh create_bfb /root/workspace/
 ADD repos/ /etc/yum.repos.d/
 
 RUN echo "install_weak_deps=False" >> /etc/dnf/dnf.conf && \
-    echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
     # alinux mirrors are throttled; relax dnf download limits so slow transfers don't abort.
     printf 'minrate=100\ntimeout=600\nretries=20\n' >> /etc/dnf/dnf.conf && \
     dnf config-manager --set-enabled alinux4-devel
@@ -19,6 +18,7 @@ RUN dnf -y install systemd && \
     dnf  --allowerasing -y group install Core && \
     dnf  -y install \
         kernel \
+        kernel-headers \
         acpid \
         audit \
         bind-utils \
@@ -111,7 +111,6 @@ RUN systemctl enable mst || true
 RUN systemctl enable mlnx_snap.service || true
 RUN systemctl disable kubelet || true
 RUN systemctl disable containerd || true
-RUN systemctl disable mlx_ipmid.service || true
 # ecs_mq is the Alibaba Cloud ECS message-queue agent baked into the alinux base
 # image; it has no role on a DPU and fails to start every boot. Mask it (alinux-only).
 RUN systemctl mask ecs_mq.service || true

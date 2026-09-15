@@ -100,6 +100,10 @@ OFED_SOURCES_URL=${OFED_SOURCES_URL:-""}
 # Path to a doca-dpu-repo-<distro>-local deb. When set the image installs it
 # instead of pointing apt at the published DOCA repo, which is what makes a
 # build possible before a DOCA release is published.
+# A DOCA apt repo URL to use instead of the published one. Preferred over
+# DOCA_REPO_DEB: it keeps IMAGE_TYPE selecting the right bootimages variant,
+# and avoids copying a multi-GB repo package through the build context.
+DOCA_REPO_URL=${DOCA_REPO_URL:-""}
 DOCA_REPO_DEB=${DOCA_REPO_DEB:-""}
 # Path to an mlxbf-bootimages deb. Same purpose as DOCA_REPO_DEB: the published
 # copy does not exist until the DOCA release is out.
@@ -171,6 +175,10 @@ WDIR=/tmp/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}${image_suffix}.$$
 
 mkdir -p $WDIR
 
+# One place decides where DOCA packages and bootimages come from, so that
+# IMAGE_TYPE keeps selecting the matching bootimages variant either way.
+doca_repo_url=${DOCA_REPO_URL:-"${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/${ARCH}"}
+
 echo "Downloading mlxbf-bootimages..."
 case "$IMAGE_TYPE" in
 	prod)
@@ -191,7 +199,7 @@ if [ -n "${BOOTIMAGES_DEB}" ]; then
 	fi
 	cp -a ${BOOTIMAGES_DEB} $WDIR/mlxbf-bootimages.deb
 else
-	wget -q -P $WDIR ${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/${ARCH}/$bootimages
+	wget -q -P $WDIR ${doca_repo_url}/$bootimages
 	mv $WDIR/mlxbf-bootimages*arm64.deb $WDIR/mlxbf-bootimages.deb
 fi
 
@@ -212,7 +220,7 @@ cp -a \
 if [ -n "${DOCA_REPO_DEB}" ]; then
 	echo "DOCA packages come from ${DOCA_REPO_DEB}, not the published repo."
 else
-	echo "deb [trusted=yes] ${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/${DISTRO}${DISTRO_VERSION}/arm64-dpu/ /" | tee $WDIR/repos/doca.base.list
+	echo "deb [trusted=yes] ${doca_repo_url}/ /" | tee $WDIR/repos/doca.base.list
 fi
 
 if [ -d install.env ]; then

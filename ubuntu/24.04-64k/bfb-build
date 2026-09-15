@@ -56,9 +56,9 @@ DISTRO="ubuntu"
 DISTRO_VERSION="24.04-64k"
 DISTRO_BASE_URL="https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-arm64-root.tar.xz"
 ARCH=${ARCH:-"arm64-dpu"}
-DOCA_VERSION="3.5.0"
-BSP_VERSION="4.16.0-14075"
-MLNX_OFED_VERSION="26.07-0.7.7"
+DOCA_VERSION="3.6.0"
+BSP_VERSION="4.17.0-14082"
+MLNX_OFED_VERSION="26.07-0.6.8.0"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-""}
 INCLUDE_DOCA_SERVICES=${INCLUDE_DOCA_SERVICES:-"yes"}
@@ -90,8 +90,17 @@ MLNX_OFED_SRC_URL=${MLNX_OFED_SRC_URL:-"${BASE_URL}/doca/${DOCA_VERSION}-${BSP_V
 
 # MLNX_OFED kernel configure flags for the BlueField DPU.
 OFED_KERNEL_EXTRA_ARGS=${OFED_KERNEL_EXTRA_ARGS:-"--with-core-mod --with-user_mad-mod --with-user_access-mod --with-addr_trans-mod --with-mlxfw-mod --with-mlx5-mod --with-mlx5-ipsec --with-ipoib-mod --with-mlxdevm-mod --with-srp-mod --with-iser-mod --with-isert-mod --with-gds --with-sf-cfg-drv --with-sf-sfc --without-xdp --without-odp --with-nfsrdma-mod"}
-# Extra flags passed to install.pl itself, e.g. --without-depcheck
-OFED_INSTALL_EXTRA_ARGS=${OFED_INSTALL_EXTRA_ARGS:-""}
+# OFED kernel module source packages to rebuild, in dependency order.
+# mlnx-ofed-kernel is always built and installed first.
+OFED_KERNEL_PACKAGES=${OFED_KERNEL_PACKAGES:-"mlnx-ofed-kernel iser isert srp mlnx-nvme mlnx-nfsrdma xpmem kernel-mft"}
+# Alternative to MLNX_OFED_SRC_URL: a directory of <pkg>_<ver>.orig.tar.* files,
+# e.g. an unpacked OFED-internal-debian tree. Takes over when the tarball is
+# not available, which is the case before a DOCA release publishes its sources.
+OFED_SOURCES_URL=${OFED_SOURCES_URL:-""}
+# Path to a doca-dpu-repo-<distro>-local deb. When set the image installs it
+# instead of pointing apt at the published DOCA repo, which is what makes a
+# build possible before a DOCA release is published.
+DOCA_REPO_DEB=${DOCA_REPO_DEB:-""}
 
 # Every BlueField SoC kernel module is rebuilt against the custom kernel from
 # the .src.rpm sources published per DOCA release. Set to "no" to skip them all,
@@ -105,6 +114,7 @@ PYTHON=${PYTHON:-python3}
 
 image_suffix=""
 ofed_src_tarball=""
+doca_repo_deb=""
 
 if [ "X${CUSTOM_KERNEL}" == "Xyes" ]; then
 	image_suffix="_custom_kernel"
@@ -114,6 +124,9 @@ if [ "X${CUSTOM_KERNEL}" == "Xyes" ]; then
 	fi
 	if [ -n "${MLNX_OFED_SRC_LOCAL}" ]; then
 		MLNX_OFED_SRC_LOCAL=$(abspath "${MLNX_OFED_SRC_LOCAL}")
+	fi
+	if [ -n "${DOCA_REPO_DEB}" ]; then
+		DOCA_REPO_DEB=$(abspath "${DOCA_REPO_DEB}")
 	fi
 
 	if [ -z "${CUSTOM_KERNEL_DEBS}" ]; then
@@ -176,7 +189,11 @@ cp -a \
 	../../common/tools/qemu-aarch64-static \
 	$WDIR
 
-echo "deb [trusted=yes] ${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/${DISTRO}${DISTRO_VERSION}/arm64-dpu/ /" | tee $WDIR/repos/doca.base.list
+if [ -n "${DOCA_REPO_DEB}" ]; then
+	echo "DOCA packages come from ${DOCA_REPO_DEB}, not the published repo."
+else
+	echo "deb [trusted=yes] ${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/${DISTRO}${DISTRO_VERSION}/arm64-dpu/ /" | tee $WDIR/repos/doca.base.list
+fi
 
 if [ -d install.env ]; then
 	cp -a install.env \
@@ -195,6 +212,16 @@ if [ "X${CUSTOM_KERNEL}" == "Xyes" ]; then
 	echo "Custom kernel packages:"
 	/bin/ls -1 $WDIR/custom-kernel | sed -e 's/^/  /'
 
+	if [ -n "${DOCA_REPO_DEB}" ]; then
+		if [ ! -e "${DOCA_REPO_DEB}" ]; then
+			echo "ERROR: DOCA_REPO_DEB not found: ${DOCA_REPO_DEB}"
+			exit 1
+		fi
+		doca_repo_deb=$(basename ${DOCA_REPO_DEB})
+		echo "Staging DOCA repo package: ${doca_repo_deb}"
+		cp -a ${DOCA_REPO_DEB} $WDIR/${doca_repo_deb}
+	fi
+
 	if [ -n "${MLNX_OFED_SRC_LOCAL}" ]; then
 		if [ ! -e "${MLNX_OFED_SRC_LOCAL}" ]; then
 			echo "ERROR: MLNX_OFED_SRC_LOCAL not found: ${MLNX_OFED_SRC_LOCAL}"
@@ -203,6 +230,9 @@ if [ "X${CUSTOM_KERNEL}" == "Xyes" ]; then
 		ofed_src_tarball=$(basename ${MLNX_OFED_SRC_LOCAL})
 		echo "Using local MLNX_OFED sources: ${MLNX_OFED_SRC_LOCAL}"
 		cp -a ${MLNX_OFED_SRC_LOCAL} $WDIR/${ofed_src_tarball}
+	elif [ -n "${OFED_SOURCES_URL}" ]; then
+		ofed_src_tarball=""
+		echo "Using MLNX_OFED source directory: ${OFED_SOURCES_URL}"
 	else
 		ofed_src_tarball=$(basename ${MLNX_OFED_SRC_URL})
 		echo "Downloading MLNX_OFED sources: ${MLNX_OFED_SRC_URL}"
@@ -214,7 +244,8 @@ if [ "X${CUSTOM_KERNEL}" == "Xyes" ]; then
 			echo "  ${BASE_URL}/doca/<doca-version>-<bsp-version>/SOURCES/mlnx_ofed/"
 			echo "Check that MLNX_OFED_VERSION (${MLNX_OFED_VERSION}) matches what is"
 			echo "published for DOCA ${DOCA_VERSION}, point MLNX_OFED_SRC_URL at the"
-			echo "right tarball, or supply a local copy with MLNX_OFED_SRC_LOCAL=<path>."
+			echo "right tarball, supply a local copy with MLNX_OFED_SRC_LOCAL=<path>,"
+			echo "or point OFED_SOURCES_URL at a directory of orig tarballs."
 			exit 1
 		fi
 	fi
@@ -239,7 +270,8 @@ docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION}${image_suffix} 2> /dev/nul
 if [ "X${CUSTOM_KERNEL}" == "Xyes" ]; then
 	$PYTHON $RENDER --template Dockerfile.j2 --output Dockerfile \
 		--kernel-packages kernel-packages \
-		--custom-kernel --ofed-src-tarball ${ofed_src_tarball}
+		--custom-kernel --ofed-src-tarball "${ofed_src_tarball}" \
+		--doca-repo-deb "${doca_repo_deb}"
 elif $PYTHON -c 'import jinja2' > /dev/null 2>&1; then
 	$PYTHON $RENDER --template Dockerfile.j2 --output Dockerfile \
 		--kernel-packages kernel-packages
@@ -253,7 +285,8 @@ sed -i -e "s|@CUSTOM_KERNEL@|${CUSTOM_KERNEL}|g" \
 	-e "s|@CUSTOM_KERNEL_VERSION@|${CUSTOM_KERNEL_VERSION}|g" \
 	-e "s|@OFED_SRC_TARBALL@|${ofed_src_tarball}|g" \
 	-e "s|@OFED_KERNEL_EXTRA_ARGS@|${OFED_KERNEL_EXTRA_ARGS}|g" \
-	-e "s|@OFED_INSTALL_EXTRA_ARGS@|${OFED_INSTALL_EXTRA_ARGS}|g" \
+	-e "s|@OFED_SOURCES_URL@|${OFED_SOURCES_URL}|g" \
+	-e "s|@OFED_KERNEL_PACKAGES@|${OFED_KERNEL_PACKAGES}|g" \
 	-e "s|@BUILD_SOC_MODULES@|${BUILD_SOC_MODULES}|g" \
 	-e "s|@SOC_SRC_URL@|${SOC_SRC_URL}|g" \
 	-e "s|@SOC_MODULES_SKIP@|${SOC_MODULES_SKIP}|g" \

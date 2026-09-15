@@ -131,10 +131,15 @@ What this changes compared to a default build:
   `doca-runtime` / `doca-devel`. These pull the complete DOCA user space but
   none of the prebuilt, kernel-version-pinned DOCA kernel modules
   (`doca-runtime = doca-runtime-kernel + doca-runtime-user`)
-- MLNX_OFED is rebuilt from source against your kernel and installed, before
-  `create_bfb` packs the root filesystem
-- `install.pl` also builds `kernel-mft-modules` (`mst_pci`, `mst_pciconf`,
-  `bf3_livefish`), so those are rebuilt for your kernel as well
+- the MLNX_OFED kernel packages are rebuilt from source against your kernel and
+  installed, before `create_bfb` packs the root filesystem. Each is built from
+  its own `<pkg>_<ver>.orig.tar.*` under `SOURCES/` rather than through
+  `install.pl`, which is how the internal pipeline builds them from DOCA 3.6.0
+  onward. `mlnx-ofed-kernel` is built and installed first because the others
+  resolve their headers and `Module.symvers` through
+  `/usr/src/ofa_kernel/<arch>/<kernel>`, which only exists once it is installed
+- `kernel-mft` is one of those source packages, so `mst_pci`, `mst_pciconf` and
+  `bf3_livefish` are rebuilt for your kernel as well
 - `apt-preferences-custom-kernel` keeps every prebuilt, kernel-version-pinned
   DOCA/MFT module package out of the image. The `doca-*-user` swap alone is not
   enough: `ngauge` recommends the virtual package `fwctl-modules`, which
@@ -203,8 +208,10 @@ Additional variables:
 | `CUSTOM_KERNEL_VERSION` | auto-detect | kernel release string, e.g. `6.8.0-1022-bluefield`. Set it when more than one kernel ends up installed |
 | `MLNX_OFED_SRC_URL` | `<BASE_URL>/doca/<DOCA_VERSION>-<BSP_VERSION>/SOURCES/mlnx_ofed/MLNX_OFED_SRC-debian-<ver>.tgz` | MLNX_OFED debian sources |
 | `MLNX_OFED_SRC_LOCAL` | - | use an already-downloaded tarball instead of fetching it |
-| `OFED_KERNEL_EXTRA_ARGS` | BlueField DPU flag set | passed to the MLNX_OFED kernel configure script |
-| `OFED_INSTALL_EXTRA_ARGS` | - | extra `install.pl` flags, e.g. `--without-depcheck` |
+| `OFED_KERNEL_EXTRA_ARGS` | BlueField DPU flag set | passed as `configure_options` to each OFED kernel package build |
+| `OFED_KERNEL_PACKAGES` | `mlnx-ofed-kernel iser isert srp mlnx-nvme mlnx-nfsrdma xpmem kernel-mft` | OFED kernel sources to rebuild, `mlnx-ofed-kernel` always first |
+| `OFED_SOURCES_URL` | - | directory of `<pkg>_<ver>.orig.tar.*` files, used instead of the source tarball |
+| `DOCA_REPO_DEB` | - | a `doca-dpu-repo-<distro>-local` deb to install instead of using the published DOCA apt repo |
 | `BUILD_SOC_MODULES` | `yes` | rebuild every BlueField SoC kernel module |
 | `SOC_SRC_URL` | `<BASE_URL>/doca/<DOCA_VERSION>-<BSP_VERSION>/SOURCES/SoC` | SoC driver sources |
 | `SOC_MODULES_SKIP` | - | space separated SoC package names to leave out |

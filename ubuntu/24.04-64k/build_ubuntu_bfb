@@ -28,7 +28,8 @@ CUSTOM_KERNEL="@CUSTOM_KERNEL@"
 CUSTOM_KERNEL_VERSION="@CUSTOM_KERNEL_VERSION@"
 OFED_SRC_TARBALL="@OFED_SRC_TARBALL@"
 OFED_KERNEL_EXTRA_ARGS='@OFED_KERNEL_EXTRA_ARGS@'
-OFED_INSTALL_EXTRA_ARGS='@OFED_INSTALL_EXTRA_ARGS@'
+OFED_SOURCES_URL="@OFED_SOURCES_URL@"
+OFED_KERNEL_PACKAGES="@OFED_KERNEL_PACKAGES@"
 BUILD_SOC_MODULES="@BUILD_SOC_MODULES@"
 SOC_SRC_URL="@SOC_SRC_URL@"
 SOC_MODULES_SKIP="@SOC_MODULES_SKIP@"
@@ -95,9 +96,9 @@ fi
 # BlueField kernel, and pulled doca-runtime-user / doca-devel-user so that no
 # prebuilt (kernel-version-pinned) DOCA kernel modules were installed.
 #
-# MLNX_OFED must now be rebuilt from source against that kernel. Its install.pl
-# also builds kernel-mft-modules (mst_pci, mst_pciconf, bf3_livefish), so those
-# are covered too.
+# MLNX_OFED must now be rebuilt from source against that kernel, one source
+# package at a time. kernel-mft ships alongside them and is built by the same
+# loop, which is what provides mst_pci, mst_pciconf and bf3_livefish.
 #
 # The BlueField SoC drivers are then rebuilt from the sources NVIDIA publishes
 # for this DOCA release, all of them, regardless of what the kernel already
@@ -107,7 +108,7 @@ fi
 echo "==============================================================="
 echo " Custom kernel BFB build"
 echo " kernel          : ${kernel}"
-echo " MLNX_OFED source: ${OFED_SRC_TARBALL}"
+echo " MLNX_OFED source: ${OFED_SRC_TARBALL:-${OFED_SOURCES_URL}}"
 echo "==============================================================="
 
 if [ ! -d /lib/modules/${kernel} ]; then
@@ -134,58 +135,116 @@ if [ "$nkernels" != "1" ]; then
 	echo "WARNING: set CUSTOM_KERNEL_VERSION if that is not the intended one."
 fi
 
-if [ ! -e "${SDIR}/${OFED_SRC_TARBALL}" ]; then
-	echo "ERROR: MLNX_OFED source tarball not found: ${SDIR}/${OFED_SRC_TARBALL}"
+# MLNX_OFED kernel packages.
+#
+# Built per source package rather than through install.pl. From DOCA 3.6.0 the
+# internal pipeline does the same: each OFED kernel module ships as its own
+# <pkg>_<ver>.orig.tar.* under SOURCES/, carrying debian/ packaging, and is
+# built directly. That is the same recipe the SoC drivers use here, and it
+# does not depend on install.pl continuing to exist.
+#
+# Order is load bearing. mlnx-ofed-kernel must be built AND installed before
+# the rest: iser, isert, srp, mlnx-nvme and mlnx-nfsrdma resolve their headers
+# and Module.symvers through /usr/src/ofa_kernel/<arch>/<kernel>, which only
+# appears once mlnx-ofed-kernel-modules is installed.
+ofed_sources=""
+
+if [ -n "${OFED_SRC_TARBALL}" ] && [ -e "${SDIR}/${OFED_SRC_TARBALL}" ]; then
+	mkdir -p ${OFED_BUILD_DIR}
+	cd ${OFED_BUILD_DIR}
+	ex tar xzf ${SDIR}/${OFED_SRC_TARBALL}
+	# MLNX_OFED_SRC-debian-<ver>.tgz extracts to a directory WITHOUT 'debian'
+	# in its name, so discover it rather than deriving it from the filename.
+	ofed_sources=`/bin/ls -1d ${OFED_BUILD_DIR}/*/SOURCES 2>/dev/null | head -1`
+elif [ -n "${OFED_SOURCES_URL}" ]; then
+	# A directory of orig tarballs, e.g. an unpacked OFED-internal-debian tree.
+	ofed_sources=${OFED_BUILD_DIR}/SOURCES
+	mkdir -p ${ofed_sources}
+	index=`wget -qO- "${OFED_SOURCES_URL}/" 2>/dev/null`
+	for pkg in ${OFED_KERNEL_PACKAGES}; do
+		tb=`echo "${index}" | grep -oE "${pkg}_[0-9][A-Za-z0-9._+-]*\.orig\.tar\.[a-z]+" | sort -u | head -1`
+		if [ -z "${tb}" ]; then
+			echo "ERROR: no source tarball for ${pkg} under ${OFED_SOURCES_URL}/"
+			exit 1
+		fi
+		ex wget -q -P ${ofed_sources} "${OFED_SOURCES_URL}/${tb}"
+	done
+fi
+
+if [ -z "${ofed_sources}" ] || [ ! -d "${ofed_sources}" ]; then
+	echo "ERROR: no MLNX_OFED sources. Provide MLNX_OFED_SRC_URL/_LOCAL (a"
+	echo "       MLNX_OFED_SRC-debian-<ver>.tgz) or OFED_SOURCES_URL (a"
+	echo "       directory of <pkg>_<ver>.orig.tar.* files)."
 	exit 1
 fi
 
-mkdir -p ${OFED_BUILD_DIR}
-cd ${OFED_BUILD_DIR}
+echo "MLNX_OFED sources: ${ofed_sources}"
 
-ex tar xzf ${SDIR}/${OFED_SRC_TARBALL}
+# Unpack and build one source package. Leaves the .deb next to the source dir.
+build_ofed_pkg()
+{
+	pkg=$1
+	tb=`/bin/ls -1 ${ofed_sources}/${pkg}_[0-9]*.orig.tar.* 2>/dev/null | head -1`
+	if [ -z "${tb}" ]; then
+		echo "ERROR: ${pkg} source tarball not found in ${ofed_sources}"
+		return 1
+	fi
+	rm -rf ${OFED_BUILD_DIR}/build/${pkg}
+	mkdir -p ${OFED_BUILD_DIR}/build/${pkg}
+	tar xf "${tb}" -C ${OFED_BUILD_DIR}/build/${pkg} || return 1
+	src=`/bin/ls -1d ${OFED_BUILD_DIR}/build/${pkg}/*/ 2>/dev/null | head -1`
+	[ -n "${src}" ] || return 1
+	echo "OFED: building ${pkg} for ${kernel}"
+	( set -e
+	  cd "${src}"
+	  # control.no_dkms declares the -modules package; not every source has one.
+	  [ -e debian/control.no_dkms ] && cp debian/control.no_dkms debian/control
+	  # mlnx-ofed-kernel reads kernelver, the dependent modules read KVER.
+	  WITH_DKMS=0 kernelver=${kernel} KVER=${kernel} \
+	    configure_options="${OFED_KERNEL_EXTRA_ARGS}" \
+	    dpkg-buildpackage -us -uc -b -Pmodules )
+}
 
-# NOTE: MLNX_OFED_SRC-debian-<ver>.tgz extracts into a directory WITHOUT
-# 'debian' in its name (MLNX_OFED_SRC-<ver>/), so discover it rather than
-# deriving it from the tarball filename.
-ofed_srcdir=`/bin/ls -1d ${OFED_BUILD_DIR}/MLNX_OFED_SRC-* ${OFED_BUILD_DIR}/OFED-internal-* 2>/dev/null | head -1`
+install_ofed_debs()
+{
+	debs=`find $1 -maxdepth 2 -name '*.deb' ! -name '*dbg*' ! -name '*debuginfo*' 2>/dev/null`
+	if [ -z "${debs}" ]; then
+		echo "ERROR: $2 produced no .deb packages"
+		exit 1
+	fi
+	echo "Installing ${2}:"
+	echo "${debs}" | sed -e 's|.*/|  |'
+	dpkg -i --force-overwrite ${debs} || apt install -y -f
+	if [ $? -ne 0 ]; then
+		echo "ERROR: failed to install ${2}"
+		exit 1
+	fi
+}
 
-if [ -z "${ofed_srcdir}" ] || [ ! -x "${ofed_srcdir}/install.pl" ]; then
-	echo "ERROR: could not find install.pl in the extracted MLNX_OFED source."
-	echo "Contents of ${OFED_BUILD_DIR}:"
-	/bin/ls -1 ${OFED_BUILD_DIR}
+# 1. mlnx-ofed-kernel first, and install it so the rest can find ofa_kernel.
+if ! build_ofed_pkg mlnx-ofed-kernel; then
+	echo "ERROR: failed to build mlnx-ofed-kernel for ${kernel}"
+	exit 1
+fi
+install_ofed_debs ${OFED_BUILD_DIR}/build/mlnx-ofed-kernel "mlnx-ofed-kernel"
+ex depmod -a ${kernel}
+
+if [ ! -d /usr/src/ofa_kernel/`uname -m`/${kernel} ]; then
+	echo "ERROR: /usr/src/ofa_kernel/`uname -m`/${kernel} was not created by"
+	echo "       mlnx-ofed-kernel-modules. The dependent OFED modules resolve"
+	echo "       their headers and Module.symvers through it and cannot build."
 	exit 1
 fi
 
-echo "MLNX_OFED source directory: ${ofed_srcdir}"
-
-# Build (do not install) the kernel-space DEBs against the custom kernel.
-#   --kernel-only   build kernel space packages only
-#   --without-dkms  build binaries for this exact kernel instead of DKMS
-#   --build-only    produce DEBs without installing them
-ex ${ofed_srcdir}/install.pl \
-	--kernel-only \
-	--without-dkms \
-	--build-only \
-	-k ${kernel} \
-	-s /lib/modules/${kernel}/build \
-	--kernel-extra-args "${OFED_KERNEL_EXTRA_ARGS}" \
-	${OFED_INSTALL_EXTRA_ARGS}
-
-ofed_debs=`find ${ofed_srcdir}/DEBS -name '*.deb' ! -name '*dbg*' ! -name '*debuginfo*' 2>/dev/null`
-
-if [ -z "${ofed_debs}" ]; then
-	echo "ERROR: MLNX_OFED build produced no .deb packages under ${ofed_srcdir}/DEBS"
-	exit 1
-fi
-
-echo "Installing rebuilt MLNX_OFED packages:"
-echo "${ofed_debs}" | sed -e 's|.*/|  |'
-
-dpkg -i --force-overwrite ${ofed_debs} || apt install -y -f
-if [ $? -ne 0 ]; then
-	echo "ERROR: failed to install the rebuilt MLNX_OFED packages"
-	exit 1
-fi
+# 2. everything else.
+for pkg in ${OFED_KERNEL_PACKAGES}; do
+	[ "${pkg}" = "mlnx-ofed-kernel" ] && continue
+	if ! build_ofed_pkg ${pkg}; then
+		echo "ERROR: failed to build ${pkg} for ${kernel}"
+		exit 1
+	fi
+	install_ofed_debs ${OFED_BUILD_DIR}/build/${pkg} "${pkg}"
+done
 
 ex depmod -a ${kernel}
 
@@ -357,9 +416,9 @@ done
 if [ -n "${missing}" ]; then
 	echo "ERROR: modules missing for kernel ${kernel}:${missing}"
 	echo ""
-	echo "MLNX_OFED's install.pl builds all of these, including kernel-mft-modules"
-	echo "(mst_pci, mst_pciconf, bf3_livefish). Without them the BFB would install"
-	echo "and then fail on the DPU."
+	echo "These come from the OFED kernel packages built above, including"
+	echo "kernel-mft (mst_pci, mst_pciconf, bf3_livefish). Without them the BFB"
+	echo "would install and then fail on the DPU."
 	exit 1
 fi
 

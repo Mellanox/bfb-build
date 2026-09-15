@@ -28,10 +28,19 @@ ADD --chown=0:0 --chmod=644 https://prod-cdn.packages.k8s.io/repositories/isv:/k
 # These land under /root/workspace, which create_bfb excludes from the shipped
 # rootfs, so they do not bloat the resulting BFB.
 ADD custom-kernel/ /root/workspace/custom-kernel/
+{%- if ofed_src_tarball %}
 COPY {{ ofed_src_tarball }} /root/workspace/
+{%- endif %}
 
 # Keep prebuilt, kernel-version-pinned DOCA/MFT kernel modules out of the image.
 ADD apt-preferences-custom-kernel /etc/apt/preferences.d/98custom-kernel
+{%- endif %}
+{%- if doca_repo_deb %}
+
+# Pre-publication DOCA packages: the same self-contained local repo deb the
+# internal pipeline consumes, instead of the published DOCA apt repo.
+COPY {{ doca_repo_deb }} /root/workspace/
+RUN dpkg -i /root/workspace/{{ doca_repo_deb }}
 {%- endif %}
 
 RUN apt update
@@ -72,6 +81,7 @@ RUN apt-get clean -y && \
         bridge-utils \
         bsdextrautils \
         build-essential \
+        btrfs-progs \
         cd-boot-images-arm64 \
         conntrack \
         containerd \

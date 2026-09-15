@@ -59,6 +59,10 @@ def parse_args():
     p.add_argument('--ofed-src-tarball', default='',
                    help='Filename of the MLNX_OFED debian source tarball staged '
                         'next to the Dockerfile (custom-kernel mode only)')
+    p.add_argument('--doca-repo-deb', default='',
+                   help='Filename of a doca-dpu-repo-*-local deb staged next to '
+                        'the Dockerfile. When given, the image installs it '
+                        'instead of using the published DOCA apt repo')
     return p.parse_args()
 
 
@@ -96,10 +100,9 @@ def main():
               "not given" % args.kernel_packages, file=sys.stderr)
         sys.exit(1)
 
-    if args.custom_kernel and not args.ofed_src_tarball:
-        print("ERROR: --ofed-src-tarball is required with --custom-kernel",
-              file=sys.stderr)
-        sys.exit(1)
+    # In custom-kernel mode the OFED sources may arrive either as a staged
+    # tarball or, before a DOCA release publishes them, from OFED_SOURCES_URL
+    # at build time. Neither is required here.
 
     template_dir = os.path.dirname(os.path.abspath(args.template)) or '.'
     env = Environment(loader=FileSystemLoader(template_dir),
@@ -111,7 +114,8 @@ def main():
 
     rendered = template.render(custom_kernel=args.custom_kernel,
                                kernel_packages=kernel_packages,
-                               ofed_src_tarball=args.ofed_src_tarball)
+                               ofed_src_tarball=args.ofed_src_tarball,
+                               doca_repo_deb=args.doca_repo_deb)
 
     with open(args.output, 'w', encoding='utf-8') as f:
         f.write(rendered)

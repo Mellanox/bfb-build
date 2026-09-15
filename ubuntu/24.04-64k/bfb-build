@@ -101,6 +101,9 @@ OFED_SOURCES_URL=${OFED_SOURCES_URL:-""}
 # instead of pointing apt at the published DOCA repo, which is what makes a
 # build possible before a DOCA release is published.
 DOCA_REPO_DEB=${DOCA_REPO_DEB:-""}
+# Path to an mlxbf-bootimages deb. Same purpose as DOCA_REPO_DEB: the published
+# copy does not exist until the DOCA release is out.
+BOOTIMAGES_DEB=${BOOTIMAGES_DEB:-""}
 
 # Every BlueField SoC kernel module is rebuilt against the custom kernel from
 # the .src.rpm sources published per DOCA release. Set to "no" to skip them all,
@@ -127,6 +130,9 @@ if [ "X${CUSTOM_KERNEL}" == "Xyes" ]; then
 	fi
 	if [ -n "${DOCA_REPO_DEB}" ]; then
 		DOCA_REPO_DEB=$(abspath "${DOCA_REPO_DEB}")
+	fi
+	if [ -n "${BOOTIMAGES_DEB}" ]; then
+		BOOTIMAGES_DEB=$(abspath "${BOOTIMAGES_DEB}")
 	fi
 
 	if [ -z "${CUSTOM_KERNEL_DEBS}" ]; then
@@ -172,8 +178,16 @@ case "$IMAGE_TYPE" in
 		;;
 esac
 
-wget -q -P $WDIR ${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/${ARCH}/$bootimages
-mv $WDIR/mlxbf-bootimages*arm64.deb $WDIR/mlxbf-bootimages.deb
+if [ -n "${BOOTIMAGES_DEB}" ]; then
+	if [ ! -e "${BOOTIMAGES_DEB}" ]; then
+		echo "ERROR: BOOTIMAGES_DEB not found: ${BOOTIMAGES_DEB}"
+		exit 1
+	fi
+	cp -a ${BOOTIMAGES_DEB} $WDIR/mlxbf-bootimages.deb
+else
+	wget -q -P $WDIR ${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/${ARCH}/$bootimages
+	mv $WDIR/mlxbf-bootimages*arm64.deb $WDIR/mlxbf-bootimages.deb
+fi
 
 cp -a \
 	Dockerfile \

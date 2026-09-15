@@ -200,7 +200,12 @@ build_ofed_pkg()
 	  # control.no_dkms declares the -modules package; not every source has one.
 	  [ -e debian/control.no_dkms ] && cp debian/control.no_dkms debian/control
 	  # mlnx-ofed-kernel reads kernelver, the dependent modules read KVER.
-	  WITH_DKMS=0 kernelver=${kernel} KVER=${kernel} \
+	  # DEB_BUILD_PROFILES must be in the environment, not only in -P:
+	  # mlnx-ofed-kernel's debian/rules derives WITH_DKMS from it directly,
+	  # and a plain '=' assignment in a makefile overrides the environment,
+	  # so passing WITH_DKMS=0 alone does not select the modules package.
+	  DEB_BUILD_PROFILES=modules WITH_DKMS=0 \
+	    kernelver=${kernel} KVER=${kernel} \
 	    configure_options="${OFED_KERNEL_EXTRA_ARGS}" \
 	    dpkg-buildpackage -us -uc -b -Pmodules )
 }

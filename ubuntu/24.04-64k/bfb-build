@@ -104,6 +104,12 @@ DOCA_REPO_DEB=${DOCA_REPO_DEB:-""}
 # Path to an mlxbf-bootimages deb. Same purpose as DOCA_REPO_DEB: the published
 # copy does not exist until the DOCA release is out.
 BOOTIMAGES_DEB=${BOOTIMAGES_DEB:-""}
+# DOCA services. By default they come from the published services/ tree. That
+# tree is a copy of three internal directories, so before a release publishes
+# them the same content can be fetched from the originals instead.
+DOCA_SERVICES_INFRA_URL=${DOCA_SERVICES_INFRA_URL:-""}
+DOCA_SERVICES_BLUEMAN_URL=${DOCA_SERVICES_BLUEMAN_URL:-""}
+DOCA_SERVICES_TELEMETRY_URL=${DOCA_SERVICES_TELEMETRY_URL:-""}
 
 # Every BlueField SoC kernel module is rebuilt against the custom kernel from
 # the .src.rpm sources published per DOCA release. Set to "no" to skip them all,
@@ -268,9 +274,32 @@ fi
 
 cd $WDIR
 
+doca_services="no"
 if [ "$INCLUDE_DOCA_SERVICES" == "yes" ]; then
-	echo "Downloading DOCA services..."
-	wget --quiet -r -np -nH --cut-dirs=5 -R "index.html*" ${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/services/
+	doca_services="yes"
+	if [ -n "${DOCA_SERVICES_INFRA_URL}${DOCA_SERVICES_BLUEMAN_URL}${DOCA_SERVICES_TELEMETRY_URL}" ]; then
+		echo "Downloading DOCA services from the internal source directories..."
+		mkdir -p infrastructure blueman telemetry-agent
+		wget --quiet -r -np -nd -l1 -R "index.html*" -A 'docker_pause_3_9.tar,enable_offline_containers.sh' \
+			-P infrastructure "${DOCA_SERVICES_INFRA_URL}/"
+		wget --quiet -r -np -nd -l1 -R "index.html*" -A '*.tar,*.sh,*.yaml' \
+			-P blueman "${DOCA_SERVICES_BLUEMAN_URL}/"
+		wget --quiet -r -np -nd -l1 -R "index.html*" -A 'doca_telemetry_service_*_arm64.tar.gz,doca_telemetry_standalone.yaml' \
+			-P telemetry-agent "${DOCA_SERVICES_TELEMETRY_URL}/"
+	else
+		echo "Downloading DOCA services..."
+		wget --quiet -r -np -nH --cut-dirs=5 -R "index.html*" ${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/services/
+	fi
+
+	# import_doca_telemetry.sh on the DPU globs doca_telemetry_service*arm64.tar.
+	# Both the published tree and the internal one carry the .tar.gz, so
+	# decompress it here, exactly as the internal image build does.
+	for gz in telemetry-agent/doca_telemetry_service_*_arm64.tar.gz; do
+		[ -e "${gz}" ] || continue
+		mv "${gz}" telemetry-agent/doca_telemetry_service_arm64.tar.gz
+		gzip -d telemetry-agent/doca_telemetry_service_arm64.tar.gz
+		break
+	done
 fi
 echo "Downloading $DISTRO base image..."
 wget -q --no-check-certificate $DISTRO_BASE_URL
@@ -285,10 +314,10 @@ if [ "X${CUSTOM_KERNEL}" == "Xyes" ]; then
 	$PYTHON $RENDER --template Dockerfile.j2 --output Dockerfile \
 		--kernel-packages kernel-packages \
 		--custom-kernel --ofed-src-tarball "${ofed_src_tarball}" \
-		--doca-repo-deb "${doca_repo_deb}"
+		--doca-repo-deb "${doca_repo_deb}" --doca-services "${doca_services}"
 elif $PYTHON -c 'import jinja2' > /dev/null 2>&1; then
 	$PYTHON $RENDER --template Dockerfile.j2 --output Dockerfile \
-		--kernel-packages kernel-packages
+		--kernel-packages kernel-packages --doca-services "${doca_services}"
 else
 	echo "python3 jinja2 not available - using the committed Dockerfile as is."
 fi

@@ -59,6 +59,9 @@ def parse_args():
     p.add_argument('--ofed-src-tarball', default='',
                    help='Filename of the MLNX_OFED debian source tarball staged '
                         'next to the Dockerfile (custom-kernel mode only)')
+    p.add_argument('--doca-services', default='yes',
+                   help='yes|no. When no, the DOCA services directories are '
+                        'left out of the image (they are not downloaded)')
     p.add_argument('--doca-repo-deb', default='',
                    help='Filename of a doca-dpu-repo-*-local deb staged next to '
                         'the Dockerfile. When given, the image installs it '
@@ -115,7 +118,8 @@ def main():
     rendered = template.render(custom_kernel=args.custom_kernel,
                                kernel_packages=kernel_packages,
                                ofed_src_tarball=args.ofed_src_tarball,
-                               doca_repo_deb=args.doca_repo_deb)
+                               doca_repo_deb=args.doca_repo_deb,
+                               doca_services=(args.doca_services != 'no'))
 
     with open(args.output, 'w', encoding='utf-8') as f:
         f.write(rendered)

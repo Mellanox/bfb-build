@@ -4,10 +4,12 @@ ENV DEBIAN_FRONTEND="noninteractive" FLASH_KERNEL_SKIP="yes" RUN_FW_UPDATER="no"
 
 ADD noble-server-cloudimg-arm64-root.tar.xz /
 ADD qemu-aarch64-static /usr/bin/
+{%- if doca_services %}
 RUN mkdir -p /opt/mellanox/doca/services/
 ADD telemetry-agent /opt/mellanox/doca/services/telemetry
 ADD blueman /opt/mellanox/doca/services/blueman
 ADD infrastructure /opt/mellanox/doca/services/infrastructure
+{%- endif %}
 
 ARG MLNX_FW_UPDATER=mlnx-fw-updater-signed
 ARG BMC_FW_PACKAGES="bf2-bmc-fw-signed bf3-bmc-fw-signed bf3-bmc-gi-signed bf3-bmc-nic-fw*"

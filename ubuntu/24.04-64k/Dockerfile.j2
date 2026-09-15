@@ -213,6 +213,10 @@ RUN apt-get clean -y && \
         ${BMC_FW_PACKAGES} \
         ${CEC_FW_PACKAGES} \
     && \
+{%- if doca_repo_deb %}
+    apt-get remove --purge -y 'doca-dpu-repo*' && \
+    rm -f /root/workspace/{{ doca_repo_deb }} && \
+{%- endif %}
     rm -rf /etc/default/grub.d/50-cloudimg-settings.cfg /etc/ssh/sshd_config.d/60-cloudimg-settings.conf /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf && \
     truncate -s0 /etc/machine-id && \
     printf 'set superusers="admin"\n' >> /etc/grub.d/40_custom && \

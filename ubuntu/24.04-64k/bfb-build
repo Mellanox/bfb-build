@@ -299,6 +299,12 @@ if [ "$INCLUDE_DOCA_SERVICES" == "yes" ]; then
 		wget --quiet -r -np -nH --cut-dirs=5 -R "index.html*" ${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/services/
 	fi
 
+	# The reference Dockerfile ADDs these with --chmod=755; wget over HTTP
+	# cannot carry a mode, so restore it or they ship non-executable.
+	chmod 0755 infrastructure/enable_offline_containers.sh \
+		blueman/bring_up_doca_blueman_service.sh \
+		blueman/generate_blueman_keys.sh 2>/dev/null || true
+
 	# import_doca_telemetry.sh on the DPU globs doca_telemetry_service*arm64.tar.
 	# Both the published tree and the internal one carry the .tar.gz, so
 	# decompress it here, exactly as the internal image build does.

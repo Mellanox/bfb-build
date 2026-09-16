@@ -22,7 +22,20 @@
 #
 ###############################################################################
 
+# Remember where the user invoked us from so that relative paths given in
+# CUSTOM_KERNEL_DEBS / MLNX_OFED_SRC_LOCAL keep working after the cd below.
+INVOKE_DIR=$(pwd)
+
 cd ${0%*/*}
+
+# Absolute path resolution for user-supplied paths.
+abspath()
+{
+	case "$1" in
+		/*) echo "$1" ;;
+		*)  echo "${INVOKE_DIR}/$1" ;;
+	esac
+}
 
 if [ ! -e Dockerfile ]; then
 	echo "ERROR: Dockerfile is missing."
@@ -43,18 +56,128 @@ DISTRO="ubuntu"
 DISTRO_VERSION="24.04"
 DISTRO_BASE_URL="https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-arm64-root.tar.xz"
 ARCH=${ARCH:-"arm64-dpu"}
-DOCA_VERSION="3.5.0"
-BSP_VERSION="4.16.0-14075"
-MLNX_OFED_VERSION="26.07-0.7.7"
+DOCA_VERSION="3.6.0"
+BSP_VERSION="4.17.0-14082"
+MLNX_OFED_VERSION="26.07-0.6.8.0"
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-""}
 INCLUDE_DOCA_SERVICES=${INCLUDE_DOCA_SERVICES:-"yes"}
 BASE_URL=${BASE_URL:-"https://linux.mellanox.com/public/repo"}
 LEAVE_CONTAINER=${LEAVE_CONTAINER:-"no"}
 
-WDIR=/tmp/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}.$$
+###############################################################################
+# Custom kernel support
+#
+# CUSTOM_KERNEL=yes builds the BFB with a customer-supplied kernel instead of
+# the NVIDIA BlueField kernel pinned in ./kernel-packages, and rebuilds
+# MLNX_OFED from source against it.
+#
+#   CUSTOM_KERNEL          yes|no                (default: no)
+#   CUSTOM_KERNEL_DEBS     directory holding the kernel .deb files to install
+#                          (linux-image, linux-modules and the matching
+#                          linux-headers are required)
+#   CUSTOM_KERNEL_VERSION  kernel release string, e.g. 6.8.0-1022-bluefield.
+#                          Optional; auto-detected from /lib/modules when unset.
+#   MLNX_OFED_SRC_URL      URL of MLNX_OFED_SRC-debian-<ver>.tgz
+#   MLNX_OFED_SRC_LOCAL    path to an already-downloaded copy of that tarball
+#                          (takes precedence over MLNX_OFED_SRC_URL)
+###############################################################################
+CUSTOM_KERNEL=${CUSTOM_KERNEL:-"no"}
+CUSTOM_KERNEL_DEBS=${CUSTOM_KERNEL_DEBS:-""}
+CUSTOM_KERNEL_VERSION=${CUSTOM_KERNEL_VERSION:-""}
+MLNX_OFED_SRC_LOCAL=${MLNX_OFED_SRC_LOCAL:-""}
+MLNX_OFED_SRC_URL=${MLNX_OFED_SRC_URL:-"${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/SOURCES/mlnx_ofed/MLNX_OFED_SRC-debian-${MLNX_OFED_VERSION}.tgz"}
+
+# MLNX_OFED kernel configure flags for the BlueField DPU.
+OFED_KERNEL_EXTRA_ARGS=${OFED_KERNEL_EXTRA_ARGS:-"--with-core-mod --with-user_mad-mod --with-user_access-mod --with-addr_trans-mod --with-mlxfw-mod --with-mlx5-mod --with-mlx5-ipsec --with-ipoib-mod --with-mlxdevm-mod --with-srp-mod --with-iser-mod --with-isert-mod --with-gds --with-sf-cfg-drv --with-sf-sfc --without-xdp --without-odp --with-nfsrdma-mod"}
+# OFED kernel module source packages to rebuild, in dependency order.
+# mlnx-ofed-kernel is always built and installed first.
+OFED_KERNEL_PACKAGES=${OFED_KERNEL_PACKAGES:-"mlnx-ofed-kernel iser isert srp mlnx-nvme mlnx-nfsrdma xpmem kernel-mft"}
+# Alternative to MLNX_OFED_SRC_URL: a directory of <pkg>_<ver>.orig.tar.* files,
+# e.g. an unpacked OFED-internal-debian tree. Takes over when the tarball is
+# not available, which is the case before a DOCA release publishes its sources.
+OFED_SOURCES_URL=${OFED_SOURCES_URL:-""}
+# Path to a doca-dpu-repo-<distro>-local deb. When set the image installs it
+# instead of pointing apt at the published DOCA repo, which is what makes a
+# build possible before a DOCA release is published.
+# A DOCA apt repo URL to use instead of the published one. Preferred over
+# DOCA_REPO_DEB: it keeps IMAGE_TYPE selecting the right bootimages variant,
+# and avoids copying a multi-GB repo package through the build context.
+DOCA_REPO_URL=${DOCA_REPO_URL:-""}
+DOCA_REPO_DEB=${DOCA_REPO_DEB:-""}
+# Path to an mlxbf-bootimages deb. Same purpose as DOCA_REPO_DEB: the published
+# copy does not exist until the DOCA release is out.
+BOOTIMAGES_DEB=${BOOTIMAGES_DEB:-""}
+# DOCA services. By default they come from the published services/ tree. That
+# tree is a copy of three internal directories, so before a release publishes
+# them the same content can be fetched from the originals instead.
+DOCA_SERVICES_INFRA_URL=${DOCA_SERVICES_INFRA_URL:-""}
+DOCA_SERVICES_BLUEMAN_URL=${DOCA_SERVICES_BLUEMAN_URL:-""}
+DOCA_SERVICES_TELEMETRY_URL=${DOCA_SERVICES_TELEMETRY_URL:-""}
+
+# Every BlueField SoC kernel module is rebuilt against the custom kernel from
+# the .src.rpm sources published per DOCA release. Set to "no" to skip them all,
+# or list package names in SOC_MODULES_SKIP to leave individual drivers out.
+BUILD_SOC_MODULES=${BUILD_SOC_MODULES:-"yes"}
+SOC_SRC_URL=${SOC_SRC_URL:-"${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/SOURCES/SoC"}
+SOC_MODULES_SKIP=${SOC_MODULES_SKIP:-""}
+
+RENDER=$(cd ../../common/tools && pwd)/render_dockerfile.py
+PYTHON=${PYTHON:-python3}
+
+image_suffix=""
+ofed_src_tarball=""
+doca_repo_deb=""
+
+if [ "X${CUSTOM_KERNEL}" == "Xyes" ]; then
+	image_suffix="_custom_kernel"
+
+	if [ -n "${CUSTOM_KERNEL_DEBS}" ]; then
+		CUSTOM_KERNEL_DEBS=$(abspath "${CUSTOM_KERNEL_DEBS}")
+	fi
+	if [ -n "${MLNX_OFED_SRC_LOCAL}" ]; then
+		MLNX_OFED_SRC_LOCAL=$(abspath "${MLNX_OFED_SRC_LOCAL}")
+	fi
+	if [ -n "${DOCA_REPO_DEB}" ]; then
+		DOCA_REPO_DEB=$(abspath "${DOCA_REPO_DEB}")
+	fi
+	if [ -n "${BOOTIMAGES_DEB}" ]; then
+		BOOTIMAGES_DEB=$(abspath "${BOOTIMAGES_DEB}")
+	fi
+
+	if [ -z "${CUSTOM_KERNEL_DEBS}" ]; then
+		echo "ERROR: CUSTOM_KERNEL=yes requires CUSTOM_KERNEL_DEBS to point at a"
+		echo "       directory containing the kernel .deb packages to install."
+		exit 1
+	fi
+
+	if [ ! -d "${CUSTOM_KERNEL_DEBS}" ]; then
+		echo "ERROR: CUSTOM_KERNEL_DEBS is not a directory: ${CUSTOM_KERNEL_DEBS}"
+		exit 1
+	fi
+
+	if [ -z "$(/bin/ls -1 ${CUSTOM_KERNEL_DEBS}/*.deb 2> /dev/null)" ]; then
+		echo "ERROR: no .deb packages found in ${CUSTOM_KERNEL_DEBS}"
+		exit 1
+	fi
+
+	if ! ($PYTHON -c 'import jinja2' > /dev/null 2>&1); then
+		echo "ERROR: CUSTOM_KERNEL=yes renders Dockerfile.j2 and needs python3 jinja2."
+		echo "       Install it with one of:"
+		echo "           apt install -y python3-jinja2"
+		echo "           dnf install -y python3-jinja2"
+		echo "           pip3 install jinja2"
+		exit 1
+	fi
+fi
+
+WDIR=/tmp/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}${image_suffix}.$$
 
 mkdir -p $WDIR
+
+# One place decides where DOCA packages and bootimages come from, so that
+# IMAGE_TYPE keeps selecting the matching bootimages variant either way.
+doca_repo_url=${DOCA_REPO_URL:-"${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/${ARCH}"}
 
 echo "Downloading mlxbf-bootimages..."
 case "$IMAGE_TYPE" in
@@ -69,11 +192,22 @@ case "$IMAGE_TYPE" in
 		;;
 esac
 
-wget -q -P $WDIR ${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}/${ARCH}/$bootimages
-mv $WDIR/mlxbf-bootimages*arm64.deb $WDIR/mlxbf-bootimages.deb
+if [ -n "${BOOTIMAGES_DEB}" ]; then
+	if [ ! -e "${BOOTIMAGES_DEB}" ]; then
+		echo "ERROR: BOOTIMAGES_DEB not found: ${BOOTIMAGES_DEB}"
+		exit 1
+	fi
+	cp -a ${BOOTIMAGES_DEB} $WDIR/mlxbf-bootimages.deb
+else
+	wget -q -P $WDIR ${doca_repo_url}/$bootimages
+	mv $WDIR/mlxbf-bootimages*arm64.deb $WDIR/mlxbf-bootimages.deb
+fi
 
 cp -a \
 	Dockerfile \
+	Dockerfile.j2 \
+	kernel-packages \
+	apt-preferences-custom-kernel \
 	build_ubuntu_bfb \
 	create_bfb \
 	install.sh \
@@ -83,7 +217,11 @@ cp -a \
 	../../common/tools/qemu-aarch64-static \
 	$WDIR
 
-echo "deb [trusted=yes] ${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/${DISTRO}${DISTRO_VERSION}/arm64-dpu/ /" | tee $WDIR/repos/doca.base.list
+if [ -n "${DOCA_REPO_DEB}" ]; then
+	echo "DOCA packages come from ${DOCA_REPO_DEB}, not the published repo."
+else
+	echo "deb [trusted=yes] ${doca_repo_url}/ /" | tee $WDIR/repos/doca.base.list
+fi
 
 if [ -d install.env ]; then
 	cp -a install.env \
@@ -93,26 +231,130 @@ else
 		$WDIR
 fi
 
+# Stage the custom kernel packages and the MLNX_OFED sources into the build
+# context. Both are placed under /root/workspace inside the image, which
+# create_bfb excludes from the shipped rootfs.
+if [ "X${CUSTOM_KERNEL}" == "Xyes" ]; then
+	mkdir -p $WDIR/custom-kernel
+	cp -a ${CUSTOM_KERNEL_DEBS}/*.deb $WDIR/custom-kernel/
+	echo "Custom kernel packages:"
+	/bin/ls -1 $WDIR/custom-kernel | sed -e 's/^/  /'
+
+	if [ -n "${DOCA_REPO_DEB}" ]; then
+		if [ ! -e "${DOCA_REPO_DEB}" ]; then
+			echo "ERROR: DOCA_REPO_DEB not found: ${DOCA_REPO_DEB}"
+			exit 1
+		fi
+		doca_repo_deb=$(basename ${DOCA_REPO_DEB})
+		echo "Staging DOCA repo package: ${doca_repo_deb}"
+		cp -a ${DOCA_REPO_DEB} $WDIR/${doca_repo_deb}
+	fi
+
+	if [ -n "${MLNX_OFED_SRC_LOCAL}" ]; then
+		if [ ! -e "${MLNX_OFED_SRC_LOCAL}" ]; then
+			echo "ERROR: MLNX_OFED_SRC_LOCAL not found: ${MLNX_OFED_SRC_LOCAL}"
+			exit 1
+		fi
+		ofed_src_tarball=$(basename ${MLNX_OFED_SRC_LOCAL})
+		echo "Using local MLNX_OFED sources: ${MLNX_OFED_SRC_LOCAL}"
+		cp -a ${MLNX_OFED_SRC_LOCAL} $WDIR/${ofed_src_tarball}
+	elif [ -n "${OFED_SOURCES_URL}" ]; then
+		ofed_src_tarball=""
+		echo "Using MLNX_OFED source directory: ${OFED_SOURCES_URL}"
+	else
+		ofed_src_tarball=$(basename ${MLNX_OFED_SRC_URL})
+		echo "Downloading MLNX_OFED sources: ${MLNX_OFED_SRC_URL}"
+		if ! wget -q -O $WDIR/${ofed_src_tarball} ${MLNX_OFED_SRC_URL}; then
+			rm -f $WDIR/${ofed_src_tarball}
+			echo "ERROR: failed to download ${MLNX_OFED_SRC_URL}"
+			echo ""
+			echo "MLNX_OFED sources for each DOCA release are published under"
+			echo "  ${BASE_URL}/doca/<doca-version>-<bsp-version>/SOURCES/mlnx_ofed/"
+			echo "Check that MLNX_OFED_VERSION (${MLNX_OFED_VERSION}) matches what is"
+			echo "published for DOCA ${DOCA_VERSION}, point MLNX_OFED_SRC_URL at the"
+			echo "right tarball, supply a local copy with MLNX_OFED_SRC_LOCAL=<path>,"
+			echo "or point OFED_SOURCES_URL at a directory of orig tarballs."
+			exit 1
+		fi
+	fi
+
+fi
+
 cd $WDIR
 
+doca_services="no"
 if [ "$INCLUDE_DOCA_SERVICES" == "yes" ]; then
-	echo "Downloading DOCA services..."
-	wget --quiet -r -np -nH --cut-dirs=5 -R "index.html*" ${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/services/
+	doca_services="yes"
+	if [ -n "${DOCA_SERVICES_INFRA_URL}${DOCA_SERVICES_BLUEMAN_URL}${DOCA_SERVICES_TELEMETRY_URL}" ]; then
+		echo "Downloading DOCA services from the internal source directories..."
+		mkdir -p infrastructure blueman telemetry-agent
+		wget --quiet -r -np -nd -l1 -R "index.html*" -A 'docker_pause_3_9.tar,enable_offline_containers.sh' \
+			-P infrastructure "${DOCA_SERVICES_INFRA_URL}/"
+		wget --quiet -r -np -nd -l1 -R "index.html*" -A '*.tar,*.sh,*.yaml' \
+			-P blueman "${DOCA_SERVICES_BLUEMAN_URL}/"
+		wget --quiet -r -np -nd -l1 -R "index.html*" -A 'doca_telemetry_service_*_arm64.tar.gz,doca_telemetry_standalone.yaml' \
+			-P telemetry-agent "${DOCA_SERVICES_TELEMETRY_URL}/"
+	else
+		echo "Downloading DOCA services..."
+		wget --quiet -r -np -nH --cut-dirs=5 -R "index.html*" ${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/services/
+	fi
+
+	# The reference Dockerfile ADDs these with --chmod=755; wget over HTTP
+	# cannot carry a mode, so restore it or they ship non-executable.
+	chmod 0755 infrastructure/enable_offline_containers.sh \
+		blueman/bring_up_doca_blueman_service.sh \
+		blueman/generate_blueman_keys.sh 2>/dev/null || true
+
+	# import_doca_telemetry.sh on the DPU globs doca_telemetry_service*arm64.tar.
+	# Both the published tree and the internal one carry the .tar.gz, so
+	# decompress it here, exactly as the internal image build does.
+	for gz in telemetry-agent/doca_telemetry_service_*_arm64.tar.gz; do
+		[ -e "${gz}" ] || continue
+		mv "${gz}" telemetry-agent/doca_telemetry_service_arm64.tar.gz
+		gzip -d telemetry-agent/doca_telemetry_service_arm64.tar.gz
+		break
+	done
 fi
 echo "Downloading $DISTRO base image..."
 wget -q --no-check-certificate $DISTRO_BASE_URL
-docker_image=bfb_runtime_${DISTRO,,}${DISTRO_VERSION,,}
+docker_image=bfb_runtime_${DISTRO,,}${DISTRO_VERSION,,}${image_suffix}
 
-docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION} 2> /dev/null
+docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION}${image_suffix} 2> /dev/null
+
+# Render the Dockerfile from the template. The committed Dockerfile is the
+# default-mode render of Dockerfile.j2, so a host without jinja2 can still run
+# a default build unchanged.
+if [ "X${CUSTOM_KERNEL}" == "Xyes" ]; then
+	$PYTHON $RENDER --template Dockerfile.j2 --output Dockerfile \
+		--kernel-packages kernel-packages \
+		--custom-kernel --ofed-src-tarball "${ofed_src_tarball}" \
+		--doca-repo-deb "${doca_repo_deb}" --doca-services "${doca_services}"
+elif $PYTHON -c 'import jinja2' > /dev/null 2>&1; then
+	$PYTHON $RENDER --template Dockerfile.j2 --output Dockerfile \
+		--kernel-packages kernel-packages --doca-services "${doca_services}"
+else
+	echo "python3 jinja2 not available - using the committed Dockerfile as is."
+fi
 
 sed -i -e "s/@IMAGE_TYPE@/$IMAGE_TYPE/g;s/@CUSTOM_VERSION@/$CUSTOM_VERSION/g" Dockerfile
+
+sed -i -e "s|@CUSTOM_KERNEL@|${CUSTOM_KERNEL}|g" \
+	-e "s|@CUSTOM_KERNEL_VERSION@|${CUSTOM_KERNEL_VERSION}|g" \
+	-e "s|@OFED_SRC_TARBALL@|${ofed_src_tarball}|g" \
+	-e "s|@OFED_KERNEL_EXTRA_ARGS@|${OFED_KERNEL_EXTRA_ARGS}|g" \
+	-e "s|@OFED_SOURCES_URL@|${OFED_SOURCES_URL}|g" \
+	-e "s|@OFED_KERNEL_PACKAGES@|${OFED_KERNEL_PACKAGES}|g" \
+	-e "s|@BUILD_SOC_MODULES@|${BUILD_SOC_MODULES}|g" \
+	-e "s|@SOC_SRC_URL@|${SOC_SRC_URL}|g" \
+	-e "s|@SOC_MODULES_SKIP@|${SOC_MODULES_SKIP}|g" \
+	build_ubuntu_bfb
 
 docker build -t ${docker_image} \
 	-f Dockerfile .
 
 DOCKER_RUN_PARAMS="--privileged -e container=docker \
 	-v $PWD:/workspace \
-	--name BlueField_OS_${DISTRO}_${DISTRO_VERSION} \
+	--name BlueField_OS_${DISTRO}_${DISTRO_VERSION}${image_suffix} \
 	--mount type=bind,source=/dev,target=/dev \
 	--mount type=bind,source=/sys,target=/sys \
 	--mount type=bind,source=/proc,target=/proc"
@@ -134,5 +376,5 @@ readlink -f *.iso
 echo "Default user/password is: ubuntu/ubuntu"
 
 if [ "X${LEAVE_CONTAINER}" == "Xyes" ]; then
-	echo "Container name: BlueField_OS_${DISTRO}_${DISTRO_VERSION} id: ${docker_id}"
+	echo "Container name: BlueField_OS_${DISTRO}_${DISTRO_VERSION}${image_suffix} id: ${docker_id}"
 fi

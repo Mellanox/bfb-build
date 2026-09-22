@@ -1,0 +1,423 @@
+#!/bin/bash
+
+###############################################################################
+#
+# Copyright 2023 NVIDIA Corporation
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+###############################################################################
+
+set -e
+
+SDIR="/root/workspace"
+kernel=$(/bin/ls -1 /lib/modules/ | head -1)
+
+SCRIPTS_DIR=$(dirname $0)
+
+WDIR=${WDIR:-/root/workspace}
+
+echo "Work directory: $WDIR"
+
+ubuntu_IMAGE=$(cat /etc/mlnx-release)
+ubuntu_ISO=${ubuntu_IMAGE}.iso
+
+PATH=$PATH:/opt/mellanox/scripts:/opt/mellanox/scripts/bin
+
+finish() {
+	sudo rm -rf "$WDIR"
+}
+trap finish EXIT
+
+# Execute command w/ echo and exit if it fail
+ex()
+{
+	echo "$@"
+	if ! "$@"; then
+		printf "\nFailed executing $@\n\n"
+		exit 1
+	fi
+}
+
+ex mkdir -p ${WDIR}
+ex cd ${WDIR}
+ex rm -rf initramfs
+
+initramfs=/boot/initrd.img-$kernel
+initramfs=$(realpath $initramfs)
+initramfs=$WDIR/dump-initramfs-v0
+
+ADD_DRIVERS=""
+for mod in mlxbf-bootctl dw_mmc dw_mmc-pltfm mmc_block dw_mmc-bluefield \
+	sdhci sdhci-of-dwcmshc mlxbf-tmfifo \
+	mlx5_core mlx5_ib mlxfw ib_umad nvme \
+	nvme-rdma nvme-tcp ib_ipoib ib_iser \
+	mst_pci mst_pciconf bf3_livefish \
+	gpio-mlxbf2 gpio-mlxbf3 mlxbf-gige \
+	pinctrl-mlxbf3 8021q \
+	ipmi_devintf ipmb_host ipmi_ssif i2c-mlxbf \
+	nls_iso8859-1 $ADDON_KERNEL_MODULES
+do
+	if (modinfo -k $kernel $mod 2>/dev/null | grep "filename:" | grep -q builtin); then
+		continue
+	fi
+	if ! (modinfo -k $kernel $mod 2>/dev/null); then
+		continue
+	fi
+	ADD_DRIVERS="$ADD_DRIVERS $mod"
+done
+
+dracut --no-hostonly -m "bash network base systemd systemd-initrd systemd-networkd dracut-systemd shutdown udev-rules" \
+    --install "/etc/udev/rules.d/91-tmfifo_net.rules /etc/udev/rules.d/92-oob_net.rules" \
+    --add-drivers "${ADD_DRIVERS}" \
+    --gzip $initramfs ${kernel}
+
+case "$(file --brief --mime-type "$initramfs")" in
+	"application/x-lzma")
+		cat_initrd="lzcat" ;;
+	"application/x-lz4")
+		cat_initrd="lz4cat" ;;
+	"application/zstd")
+		cat_initrd="zstdcat" ;;
+	*)
+		cat_initrd="zcat" ;;
+esac
+
+echo "Rebuilding $initramfs"
+
+mkdir -p ${WDIR}/initramfs
+cd initramfs
+$cat_initrd "$initramfs" | sudo cpio -i
+
+copy_file()
+{
+	if [[ -e $1 || -h $1 ]]; then
+		bin=$1
+	else
+		bin=$(which $1 2> /dev/null)
+	fi
+	if [ -z "$bin" ]; then
+		echo "ERROR: Cannot find $1"
+		exit 1
+	fi
+	sudo mkdir -p .$(dirname $bin)
+	if [ ! -e .${bin} ]; then
+		sudo cp -a $bin .${bin}
+	fi
+
+	# Copy dependencies
+	for lib in  $(ldd $bin 2> /dev/null | grep '=>' | awk '{print $3}')
+	do
+		if [ -e .$lib ]; then
+			continue
+		fi
+		sudo mkdir -p .$(dirname $lib)
+		sudo cp -a $lib .$lib
+		if [ -h $lib ]; then
+			tlib=$(readlink -f $lib)
+			if [ ! -e .$tlib ]; then
+				sudo mkdir -p .$(dirname $tlib)
+				sudo cp $tlib .$tlib
+			fi
+		fi
+	done
+}
+
+(cd usr/bin; sudo ln -s xz xzcat)
+cp $(readlink -f /usr/bin/which) ./usr/bin/which
+
+for tool in xz efibootmgr bash getopt hexdump mstflint lspci \
+		lsblk watchdog shutdown systemctl strings aarch64-linux-gnu-strings \
+		mlxbf-bootctl id dirname curl openssl parted jq mlnx_bf_configure xxd cmp file hwclock $ADDON_TOOLS
+do
+	if [ -d $tool ]; then
+		continue
+	fi
+	# Remove tools coming with busybox
+	/bin/rm -f .${tool}
+	copy_file $tool
+done
+
+libperl=$(dpkg -S /usr/lib/aarch64-linux-gnu/perl | cut -d ':' -f 1 | tr -d ',')
+perl_modules=$(dpkg -S /usr/share/perl | cut -d ':' -f 1 | tr -d ',')
+
+# Check if python command is available, if not try to create symlink from python3
+if ! command -v python > /dev/null 2>&1; then
+	if command -v python3 > /dev/null 2>&1; then
+		python3_path=$(which python3)
+		python_dir=$(dirname $python3_path)
+		sudo ln -sf $python_dir/python3 $python_dir/python
+	fi
+fi
+
+python3=$(dpkg -S /usr/bin/pdb3.* | head -1 | cut -d ':' -f 1 | tr -d ',')
+libpython3_minimal=$(dpkg -S /usr/lib/python3*/os.py | head -1 | cut -d ':' -f 1 | tr -d ',')
+libpython3=$(dpkg -S /usr/lib/aarch64-linux-gnu/libpython3.*.so.1 | head -1 | cut -d ':' -f 1 | tr -d ',')
+python3_distutils=$(dpkg -S /usr/lib/python3.*/distutils | head -1 | cut -d ':' -f 1 | tr -d ',')
+python3_lib2to3=$(dpkg -S /usr/lib/python3.*/lib2to3 | head -1 | cut -d ':' -f 1 | tr -d ',')
+python_bin=$(readlink -f /usr/bin/python)
+python_deb=$(dpkg -S $python_bin | head -1 | cut -d ':' -f 1 | tr -d ',')
+python_ver=$(python -V | cut -d ' ' -f 2 | cut -d '.' -f1,2)
+
+for deb in mlxbf-scripts mft mft-oem mft-nvredfish mft-mlx5 dosfstools e2fsprogs fdisk kmod pciutils \
+		   usbutils tar coreutils nvme-cli mmc-utils iputils-ping uuid-runtime \
+		   sshpass openssh-client util-linux ipmitool procps debianutils \
+		   iproute2 findutils perl-base $libperl $perl_modules \
+		   $libpython3_minimal $python3_distutils $python3_lib2to3 $python3 $python_deb \
+		   $libpython3 bsdutils libexpat1 wget net-tools isc-dhcp-client hostname zip $ADDON_DEBS
+do
+	for pfile in $(dpkg -L $deb 2>/dev/null)
+	do
+		# Skip dpkg diversion messages and problematic entries
+		case "$pfile" in
+			"/."|"/lib"|"diverted"*|"package diverts"*)
+				continue
+				;;
+			*/man*|*doc*)
+				continue
+				;;
+			*share*)
+				case "$deb" in
+					perl*|mft*)
+						;;
+					*)
+						continue
+						;;
+				esac
+				;;
+		esac
+		
+		# Skip if file doesn't exist (handles any other weird dpkg output)
+		if [[ ! -e "$pfile" && ! -h "$pfile" ]]; then
+			continue
+		fi
+		
+		if [[ -d $pfile && ! -h $pfile ]]; then
+			continue
+		fi
+		/bin/rm -f .${pfile}
+		copy_file $pfile
+	done
+done
+
+sudo mkdir -p usr/share/misc/ bin/ var/log/watchdog
+sudo cp /usr/share/misc/pci.ids usr/share/misc/
+sudo cp /etc/watchdog.conf etc
+if ! [ -e usr/bin/python ]; then
+	ln -s python${python_ver} usr/bin/python
+fi
+if ! [ -e usr/bin/python3 ]; then
+	ln -s python${python_ver} usr/bin/python3
+fi
+
+# Make sure we can load mlx-bootctl
+bootctl_ko=""
+for driver in mlxbf-bootctl mlx-bootctl
+do
+	bootctl_ko=$(modinfo -F filename -k $kernel $driver || true)
+	if [ ! -z $bootctl_ko ]; then
+		break
+	fi
+done
+if [ -z "$bootctl_ko" ]; then
+	echo "ERROR: Cannot find mlxbf-bootctl or mlx-bootctl drivers"
+	exit 1
+fi
+sudo cp $bootctl_ko ./mlx-bootctl.ko
+# Find and copy the sbsa_gwdt watchdog driver (handles .ko, .ko.xz, .ko.gz, etc.)
+watchdog_driver=$(find /lib/modules/$kernel/kernel/drivers/ -name "sbsa_gwdt.ko*" -type f | head -1)
+if [ -n "$watchdog_driver" ]; then
+	sudo cp "$watchdog_driver" .
+else
+	echo "WARNING: sbsa_gwdt watchdog driver not found"
+fi
+sudo mkdir -p ./lib/firmware/
+if [ -d /lib/firmware/swissbit/ ]; then
+	sudo cp -a /lib/firmware/swissbit/ ./lib/firmware/
+fi
+
+sudo mkdir -p ./lib/udev/rules.d
+sudo cp /lib/udev/rules.d/82-net-setup-link.rules ./lib/udev/rules.d/82-net-setup-link.rules
+sudo mkdir -p ./etc/infiniband
+sudo cp /etc/infiniband/vf-net-link-name.sh ./etc/infiniband/vf-net-link-name.sh
+
+sudo mkdir -p mnt
+
+# Remove hostname that includes docker container's id
+/bin/rm -f ./etc/hostname
+echo localhost > /etc/hostname
+
+touch ./etc/fstab
+
+# Prevent the modules from loading automatically by blacklisting them
+cat > ./etc/modprobe.d/blacklist-mlx5.conf << EOF
+blacklist mlx5_core
+blacklist mlx5_ib
+blacklist mlxfw
+blacklist ib_umad
+EOF
+
+ex mkdir -p ubuntu
+# Tar the image
+XZ_OPT="--threads=0 -9 --verbose" tar -cJp \
+	--exclude='./workspace' \
+	--exclude='./signing-local' \
+	--exclude='./signing-shared' \
+	--exclude='./var/run/docker.sock' \
+	--exclude='./root/workspace' \
+	--exclude='./tmp/*' \
+	--exclude='./run/*' \
+	--exclude='./sys/*' \
+	--exclude='./proc/*' \
+	--exclude='./dev/*' \
+	--exclude='./.dockerenv' \
+	--exclude='./root/.bash_history' \
+	--exclude='./var/tmp/*' \
+	--exclude='./bin/qemu-aarch64-static' \
+	--exclude='./usr/bin/qemu-aarch64-static' \
+	--exclude='./usr/bin/qemu-arm-static' \
+	--exclude='./var/cache/apt/*' \
+	--exclude='./var/lib/apt/lists/*' \
+	--exclude='./usr/share/cd-boot-images-arm64' \
+	-f ./ubuntu/image.tar.xz -C / .
+
+ex install -m 0755 ${SDIR}/install.sh ./ubuntu/install.sh
+ex cp -a ${SDIR}/install.env ./ubuntu/
+
+mkdir -p scripts
+cat > scripts/initrd-install << EOF
+#!/bin/bash
+
+printf_msg()
+{
+	echo "\$@" > /dev/kmsg
+	return 0
+}
+
+modprobe nls_iso8859-1 > /dev/null 2>&1
+modprobe -a sdhci-of-dwcmshc dw_mmc-bluefield > /dev/null 2>&1
+modprobe mlxbf_tmfifo > /dev/null 2>&1
+modprobe -a ipmi_msghandler ipmi_devintf i2c-mlxbf
+modprobe ipmb_host slave_add=0x10
+echo ipmb-host 0x1011 > /sys/bus/i2c/devices/i2c-1/new_device
+insmod /mlx-bootctl.ko > /dev/null 2>&1
+insmod /sbsa_gwdt.ko > /dev/null 2>&1
+/usr/sbin/watchdog > /dev/null 2>&1
+
+printf_msg "================================="
+printf_msg "Installing ubuntu. Please wait..."
+printf_msg "================================="
+
+/bin/bash /ubuntu/install.sh
+if [ \$? -eq 0 ]; then
+	printf_msg "==================================="
+	printf_msg "Installation finished. Rebooting..."
+	printf_msg "==================================="
+	printf_msg
+	sleep 3
+	reboot -f
+else
+	printf_msg "========================"
+	printf_msg "Failed to install ubuntu"
+	printf_msg "========================"
+fi
+EOF
+
+chmod +x scripts/initrd-install
+sudo rm -f conf/conf.d/ubuntu-core*
+
+cat > usr/lib/systemd/system/install-ubuntu.service << EOF
+[Unit]
+Description=Install ubuntu Linux
+After=initrd-root-fs.target initrd-parse-etc.service
+After=dracut-initqueue.service dracut-mount.service
+
+[Service]
+Type=oneshot
+ExecStart=/scripts/initrd-install
+StandardInput=null
+StandardOutput=syslog
+StandardError=syslog+console
+EOF
+
+mkdir -p etc/systemd/system/initrd.target.wants
+ln -s /usr/lib/systemd/system/install-ubuntu.service etc/systemd/system/initrd.target.wants/install-ubuntu.service
+
+# Make initramfs with new ubuntu
+find . -print0 | sudo cpio --null -o --format=newc | gzip -9 > "$initramfs"
+
+cd ..
+
+mkdir -p /workspace
+
+# BF4: ISO 9660 image
+MLNX_REL=$(cat /etc/mlnx-release)
+
+# possible redundant "_bf4" in MLNX_REL
+MLNX_REL=$(echo $MLNX_REL | sed s/_bf4//)
+
+ISO_FILENAME=$MLNX_REL".iso"
+
+ISO_DIR=/workspace/iso
+mkdir -p $ISO_DIR
+
+# Boot the running kernel and the installer initramfs built above
+mkdir -p "$ISO_DIR"
+cp /boot/vmlinuz-$kernel "$ISO_DIR/vmlinuz"
+cp $initramfs "$ISO_DIR/initrd"
+cp -a /usr/share/cd-boot-images-arm64/tree/* "$ISO_DIR/"
+
+cat > "${ISO_DIR}/boot/grub/grub.cfg" << EOF
+loadfont unicode
+
+set menu_color_normal=white/black
+set menu_color_highlight=black/light-gray
+
+set default=0
+set timeout=3
+
+menuentry "${ubuntu_IMAGE} Installation" {
+  linux /vmlinuz keep_bootcon ip=dhcp
+  initrd /initrd
+}
+EOF
+
+mkdir -p "$ISO_DIR/.disk"
+echo "${ubuntu_ISO}" > "$ISO_DIR/.disk/info"
+
+ex xorriso -as mkisofs \
+  -iso-level 3 \
+  -allow-lowercase \
+  -volid "BF_BUNDLE_ISO" \
+  -J \
+  -joliet-long \
+  -l \
+  -c boot/boot.cat \
+  -partition_offset 16 \
+  -append_partition 2 0xef "/usr/share/cd-boot-images-arm64/images/boot/grub/efi.img" \
+  -e --interval:appended_partition_2:all:: \
+  -no-emul-boot \
+  -partition_cyl_align all \
+  "$ISO_DIR" \
+  -output "/workspace/${ubuntu_ISO}"
+
+cd ..
+
+rm -r $ISO_DIR
+
+echo "ISO is ready: $(readlink -f /workspace/${ubuntu_ISO})"

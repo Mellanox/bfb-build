@@ -1,0 +1,121 @@
+#!/bin/bash -e
+###############################################################################
+#
+# Copyright 2022 NVIDIA Corporation
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+###############################################################################
+
+cd ${0%*/*}
+
+if [ ! -e Dockerfile ]; then
+	echo "ERROR: Dockerfile is missing."
+	exit 1
+fi
+
+if ! (which wget > /dev/null 2>&1); then
+	echo "wget is required to build BFB"
+	exit 1
+fi
+
+if ! (which docker > /dev/null 2>&1); then
+	echo "docker is required to build BFB"
+	exit 1
+fi
+
+DISTRO="ubuntu"
+DISTRO_DISPLAY_NAME="ubuntu"
+DISTRO_VERSION="24.04-64k"
+DISTRO_BASE_URL="https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-arm64-root.tar.xz"
+RELEASE_DIR_SUFFIX=${RELEASE_DIR_SUFFIX:-""}
+ARCH=${ARCH:-"arm64-dpu"}
+LEAVE_CONTAINER=${LEAVE_CONTAINER:-"no"}
+INCLUDE_DOCA_SERVICES=${INCLUDE_DOCA_SERVICES:-"yes"}
+
+DOCA_REPO_URL=${DOCA_REPO_URL:-"https://linux.mellanox.com/public/repo/doca/3.3.0-bf4-beta1/ubuntu24.04-64k/arm64-dpu/"}
+
+
+WDIR=/tmp/${DISTRO}${DISTRO_VERSION}${DISTRO_KERNEL}.$$
+
+mkdir -p $WDIR
+
+cp -a \
+	Dockerfile \
+	build_ubuntu_bfb \
+	create_bfb \
+	install.sh \
+	repos \
+	10-mlx-console-messages.conf \
+	apt-preferences \
+	../../common-bf4/tools/qemu-aarch64-static \
+	$WDIR
+
+
+cp -a ../../common-bf4/install.env $WDIR
+
+cd $WDIR
+wget -q --no-check-certificate $DISTRO_BASE_URL
+
+echo "deb [trusted=yes] $DOCA_REPO_URL ./" | tee $WDIR/repos/00.doca.list
+
+if [ "$INCLUDE_DOCA_SERVICES" == "yes" ]; then
+	echo "Downloading DOCA services..."
+	http=$DOCA_REPO_URL/services/
+
+	cut_dirs=$(echo $http | cut -d: -f2 | sed s:/:" ":g | wc -w)
+    cut_dirs=$((cut_dirs - 1))
+
+    # https://man7.org/linux/man-pages/man1/wget.1.html
+    wget -r -l0 -nv -np -nH --cut-dirs $cut_dirs --execute robots=off -R index.html* $http
+
+	gzip -d services/telemetry/doca_telemetry_*.tar.gz
+fi
+
+docker_image=bfb_runtime_${DISTRO,,}${DISTRO_VERSION,,}
+
+docker rm -f BlueField_OS_${DISTRO}_${DISTRO_VERSION} 2> /dev/null
+
+docker build -t ${docker_image} \
+	-f Dockerfile .
+
+DOCKER_RUN_PARAMS="--privileged -e container=docker \
+	-v $PWD:/workspace \
+	--name BlueField_OS_${DISTRO}_${DISTRO_VERSION} \
+	--mount type=bind,source=/dev,target=/dev \
+	--mount type=bind,source=/sys,target=/sys \
+	--mount type=bind,source=/proc,target=/proc"
+
+if [ "X${LEAVE_CONTAINER}" == "Xyes" ]; then
+	DOCKER_RUN_PARAMS="-d -it ${DOCKER_RUN_PARAMS}"
+	docker_id=$(docker run ${DOCKER_RUN_PARAMS} \
+		${docker_image} /bin/bash)
+	docker exec -it ${docker_id} /bin/bash -x /root/workspace/build_ubuntu_bfb
+else
+	DOCKER_RUN_PARAMS="-t --rm ${DOCKER_RUN_PARAMS}"
+	docker run ${DOCKER_RUN_PARAMS} \
+		${docker_image} /bin/bash -x /root/workspace/build_ubuntu_bfb
+fi
+
+readlink -f *.iso
+
+echo "Default user/password is: ubuntu/ubuntu"
+
+if [ "X${LEAVE_CONTAINER}" == "Xyes" ]; then
+	echo "Container name: BlueField_OS_${DISTRO}_${DISTRO_VERSION} id: ${docker_id}"
+fi

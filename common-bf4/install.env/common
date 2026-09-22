@@ -336,16 +336,12 @@ EOF
 configure_ovs()
 {
 	if (lspci -n -d 15b3: | grep -wq 'a2df'); then
-		case "${distro,,}" in
-			"ubuntu")
-			if [ -e /etc/mellanox/mlnx-ovs.conf ]; then
-					ilog "Enable OVS DOCA on BlueField-4"
-					sed -i -e "s/OVS_DOCA=.*/OVS_DOCA=yes/" /mnt/etc/mellanox/mlnx-ovs.conf
-			else
-					ilog "OVS configuration file was not found: /mnt/etc/mellanox/mlnx-ovs.conf"
-			fi
-			;;
-		esac
+		if [ -e /mnt/etc/mellanox/mlnx-ovs.conf ]; then
+				ilog "Enable OVS DOCA on BlueField-4"
+				sed -i -e "s/OVS_DOCA=.*/OVS_DOCA=yes/" /mnt/etc/mellanox/mlnx-ovs.conf
+		else
+				ilog "OVS configuration file was not found: /mnt/etc/mellanox/mlnx-ovs.conf"
+		fi
 	fi
 }
 
@@ -825,7 +821,7 @@ configure_default_grub()
 	ilog "Configure /etc/default/grub:"
 	# Then, set boot arguments: Read current 'console' and 'earlycon'
 	# parameters, and append the root filesystem parameters.
-	bootarg="$(cat /proc/cmdline | sed 's/initrd=initramfs//;s/console=.*//')"
+	bootarg="$(cat /proc/cmdline | sed 's/initrd=initramfs//;s/console=.*//;s/BOOT_IMAGE=[^[:space:]]*[[:space:]]*//g')"
 	redfish_osarg="$(bfcfg --dump-osarg 2> /dev/null)"
 	if [ -n "$redfish_osarg" ]; then
 		bootarg="$bootarg $redfish_osarg"

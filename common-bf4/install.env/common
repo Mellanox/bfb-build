@@ -1,4 +1,3 @@
-rshimlog=$(which bfrshlog 2> /dev/null)
 RC=0
 err_msg=""
 export LC_ALL=C
@@ -19,14 +18,6 @@ BD_PSIDS=${BD_PSIDS:-"BD_0000000004 BD_0000000005"}
 DEVICE_TIMEOUT=${DEVICE_TIMEOUT:-30}
 FSTAB_USE_DEV_NAME=${FSTAB_USE_DEV_NAME:-"no"}
 
-rlog()
-{
-	msg=$(echo "$*" | sed 's/INFO://;s/ERROR:/ERR/;s/WARNING:/WARN/')
-	if [ -n "$rshimlog" ]; then
-		$rshimlog "$msg"
-	fi
-}
-
 ilog()
 {
 	msg="[$(date +%H:%M:%S)] $*"
@@ -38,7 +29,6 @@ ilog()
 log()
 {
 	ilog "$*"
-	rlog "$*"
 }
 
 fail()
@@ -336,16 +326,12 @@ EOF
 configure_ovs()
 {
 	if (lspci -n -d 15b3: | grep -wq 'a2df'); then
-		case "${distro,,}" in
-			"ubuntu")
-			if [ -e /etc/mellanox/mlnx-ovs.conf ]; then
-					ilog "Enable OVS DOCA on BlueField-4"
-					sed -i -e "s/OVS_DOCA=.*/OVS_DOCA=yes/" /mnt/etc/mellanox/mlnx-ovs.conf
-			else
-					ilog "OVS configuration file was not found: /mnt/etc/mellanox/mlnx-ovs.conf"
-			fi
-			;;
-		esac
+		if [ -e /mnt/etc/mellanox/mlnx-ovs.conf ]; then
+				ilog "Enable OVS DOCA on BlueField-4"
+				sed -i -e "s/OVS_DOCA=.*/OVS_DOCA=yes/" /mnt/etc/mellanox/mlnx-ovs.conf
+		else
+				ilog "OVS configuration file was not found: /mnt/etc/mellanox/mlnx-ovs.conf"
+		fi
 	fi
 }
 
@@ -692,18 +678,76 @@ EOF
 	/bin/rm -f /mnt/boot/vmlinux-*.bz2
 }
 
+get_sf_netdev_name()
+{
+	# Derive the predictable SF netdev name from a PCI device address and function index.
+	# Usage: get_sf_netdev_name <pci_address> <sf_index>
+	# BF3 (single domain 0000): enp<bus>s0f<func>s<sf>
+	# BF4 (multi-domain):       enP<domain>p<bus>s0f<func>S<sf>
+	local pciid=$1
+	local sf_index=${2:-0}
+	local domain bus slot func
+
+	domain=$(echo $pciid | awk -F: '{print $1}')
+	bus=$(echo $pciid | awk -F: '{print $2}')
+	slot=$(echo $pciid | awk -F'[:.]' '{print $3}')
+	func=$(echo $pciid | awk -F'[:.]' '{print $4}')
+
+	# Strip leading zeros for the naming scheme
+	local bus_dec=$((16#$bus))
+	local domain_dec=$((16#$domain))
+	local slot_dec=$((16#$slot))
+	local func_dec=$((16#$func))
+
+	if [ $domain_dec -eq 0 ]; then
+		# Single domain (BF3 and earlier): enp<bus>s<slot>f<func>s<sf>
+		echo "enp${bus_dec}s${slot_dec}f${func_dec}s${sf_index}"
+	else
+		# Multi-domain (BF4): enP<domain>p<bus>s<slot>f<func>S<sf>
+		echo "enP${domain_dec}p${bus_dec}s${slot_dec}f${func_dec}S${sf_index}"
+	fi
+}
+
 configure_network()
 {
 	ilog "Configure network for SF interfaces:"
-	num_ports=$(lspci -nD 2> /dev/null | grep -E "$SUPPORTED_DEVICES" | wc -l)
+	local all_pci_devs=$(lspci -nD 2> /dev/null | grep -E "$SUPPORTED_DEVICES" | awk '{print $1}')
+
+	if [ -z "$all_pci_devs" ]; then
+		ilog "No network interfaces found"
+		return
+	fi
+
+	# Determine which PCI devices have SFs.
+	# BF4 (multi-domain): multiple PCI functions per domain but only function 0
+	#   per domain has an SF (e.g. 0002:01:00.0 and 0006:01:00.0).
+	# BF3 and earlier (single domain 0000): each PCI function has an SF
+	#   (e.g. 0000:03:00.0 and 0000:03:00.1).
+	local sf_pci_devs=""
+	if is_bf4; then
+		local -A seen_domains
+		for pciid in $all_pci_devs; do
+			local domain="${pciid%%:*}"
+			if [ -z "${seen_domains[$domain]:-}" ]; then
+				seen_domains[$domain]=1
+				sf_pci_devs="${sf_pci_devs} ${pciid}"
+			fi
+		done
+	else
+		sf_pci_devs="$all_pci_devs"
+	fi
+	sf_pci_devs=$(echo $sf_pci_devs)
+
+	local num_ports=$(echo "$sf_pci_devs" | wc -w)
 	if [ $num_ports -lt 1 ]; then
 		ilog "No network interfaces found"
 		return
 	fi
-	for port in $(seq 1 $num_ports); do
-		p=$((port - 1))
-		interface="enp3s0f${p}s0"
-		ilog "Configuring network interface $port"
+
+	local port=0
+	for pciid in $sf_pci_devs; do
+		interface=$(get_sf_netdev_name $pciid 0)
+		ilog "Configuring network interface $((port + 1)) ($interface) for PCI device $pciid"
 		if [ -d /mnt/etc/sysconfig/network-scripts/ ]; then
 			cat > /mnt/etc/sysconfig/network-scripts/ifcfg-${interface} << EOF
 NAME="${interface}"
@@ -718,7 +762,7 @@ EOF
 			chmod 600 /mnt/etc/sysconfig/network-scripts/ifcfg-${interface}
 			ilog "Created configuration for network interface ${interface}: /etc/sysconfig/network-scripts/ifcfg-${interface}"
 		elif [ -d /mnt/etc/netplan/ ]; then
-			cat > /mnt/etc/netplan/60-mlnx-${p}.yaml << EOF
+			cat > /mnt/etc/netplan/60-mlnx-${port}.yaml << EOF
 network:
   version: 2
   ethernets:
@@ -726,8 +770,8 @@ network:
       renderer: networkd
       dhcp4: 'true'
 EOF
-			chmod 600 /mnt/etc/netplan/60-mlnx-${p}.yaml
-			ilog "Created configuration for network interface ${interface}: /etc/netplan/60-mlnx-${p}.yaml"
+			chmod 600 /mnt/etc/netplan/60-mlnx-${port}.yaml
+			ilog "Created configuration for network interface ${interface}: /etc/netplan/60-mlnx-${port}.yaml"
 		elif [ -d /mnt/etc/network/interfaces.d/ ]; then
 			cat > /mnt/etc/network/interfaces.d/${interface} << EOF
 auto ${interface}
@@ -739,10 +783,12 @@ EOF
 			ilog "Unknown network configuration environment"
 			return 1
 		fi
+		port=$((port + 1))
 	done
 
 	if [ $num_ports -eq 1 ]; then
 		ilog "Removing configuration for the second network interface on one port devices"
+		# Clean up BF3-style names
 		if [ -f /mnt/etc/sysconfig/network-scripts/ifcfg-enp3s0f1s0 ]; then
 			/bin/rm -f /mnt/etc/sysconfig/network-scripts/ifcfg-enp3s0f1s0
 			ilog "Removed configuration for network interface enp3s0f1s0: /etc/sysconfig/network-scripts/ifcfg-enp3s0f1s0"
@@ -753,7 +799,7 @@ EOF
 		fi
 		if [ -f /mnt/etc/netplan/60-mlnx-1.yaml ]; then
 			/bin/rm -f /mnt/etc/netplan/60-mlnx-1.yaml
-			ilog "Removed configuration for network interface enp3s0f1s0: /etc/netplan/60-mlnx-1.yaml"
+			ilog "Removed configuration for network interface: /etc/netplan/60-mlnx-1.yaml"
 		fi
 	fi
 
@@ -825,15 +871,15 @@ configure_default_grub()
 	ilog "Configure /etc/default/grub:"
 	# Then, set boot arguments: Read current 'console' and 'earlycon'
 	# parameters, and append the root filesystem parameters.
-	bootarg="$(cat /proc/cmdline | sed 's/initrd=initramfs//;s/console=.*//')"
+	bootarg="$(cat /proc/cmdline | sed 's/initrd=initramfs//;s/console=.*//;s/BOOT_IMAGE=[^[:space:]]*[[:space:]]*//g')"
 	redfish_osarg="$(bfcfg --dump-osarg 2> /dev/null)"
 	if [ -n "$redfish_osarg" ]; then
 		bootarg="$bootarg $redfish_osarg"
 	fi
 	if (lscpu 2>&1 | grep -wq Grace); then
-		sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=1024M $bootarg keep_bootcon earlycon modprobe.blacklist=mlx5_core,mlx5_ib selinux=0 biosdevname=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
+		sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=1024M $bootarg keep_bootcon earlycon modprobe.blacklist=mlx5_core,mlx5_ib selinux=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
 	else
-		sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=1024M $bootarg console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 modprobe.blacklist=mlx5_core,mlx5_ib selinux=0 biosdevname=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
+		sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=1024M $bootarg console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 modprobe.blacklist=mlx5_core,mlx5_ib selinux=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
 	fi
 	if (grep -q MLNXBF33 /sys/firmware/acpi/tables/SSDT*); then
 		# BlueField-3
@@ -880,11 +926,7 @@ os_installation_flow()
 
 	update_uefi_boot_entries
 
-	if [ "X$ENABLE_SFC_HBN" == "Xyes" ]; then
-		enable_sfc_hbn
-	fi
-
-	if [ "X$ENABLE_BR_HBN" == "Xyes" ]; then
+	if [ "X$ENABLE_SFC_HBN" == "Xyes" ] || [ "X$ENABLE_BR_HBN" == "Xyes" ]; then
 		enable_sfc_hbn
 	fi
 

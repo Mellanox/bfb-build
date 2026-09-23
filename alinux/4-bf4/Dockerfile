@@ -99,6 +99,7 @@ RUN dnf -y install systemd && \
         mstflint \
         https://archives.fedoraproject.org/pub/archive/epel/9.6/Everything/aarch64/Packages/s/strongswan-5.9.11-1.el9.aarch64.rpm \
     && \
+    dnf -y reinstall grub2-efi-aa64 shim-aa64 && \
     dnf -y clean all && \
     rm -rf /var/cache/* && \
     mkdir -p /etc/ssh/sshd_config.d && \

@@ -56,9 +56,10 @@ DISTRO="ubuntu"
 DISTRO_VERSION="24.04-64k"
 DISTRO_BASE_URL="https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-arm64-root.tar.xz"
 ARCH=${ARCH:-"arm64-dpu"}
-DOCA_VERSION="3.6.0"
-BSP_VERSION="4.17.0-14082"
-MLNX_OFED_VERSION="26.07-0.6.8.0"
+DOCA_VERSION=${DOCA_VERSION:-"3.5.0"}
+BSP_VERSION=${BSP_VERSION:-"4.16.0-14075"}
+# Must match the published MLNX_OFED_SRC-debian-<ver>.tgz exactly.
+MLNX_OFED_VERSION=${MLNX_OFED_VERSION:-"26.07-0.7.7.0"}
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-""}
 INCLUDE_DOCA_SERVICES=${INCLUDE_DOCA_SERVICES:-"yes"}

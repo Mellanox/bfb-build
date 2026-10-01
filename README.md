@@ -119,9 +119,46 @@ CUSTOM_KERNEL_DEBS=/path/to/my-kernel-debs \
 
 The same works for the 64k-page variant with `./bfb-build ubuntu 24.04-64k`.
 
-The directory must contain at least `linux-image-*`, `linux-modules-*` and the
-matching `linux-headers-*` packages. The headers are required: MLNX_OFED is
-compiled against `/lib/modules/<kernel>/build`.
+This mode renders the Dockerfile from a template, so the build host needs
+`python3-jinja2` installed. Default builds use the committed Dockerfile and do
+not need it.
+
+The directory must be a flat folder of `.deb` files holding the kernel you want:
+
+````
+linux-image-<abi>-<flavour>_<ver>_arm64.deb
+linux-modules-<abi>-<flavour>_<ver>_arm64.deb
+linux-modules-extra-<abi>-<flavour>_<ver>_arm64.deb   (4k flavours only)
+linux-headers-<abi>-<flavour>_<ver>_arm64.deb
+linux-headers-<abi>_<ver>_all.deb
+````
+
+Three things to get right:
+
+- the `linux-headers` packages are mandatory, both the flavour one and the
+  architecture-independent one. Everything in this flow is compiled against
+  `/lib/modules/<kernel>/build`, which those packages provide
+- use the versioned packages, not the `linux-image-generic` style metapackages.
+  A metapackage pulls `linux-firmware` in with it, which is large and of no use
+  on a DPU
+- the 64k-page flavours ship no `linux-modules-extra`; their `linux-modules`
+  contains everything
+
+Any Ubuntu 24.04 arm64 kernel will do. One way to collect a stock one is to let
+apt download it in a throwaway container and copy out the versioned packages:
+
+````
+docker run --rm -v /path/to/my-kernel-debs:/out arm64v8/ubuntu:24.04 bash -c '
+apt-get update -qq
+apt-get install -y --download-only -qq linux-generic
+cd /var/cache/apt/archives
+for g in "linux-image-*-generic_*.deb" "linux-modules-*-generic_*.deb" \
+         "linux-headers-*-generic_*.deb" "linux-headers-*_all.deb"; do
+  cp $g /out/ 2>/dev/null
+done'
+````
+
+Use `linux-generic-64k` instead when building `ubuntu 24.04-64k`.
 
 What this changes compared to a default build:
 
@@ -153,28 +190,19 @@ What this changes compared to a default build:
 All BlueField SoC kernel modules are rebuilt against the custom kernel from the
 sources published at `.../SOURCES/SoC/`, one `.src.rpm` per driver, each
 carrying `debian/` packaging. They are rebuilt whether or not the kernel already
-provides a driver of the same name. Most of them are upstream, but the in-kernel
-copy is a snapshot of whatever the customer's kernel forked from, while these
-are the versions the DOCA release was validated with: for DOCA 3.4.0,
-`mlxbf-gige` carries `mlxbf_gige_uphy.c` and `mlxbf_gige_debug.c`, neither of
-which is in mainline as of v6.16, and BF3 OOB networking needs the first. The
-rebuilt modules install into `/lib/modules/<kernel>/updates`, which `depmod`
-prefers over `kernel/`, so they take precedence over the in-box copy.
+provides a driver of the same name. Several of them are upstream, but the
+in-kernel copy is a snapshot of whatever the customer's kernel forked from,
+while these are the versions the DOCA release ships. The rebuilt modules install
+into `/lib/modules/<kernel>/updates`, which `depmod` prefers over `kernel/`, so
+they take precedence over the in-box copy.
 
 Which sources are kernel modules is discovered rather than hardcoded: a kernel
-module source carries `debian/control.no_dkms`, the userspace ones (`libpka`,
-`mlx-OpenIPMI`, `mlxbf-bootctl`, `rshim`) do not. For DOCA 3.4.0 that is 20 of
-the 24 published sources. Seven of the twenty are NVIDIA-only and exist in no
-upstream kernel: `ipmb-host`, `mlx-cpld`, `mlx-trio`, `mlxbf-livefish`,
-`mlxbf-pka`, `mlxbf-ptm`, `pwr-mlxbf`. Two more (`gpio-mlxbf3`,
-`pinctrl-mlxbf3`) only reached mainline in v6.6.
+module source carries `debian/control.no_dkms`, the userspace ones do not, so
+the set follows whatever a given DOCA release publishes.
 
 Set `BUILD_SOC_MODULES=no` to skip all of them, or name individual packages in
-`SOC_MODULES_SKIP` to leave one out. A driver that will not build is listed in
-the build summary rather than failing the BFB. `sdhci-of-dwcmshc` is the one to
-watch: it links private copies of `sdhci.o` and `sdhci-pltfm.o` into its own
-module, so on a kernel whose eMMC support differs from BlueField's it is the
-first candidate for `SOC_MODULES_SKIP`.
+`SOC_MODULES_SKIP` to leave one out. A driver that will not build against the
+supplied kernel is listed in the build summary rather than failing the BFB.
 
 ### What the kernel itself has to provide
 

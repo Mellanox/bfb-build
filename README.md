@@ -212,11 +212,6 @@ Additional variables:
 | `OFED_KERNEL_PACKAGES` | `mlnx-ofed-kernel iser isert srp mlnx-nvme mlnx-nfsrdma xpmem kernel-mft` | OFED kernel sources to rebuild, `mlnx-ofed-kernel` always first |
 | `OFED_SOURCES_URL` | - | directory of `<pkg>_<ver>.orig.tar.*` files, used instead of the source tarball |
 | `DOCA_REPO_URL` | `<BASE_URL>/doca/<DOCA_VERSION>-<BSP_VERSION>/<distro>/<arch>` | DOCA apt repo, also where `mlxbf-bootimages` is fetched from |
-| `DOCA_REPO_DEB` | - | a `doca-dpu-repo-<distro>-local` deb to install instead of using an apt repo |
-| `BOOTIMAGES_DEB` | - | an `mlxbf-bootimages` deb to use instead of downloading the published one |
-| `DOCA_SERVICES_INFRA_URL` | - | source for `infrastructure/`, instead of the published `services/` tree |
-| `DOCA_SERVICES_BLUEMAN_URL` | - | source for `blueman/` |
-| `DOCA_SERVICES_TELEMETRY_URL` | - | source for `telemetry-agent/` |
 | `BUILD_SOC_MODULES` | `yes` | rebuild every BlueField SoC kernel module |
 | `SOC_SRC_URL` | `<BASE_URL>/doca/<DOCA_VERSION>-<BSP_VERSION>/SOURCES/SoC` | SoC driver sources |
 | `SOC_MODULES_SKIP` | - | space separated SoC package names to leave out |

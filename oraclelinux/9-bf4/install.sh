@@ -35,6 +35,9 @@ if [ ! -e /tmp/bfpxe.done ]; then touch /tmp/bfpxe.done; bfpxe; fi
 
 ROOTFS=${ROOTFS:-"xfs"}
 
+# Enable mlx5_core async probe on BF-4 (default: no)
+ENABLE_MLX5_ASYNC_PROBE=${ENABLE_MLX5_ASYNC_PROBE:-"no"}
+
 if [ -e ${BDIR}/install.env/common ]; then
 	. ${BDIR}/install.env/common
 else
@@ -161,13 +164,11 @@ sed -i -e "s/^SELINUX=.*/SELINUX=disabled/" /mnt/etc/selinux/config
 chmod 600 /mnt/etc/ssh/*
 
 # Enable NetworkManager for ifcfg-enp3s0f0s0 and ifcfg-enp3s0f1s0
-# TODO: ensure naming
 sed -i 's@NM_CONTROLLED="no"@NM_CONTROLLED="yes"@' /mnt/etc/sysconfig/network-scripts/ifcfg-enp3s0f0s0
 sed -i 's@NM_CONTROLLED="no"@NM_CONTROLLED="yes"@' /mnt/etc/sysconfig/network-scripts/ifcfg-enp3s0f1s0
 
 # BlueField-4
 chroot /mnt rpm -e mlnx-snap mlnx-libsnap spdk || true
-chroot /mnt systemctl disable bfvcheck mlx_ipmid || true
 }
 
 update_efi_bootmgr()
@@ -197,15 +198,21 @@ $(lsblk -o NAME,LABEL,UUID,PARTUUID)
 
 EOF
 
-	# Then, set boot arguments: Read current 'console' and 'earlycon'
-	# parameters, and append the root filesystem parameters.
-	bootarg="$(cat /proc/cmdline | sed 's/initrd=initramfs//;s/console=.*//')"
+	bootarg="$(cat /proc/cmdline | sed 's/initrd=initramfs//;s/console=.*//;s/BOOT_IMAGE=[^[:space:]]*[[:space:]]*//g')"
 	redfish_osarg="$(bfcfg --dump-osarg 2> /dev/null)"
 	if [ -n "$redfish_osarg" ]; then
 		bootarg="$bootarg $redfish_osarg"
 	fi
+	async_probe=""
+	if [ "${ENABLE_MLX5_ASYNC_PROBE}" = "yes" ]; then
+		async_probe=" driver_async_probe=mlx5_core"
+	fi
+	sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=1024M $bootarg keep_bootcon earlycon selinux=0 iommu.passthrough=1${async_probe}\"@" /mnt/etc/default/grub
 
-	sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=1024M $bootarg earlycon selinux=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
+	if (lspci -vv | grep -wq SimX); then
+		# Remove earlycon from grub parameters on SimX
+		sed -i -r -e 's/earlycon=[^ ]* //g' /mnt/etc/default/grub
+	fi
 
 	ilog "GRUB /etc/default/grub"
 	ilog "$(cat /mnt/etc/default/grub)"
@@ -234,7 +241,6 @@ set_root_password()
 }
 
 global_installation_flow
-
 
 save_log
 sleep 3

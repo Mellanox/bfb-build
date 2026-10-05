@@ -8,8 +8,7 @@ ADD install.sh create_bfb /root/workspace/
 
 ADD repos/ /etc/yum.repos.d/
 
-RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
-    dnf -y install \
+RUN dnf -y install \
         acpid \
         annobin \
         audit \
@@ -53,8 +52,8 @@ RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
         kexec-tools \
         kernel-rpm-macros \
         kmod \
-        kubeadm \
-        kubelet \
+        kubeadm-1.34.1 \
+        kubelet-1.34.1 \
         kubernetes-cni \
         libbsd \
         libibverbs \
@@ -151,7 +150,6 @@ RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
 RUN rm -f /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf
 
 # Manage services
-RUN systemctl disable mlx_ipmid.service || true
 RUN systemctl enable kdump || true
 RUN systemctl disable kubelet || true
 RUN systemctl disable containerd || true

@@ -303,22 +303,34 @@ configure_sfs()
 			sd_domains[$domain]=1
 		done
 		sorted_domains=($(echo "${!sd_domains[@]}" | tr ' ' '\n' | sort))
+		local sd_idx=0
 		for domain in "${sorted_domains[@]}"; do
 			pciid="${domain}:01:00.0"
 			# Verify this PCI ID actually exists
 			if echo "$all_pciids" | grep -q "^${pciid}$"; then
+				local ctrl_opt=""
+				if [ $sd_idx -gt 0 ]; then
+					ctrl_opt=" --controller 4"
+				fi
 				cat >> /mnt/etc/mellanox/mlnx-sf.conf << EOF
-/sbin/mlnx-sf --action create --device $pciid --sfnum 0 --hwaddr $(uuidgen | sed -e 's/-//;s/^\(..\)\(..\)\(..\)\(..\)\(..\).*$/02:\1:\2:\3:\4:\5/')
+/sbin/mlnx-sf --action create --device $pciid --sfnum 0${ctrl_opt} --hwaddr $(uuidgen | sed -e 's/-//;s/^\(..\)\(..\)\(..\)\(..\)\(..\).*$/02:\1:\2:\3:\4:\5/')
 EOF
+				sd_idx=$((sd_idx + 1))
 			fi
 		done
 	else
 		# Non-SD: one SF per PCI device (original behavior)
+		local dev_idx=0
 		for pciid in $all_pciids
 		do
+			local ctrl_opt=""
+			if [ $dev_idx -gt 0 ]; then
+				ctrl_opt=" --controller 3"
+			fi
 			cat >> /mnt/etc/mellanox/mlnx-sf.conf << EOF
-/sbin/mlnx-sf --action create --device $pciid --sfnum 0 --hwaddr $(uuidgen | sed -e 's/-//;s/^\(..\)\(..\)\(..\)\(..\)\(..\).*$/02:\1:\2:\3:\4:\5/')
+/sbin/mlnx-sf --action create --device $pciid --sfnum 0${ctrl_opt} --hwaddr $(uuidgen | sed -e 's/-//;s/^\(..\)\(..\)\(..\)\(..\)\(..\).*$/02:\1:\2:\3:\4:\5/')
 EOF
+			dev_idx=$((dev_idx + 1))
 		done
 	fi
 }
@@ -869,8 +881,6 @@ update_default_bfb()
 configure_default_grub()
 {
 	ilog "Configure /etc/default/grub:"
-	# Then, set boot arguments: Read current 'console' and 'earlycon'
-	# parameters, and append the root filesystem parameters.
 	bootarg="$(cat /proc/cmdline | sed 's/initrd=initramfs//;s/console=.*//;s/BOOT_IMAGE=[^[:space:]]*[[:space:]]*//g')"
 	redfish_osarg="$(bfcfg --dump-osarg 2> /dev/null)"
 	if [ -n "$redfish_osarg" ]; then

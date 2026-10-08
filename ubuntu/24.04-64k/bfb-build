@@ -93,7 +93,7 @@ MLNX_OFED_SRC_URL=${MLNX_OFED_SRC_URL:-"${BASE_URL}/doca/${DOCA_VERSION}-${BSP_V
 OFED_KERNEL_EXTRA_ARGS=${OFED_KERNEL_EXTRA_ARGS:-"--with-core-mod --with-user_mad-mod --with-user_access-mod --with-addr_trans-mod --with-mlxfw-mod --with-mlx5-mod --with-mlx5-ipsec --with-ipoib-mod --with-mlxdevm-mod --with-srp-mod --with-iser-mod --with-isert-mod --with-gds --with-sf-cfg-drv --with-sf-sfc --without-xdp --without-odp --with-nfsrdma-mod"}
 # OFED kernel module source packages to rebuild, in dependency order.
 # mlnx-ofed-kernel is always built and installed first.
-OFED_KERNEL_PACKAGES=${OFED_KERNEL_PACKAGES:-"mlnx-ofed-kernel iser isert srp mlnx-nvme mlnx-nfsrdma xpmem kernel-mft"}
+OFED_KERNEL_PACKAGES=${OFED_KERNEL_PACKAGES:-"mlnx-ofed-kernel iser isert srp mlnx-nvme mlnx-nfsrdma kernel-mft"}
 # Alternative to MLNX_OFED_SRC_URL: a directory of <pkg>_<ver>.orig.tar.* files,
 # e.g. an unpacked OFED-internal-debian tree. Takes over when the tarball is
 # not available, which is the case before a DOCA release publishes its sources.

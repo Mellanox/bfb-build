@@ -446,6 +446,37 @@ if [ -n "${advisory}" ]; then
 	echo "WARNING: create_bfb will omit these from the installer initramfs."
 fi
 
+
+###############################################################################
+# Restore parity with a default build before packing the rootfs.
+###############################################################################
+
+# openibd. A default build enables it when mlnx-ofed-kernel-utils is installed
+# during the image build; installing the rebuilt deb here with dpkg does not.
+# The reason is not established, so assert the end state instead of trusting
+# the maintainer script, and fail loudly rather than ship a BFB whose OFED
+# startup service never runs.
+if [ -e /lib/systemd/system/openibd.service ] || [ -e /etc/init.d/openibd ]; then
+	systemctl enable openibd.service > /dev/null 2>&1 || update-rc.d openibd defaults > /dev/null 2>&1 || true
+	if ! /bin/ls /etc/systemd/system/*.wants/openibd.service > /dev/null 2>&1 && \
+	   ! /bin/ls /etc/rc3.d/S*openibd > /dev/null 2>&1; then
+		echo "ERROR: openibd is installed but not enabled at boot."
+		exit 1
+	fi
+fi
+
+# The apt pin is a build-time control only. Left in place it would pin those
+# packages to -1 on the customer's DPU for the life of the installation.
+rm -f /etc/apt/preferences.d/98custom-kernel
+
+# Purge the toolchain the rebuild needed. Only packages a default build does
+# not already carry are listed; autoremove drops what they pulled in.
+apt-get remove --purge -y \
+	autoconf automake autotools-dev bison debhelper dh-exec dh-python \
+	diffstat flex libtool quilt rpm > /dev/null 2>&1 || true
+apt-get autoremove --purge -y > /dev/null 2>&1 || true
+apt-get clean -y > /dev/null 2>&1 || true
+
 /usr/sbin/update-pciids || true
 
 ex /root/workspace/create_bfb -k ${kernel}

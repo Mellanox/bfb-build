@@ -138,6 +138,9 @@ linux-modules-<abi>-<flavour>_<ver>_arm64.deb
 linux-modules-extra-<abi>-<flavour>_<ver>_arm64.deb   (4k flavours only)
 linux-headers-<abi>-<flavour>_<ver>_arm64.deb
 linux-headers-<abi>_<ver>_all.deb
+linux-tools-<abi>-<flavour>_<ver>_arm64.deb           (optional)
+linux-tools-<abi>_<ver>_arm64.deb                     (optional)
+linux-tools-common_<ver>_all.deb                      (optional)
 ````
 
 - both `linux-headers` packages are mandatory. Everything in this flow compiles
@@ -145,6 +148,10 @@ linux-headers-<abi>_<ver>_all.deb
 - use the versioned packages, not `linux-image-generic` style metapackages
 - the 64k flavours ship no `linux-modules-extra`; their `linux-modules` holds
   everything
+- `linux-tools` is optional but recommended. A default build ships `perf`,
+  `bpftool`, `cpupower` and `turbostat` through the NVIDIA kernel's tools
+  package; without the equivalent for your kernel the resulting image has none
+  of them
 
 To collect a stock Ubuntu kernel, let apt download it in a throwaway container
 and copy out the versioned packages:
@@ -152,10 +159,12 @@ and copy out the versioned packages:
 ````
 docker run --rm -v /path/to/my-kernel-debs:/out arm64v8/ubuntu:24.04 bash -c '
 apt-get update -qq
-apt-get install -y --download-only -qq linux-generic
+apt-get install -y --download-only -qq linux-generic linux-tools-generic
 cd /var/cache/apt/archives
 for g in "linux-image-*-generic_*.deb" "linux-modules-*-generic_*.deb" \
-         "linux-headers-*-generic_*.deb" "linux-headers-*_all.deb"; do
+         "linux-headers-*-generic_*.deb" "linux-headers-*_all.deb" \
+         "linux-tools-*-generic_*.deb" "linux-tools-6*_arm64.deb" \
+         "linux-tools-common_*.deb"; do
   cp $g /out/ 2>/dev/null
 done'
 ````
@@ -213,7 +222,7 @@ from eMMC.
 | `MLNX_OFED_SRC_URL` | `<BASE_URL>/doca/<DOCA_VERSION>-<BSP_VERSION>/SOURCES/mlnx_ofed/MLNX_OFED_SRC-debian-<ver>.tgz` | MLNX_OFED debian sources |
 | `MLNX_OFED_SRC_LOCAL` | - | use an already-downloaded tarball instead of fetching it |
 | `OFED_KERNEL_EXTRA_ARGS` | BlueField DPU flag set | passed as `configure_options` to each OFED kernel package build |
-| `OFED_KERNEL_PACKAGES` | `mlnx-ofed-kernel iser isert srp mlnx-nvme mlnx-nfsrdma xpmem kernel-mft` | OFED kernel sources to rebuild, `mlnx-ofed-kernel` always first |
+| `OFED_KERNEL_PACKAGES` | `mlnx-ofed-kernel iser isert srp mlnx-nvme mlnx-nfsrdma kernel-mft` | OFED kernel sources to rebuild, `mlnx-ofed-kernel` always first |
 | `OFED_SOURCES_URL` | - | directory of `<pkg>_<ver>.orig.tar.*` files, used instead of the source tarball |
 | `DOCA_REPO_URL` | `<BASE_URL>/doca/<DOCA_VERSION>-<BSP_VERSION>/<distro>/<arch>` | DOCA apt repo, also where `mlxbf-bootimages` is fetched from |
 | `BUILD_SOC_MODULES` | `yes` | rebuild every BlueField SoC kernel module |

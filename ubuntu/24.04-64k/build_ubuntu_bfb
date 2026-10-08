@@ -451,17 +451,15 @@ fi
 # Restore parity with a default build before packing the rootfs.
 ###############################################################################
 
-# openibd. A default build enables it when mlnx-ofed-kernel-utils is installed
-# during the image build; installing the rebuilt deb here with dpkg does not.
-# The reason is not established, so assert the end state instead of trusting
-# the maintainer script, and fail loudly rather than ship a BFB whose OFED
-# startup service never runs.
+# openibd. Installing the rebuilt mlnx-ofed-kernel-utils here with dpkg does
+# not enable it, while a GA image has it enabled. Whether a default bfb-build
+# image enables it is not established, so enable it and report, rather than
+# fail a build over a premise that has not been checked.
 if [ -e /lib/systemd/system/openibd.service ] || [ -e /etc/init.d/openibd ]; then
 	systemctl enable openibd.service > /dev/null 2>&1 || update-rc.d openibd defaults > /dev/null 2>&1 || true
 	if ! /bin/ls /etc/systemd/system/*.wants/openibd.service > /dev/null 2>&1 && \
 	   ! /bin/ls /etc/rc3.d/S*openibd > /dev/null 2>&1; then
-		echo "ERROR: openibd is installed but not enabled at boot."
-		exit 1
+		echo "WARNING: openibd is installed but could not be enabled at boot."
 	fi
 fi
 

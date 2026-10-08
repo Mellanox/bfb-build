@@ -106,6 +106,134 @@ MLNX_OFED driver packages and other BlueField SoC drivers.
 The relevant source packages are available under
 https://linux.mellanox.com/public/repo/bluefield/latest/extras/.
 
+### Ubuntu 24.04 / 24.04-64k: built-in custom kernel support
+
+`ubuntu/24.04` and `ubuntu/24.04-64k` can build a BFB around a kernel you
+supply. Install the one extra prerequisite, put your kernel `.deb` packages in a
+directory, and set `CUSTOM_KERNEL=yes`:
+
+````
+sudo apt-get install -y python3-jinja2
+
+CUSTOM_KERNEL=yes \
+CUSTOM_KERNEL_DEBS=/path/to/my-kernel-debs \
+./bfb-build ubuntu 24.04
+````
+
+Use `./bfb-build ubuntu 24.04-64k` for the 64k-page variant. The package is
+named `python3-jinja2` on RPM based hosts too, and `pip3 install jinja2` works
+as a fallback.
+
+Jinja2 is needed because this mode renders the Dockerfile from `Dockerfile.j2`.
+The committed `Dockerfile` is the default-mode rendering of that same template,
+so default builds are unchanged and need nothing installed.
+
+#### The kernel packages
+
+A flat directory of `.deb` files:
+
+````
+linux-image-<abi>-<flavour>_<ver>_arm64.deb
+linux-modules-<abi>-<flavour>_<ver>_arm64.deb
+linux-modules-extra-<abi>-<flavour>_<ver>_arm64.deb   (4k flavours only)
+linux-headers-<abi>-<flavour>_<ver>_arm64.deb
+linux-headers-<abi>_<ver>_all.deb
+linux-tools-<abi>-<flavour>_<ver>_arm64.deb           (optional)
+linux-tools-<abi>_<ver>_arm64.deb                     (optional)
+linux-tools-common_<ver>_all.deb                      (optional)
+````
+
+- both `linux-headers` packages are mandatory. Everything in this flow compiles
+  against `/lib/modules/<kernel>/build`, which they provide
+- use the versioned packages, not `linux-image-generic` style metapackages
+- the 64k flavours ship no `linux-modules-extra`; their `linux-modules` holds
+  everything
+- `linux-tools` is optional but recommended. A default build ships `perf`,
+  `bpftool`, `cpupower` and `turbostat` through the NVIDIA kernel's tools
+  package; without the equivalent for your kernel the resulting image has none
+  of them
+
+To collect a stock Ubuntu kernel, let apt download it in a throwaway container
+and copy out the versioned packages:
+
+````
+docker run --rm -v /path/to/my-kernel-debs:/out arm64v8/ubuntu:24.04 bash -c '
+apt-get update -qq
+apt-get install -y --download-only -qq linux-generic linux-tools-generic
+cd /var/cache/apt/archives
+for g in "linux-image-*-generic_*.deb" "linux-modules-*-generic_*.deb" \
+         "linux-headers-*-generic_*.deb" "linux-headers-*_all.deb" \
+         "linux-tools-*-generic_*.deb" "linux-tools-6*_arm64.deb" \
+         "linux-tools-common_*.deb"; do
+  cp $g /out/ 2>/dev/null
+done'
+````
+
+Use `linux-generic-64k` instead when building `ubuntu 24.04-64k`.
+
+#### What the build does
+
+- installs your kernel instead of the one pinned in `kernel-packages`
+- installs `doca-runtime-user` and `doca-devel-user` rather than `doca-runtime`
+  and `doca-devel`, which brings in the complete DOCA user space but none of the
+  prebuilt, kernel-version-pinned DOCA kernel modules
+- rebuilds the MLNX_OFED kernel packages from source against your kernel and
+  installs them before `create_bfb` packs the root filesystem. `kernel-mft` is
+  one of them, so `mst_pci`, `mst_pciconf` and `bf3_livefish` are covered too
+- rebuilds every BlueField SoC kernel module from the sources published at
+  `.../SOURCES/SoC/` into `/lib/modules/<kernel>/updates`, which `depmod`
+  prefers over `kernel/`. A driver that will not build against your kernel is
+  reported in the build summary rather than failing the BFB. Set
+  `BUILD_SOC_MODULES=no` to skip them all, or name packages in
+  `SOC_MODULES_SKIP` to leave individual ones out
+- asserts that the modules it is responsible for resolve against your kernel
+  before `create_bfb` runs. Without this a module that failed to build is
+  dropped silently from the initramfs and only surfaces as a broken DPU
+- suffixes the image and container with `_custom_kernel`, so a custom kernel
+  build does not overwrite a default one
+
+#### What your kernel must provide
+
+MLNX_OFED and the SoC sources cover every NVIDIA driver the DPU needs. What is
+left is the upstream set `create_bfb` puts in the installer initramfs:
+
+| Module | Kernel config |
+|---|---|
+| `dw_mmc`, `dw_mmc-pltfm` | `MMC_DW`, `MMC_DW_PLTFM` |
+| `mmc_block` | `MMC_BLOCK` |
+| `sdhci` | `MMC_SDHCI` |
+| `8021q` | `VLAN_8021Q` |
+| `ipmi_devintf`, `ipmi_ssif` | `IPMI_DEVICE_INTERFACE`, `IPMI_SSIF` |
+| `nls_iso8859-1` | `NLS_ISO8859_1` |
+| `sbsa_gwdt` | `ARM_SBSA_WATCHDOG` |
+
+A stock distro kernel has all of these. An arm64 `defconfig` does not: it misses
+`ARM_SBSA_WATCHDOG` and `IPMI_SSIF`. The build warns about whichever are absent
+rather than failing, but a kernel without `mmc_block` or `sdhci` will not boot
+from eMMC.
+
+#### Variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CUSTOM_KERNEL` | `no` | set to `yes` to enable the custom kernel flow |
+| `CUSTOM_KERNEL_DEBS` | - | directory holding the kernel `.deb` files |
+| `CUSTOM_KERNEL_VERSION` | auto-detect | kernel release string, e.g. `6.8.0-1022-bluefield`. Set it when more than one kernel ends up installed |
+| `MLNX_OFED_SRC_URL` | `<BASE_URL>/doca/<DOCA_VERSION>-<BSP_VERSION>/SOURCES/mlnx_ofed/MLNX_OFED_SRC-debian-<ver>.tgz` | MLNX_OFED debian sources |
+| `MLNX_OFED_SRC_LOCAL` | - | use an already-downloaded tarball instead of fetching it |
+| `OFED_KERNEL_EXTRA_ARGS` | BlueField DPU flag set | passed as `configure_options` to each OFED kernel package build |
+| `OFED_KERNEL_PACKAGES` | `mlnx-ofed-kernel iser isert srp mlnx-nvme mlnx-nfsrdma kernel-mft` | OFED kernel sources to rebuild, `mlnx-ofed-kernel` always first |
+| `OFED_SOURCES_URL` | - | directory of `<pkg>_<ver>.orig.tar.*` files, used instead of the source tarball |
+| `DOCA_REPO_URL` | `<BASE_URL>/doca/<DOCA_VERSION>-<BSP_VERSION>/<distro>/<arch>` | DOCA apt repo, also where `mlxbf-bootimages` is fetched from |
+| `BUILD_SOC_MODULES` | `yes` | rebuild every BlueField SoC kernel module |
+| `SOC_SRC_URL` | `<BASE_URL>/doca/<DOCA_VERSION>-<BSP_VERSION>/SOURCES/SoC` | SoC driver sources |
+| `SOC_MODULES_SKIP` | - | space separated SoC package names to leave out |
+
+The MLNX_OFED version is paired with the DOCA release, so `MLNX_OFED_VERSION` in
+`bfb-build` must match what is published for `DOCA_VERSION` (DOCA 3.4.0 pairs
+with MLNX_OFED 26.04-0.8.5.0, DOCA 3.4.1 with 26.04-1.1.0.0). If the source
+download fails, check that pairing first, or supply a local copy with
+`MLNX_OFED_SRC_LOCAL`.
 
 **Example for RPM based Distros:**
 The following steps can be added to the Dockerfile based on the real kernel and

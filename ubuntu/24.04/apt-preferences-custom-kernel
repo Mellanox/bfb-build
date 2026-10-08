@@ -1,0 +1,20 @@
+# Custom kernel builds only.
+#
+# These packages ship kernel modules prebuilt against the NVIDIA BlueField
+# kernel (their versions carry a .kver.<kernel> suffix). In a custom kernel
+# build they would never load, so they must not be installed. MLNX_OFED's
+# install.pl rebuilds all of them from source against the customer's kernel,
+# including kernel-mft-modules (mst_pci, mst_pciconf, bf3_livefish).
+#
+# The doca-*-user metapackages already avoid depending on them, but that is not
+# sufficient on its own: ngauge (pulled in by doca-runtime-container) Recommends
+# the virtual package "fwctl-modules", which mlnx-ofed-kernel-modules Provides,
+# and the image is built without --no-install-recommends. Pinning them to -1
+# leaves that Recommends unsatisfied, which is harmless.
+#
+# Safe to pin: every hard dependency on these comes from doca-runtime-kernel
+# (or from one another), and doca-runtime-kernel is only pulled in by
+# doca-runtime / doca-devel-kernel, which custom kernel builds do not install.
+Package: mlnx-ofed-kernel-modules mlnx-ofed-kernel-utils mlnx-nvme-modules mlnx-nfsrdma-modules iser-modules isert-modules srp-modules kernel-mft-modules xpmem-modules doca-runtime-kernel
+Pin: release *
+Pin-Priority: -1

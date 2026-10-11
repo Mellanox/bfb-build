@@ -471,7 +471,9 @@ rm -f /etc/apt/preferences.d/98custom-kernel
 # not already carry are listed; autoremove drops what they pulled in.
 apt-get remove --purge -y \
 	autoconf automake autotools-dev bison debhelper dh-exec dh-python \
-	diffstat flex libtool quilt rpm > /dev/null 2>&1 || true
+	diffstat flex libtool quilt rpm \
+	autopoint gettext intltool-debian po-debconf libmail-sendmail-perl \
+	libsys-hostname-long-perl > /dev/null 2>&1 || true
 apt-get autoremove --purge -y > /dev/null 2>&1 || true
 apt-get clean -y > /dev/null 2>&1 || true
 

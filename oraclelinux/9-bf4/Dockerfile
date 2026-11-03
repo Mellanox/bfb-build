@@ -101,7 +101,6 @@ RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
         sg3_utils \
         shadow-utils \
         shim \
-        spdk \
         srp_daemon \
         sshpass \
         sudo \
@@ -124,8 +123,6 @@ RUN echo 'excludepkgs=OpenIPMI' >> /etc/dnf/dnf.conf && \
 #DOCA Packages
         doca-runtime \
         doca-devel \
-        mlnx-snap \
-        mlnx-libsnap \
         ibacm \
         infiniband-diags \
         infiniband-diags-compat \
@@ -158,5 +155,4 @@ RUN systemctl disable containerd || true
 RUN systemctl disable bfvcheck || true
 
 RUN systemctl enable openvswitch || true
-RUN systemctl enable mlnx_snap || true
 RUN systemctl enable watchdog || true

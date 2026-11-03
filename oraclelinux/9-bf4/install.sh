@@ -199,7 +199,7 @@ EOF
 
 	# Then, set boot arguments: Read current 'console' and 'earlycon'
 	# parameters, and append the root filesystem parameters.
-	bootarg="$(cat /proc/cmdline | sed 's/initrd=initramfs//;s/console=.*//')"
+	bootarg="$(cat /proc/cmdline | sed 's/initrd=initramfs//;s/console=.*//;s/BOOT_IMAGE=[^[:space:]]*[[:space:]]*//g')"
 	redfish_osarg="$(bfcfg --dump-osarg 2> /dev/null)"
 	if [ -n "$redfish_osarg" ]; then
 		bootarg="$bootarg $redfish_osarg"

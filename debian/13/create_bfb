@@ -1,0 +1,742 @@
+#!/bin/bash
+
+###############################################################################
+#
+# Copyright 2023 NVIDIA Corporation
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+###############################################################################
+
+set -e
+
+SDIR="/root/workspace"
+BFB="${BFB:-/lib/firmware/mellanox/boot/default.bfb}"
+CAPSULE="${CAPSULE:-/lib/firmware/mellanox/boot/capsule/boot_update2.cap}"
+kernel=$(/bin/ls -1 /lib/modules/ | head -1)
+
+SCRIPTS_DIR=$(dirname $0)
+
+WDIR=${WDIR:-/root/workspace/bfb}
+
+echo "Work directory: $WDIR"
+
+debian_IMAGE=$(cat /etc/mlnx-release)
+debian_BFB=${debian_IMAGE}.bfb
+debian_ISO=${debian_IMAGE}.iso
+
+PATH=$PATH:/opt/mellanox/scripts:/opt/mellanox/scripts/bin
+mkbfb=$(which mlx-mkbfb)
+
+if [ ! -x "${mkbfb}" ]; then
+	echo "- ERROR: mlx-mkbfb is required to build BFB image"
+	exit 1
+fi
+
+if [[ ! -n "${BFB}" || ! -e "${BFB}" ]]; then
+	echo "- ERROR: BFB was not found"
+	exit 1
+fi
+
+finish() {
+	rm -f "$boot_args" "$boot_path" "$boot_desc"
+	sudo rm -rf "$WDIR"
+}
+trap finish EXIT
+
+# Execute command w/ echo and exit if it fail
+ex()
+{
+	echo "$@"
+	if ! "$@"; then
+		printf "\nFailed executing $@\n\n"
+		exit 1
+	fi
+}
+
+ex mkdir -p ${WDIR}
+ex cd ${WDIR}
+ex rm -rf initramfs
+
+initramfs=/boot/initrd.img-$kernel
+initramfs=$(realpath $initramfs)
+initramfs=$WDIR/dump-initramfs-v0
+
+ADD_DRIVERS=""
+for mod in mlxbf-bootctl sdhci-of-dwcmshc mlxbf-tmfifo mlx5_core mlx5_ib mlxfw ib_umad nvme gpio-mlxbf2 gpio-mlxbf3 mlxbf-gige pinctrl-mlxbf3 8021q virtio_console
+do
+	if (modinfo -k $kernel $mod 2>/dev/null | grep "filename:" | grep -q builtin); then
+		continue
+	fi
+	if ! (modinfo -k $kernel $mod 2>/dev/null); then
+		continue
+	fi
+	ADD_DRIVERS="$ADD_DRIVERS $mod"
+done
+
+dracut --no-hostonly -m "bash network base systemd systemd-initrd systemd-networkd dracut-systemd shutdown udev-rules" \
+    --install "/etc/udev/rules.d/91-tmfifo_net.rules /etc/udev/rules.d/92-oob_net.rules" \
+    --add-drivers "${ADD_DRIVERS}" \
+	--filesystems "vfat ext4" \
+    --gzip $initramfs ${kernel}
+
+case "$(file --brief --mime-type "$initramfs")" in
+	"application/x-lzma")
+		cat_initrd="lzcat" ;;
+	"application/x-lz4")
+		cat_initrd="lz4cat" ;;
+	"application/zstd")
+		cat_initrd="zstdcat" ;;
+	*)
+		cat_initrd="zcat" ;;
+esac
+
+echo "Rebuilding $initramfs"
+
+mkdir -p ${WDIR}/initramfs
+cd initramfs
+$cat_initrd "$initramfs" | sudo cpio -i
+
+copy_file()
+{
+	if [[ -e $1 || -h $1 ]]; then
+		bin=$1
+	else
+		bin=$(which $1 2> /dev/null)
+	fi
+	if [ -z "$bin" ]; then
+		echo "ERROR: Cannot find $1"
+		exit 1
+	fi
+	sudo mkdir -p .$(dirname $bin)
+	if [ ! -e .${bin} ]; then
+		sudo cp -a $bin .${bin}
+	fi
+
+	# Copy dependencies
+	for lib in  $(ldd $bin 2> /dev/null | grep '=>' | awk '{print $3}')
+	do
+		if [ -e .$lib ]; then
+			continue
+		fi
+		sudo mkdir -p .$(dirname $lib)
+		sudo cp -a $lib .$lib
+		if [ -h $lib ]; then
+			tlib=$(readlink -f $lib)
+			if [ ! -e .$tlib ]; then
+				sudo mkdir -p .$(dirname $tlib)
+				sudo cp $tlib .$tlib
+			fi
+		fi
+	done
+}
+
+module_exist()
+{
+	mod=$(find ./lib/modules/$kernel -name "${1}.ko*" 2> /dev/null)
+	test -n "$mod"
+	return $?
+}
+
+copy_module()
+{
+	if module_exist $1; then
+		return
+	fi
+
+	if (modinfo -k $kernel $1 2>/dev/null | grep "filename:" | grep -q builtin); then
+		return
+	fi
+
+	if ! (modinfo -k $kernel $1 2>/dev/null); then
+		return
+	fi
+
+	for mod in $(modinfo -F depends -k $kernel $1 | tr -s ',' ' ')
+	do
+		copy_module $mod
+	done
+
+	mod_ko=$(modinfo -F filename -k $kernel $1)
+	mkdir -p ./$(dirname ${mod_ko})
+	sudo cp ${mod_ko} ./${mod_ko}
+}
+
+(cd usr/bin; sudo ln -s xz xzcat)
+cp $(readlink -f /usr/bin/which) ./usr/bin/which
+touch ./etc/fstab
+
+for tool in xz efibootmgr bash getopt hexdump mstflint lspci \
+		lsblk watchdog shutdown systemctl strings aarch64-linux-gnu-strings \
+		mlxbf-bootctl id dirname curl openssl parted jq mlnx_bf_configure hwclock xxd cmp file $ADDON_TOOLS
+do
+	if [ -d $tool ]; then
+		continue
+	fi
+	# Remove tools coming with busybox
+	/bin/rm -f .${tool}
+	copy_file $tool
+done
+
+libperl=$(dpkg -S /usr/lib/aarch64-linux-gnu/perl | cut -d ':' -f 1 | tr -d ',')
+perl_modules=$(dpkg -S /usr/share/perl | cut -d ':' -f 1 | tr -d ',')
+python3=$(dpkg -S /usr/bin/pdb3.* | head -1 | cut -d ':' -f 1 | tr -d ',')
+libpython3_minimal=$(dpkg -S /usr/lib/python3*/os.py | head -1 | cut -d ':' -f 1 | tr -d ',')
+libpython3=$(dpkg -S /usr/lib/aarch64-linux-gnu/libpython3.*.so.1 | head -1 | cut -d ':' -f 1 | tr -d ',')
+python3_distutils=$(dpkg -S /usr/lib/python3.*/distutils | head -1 | cut -d ':' -f 1 | tr -d ',')
+python3_lib2to3=$(dpkg -S /usr/lib/python3.*/lib2to3 | head -1 | cut -d ':' -f 1 | tr -d ',')
+libpython3_stdlib=$(dpkg -S /usr/lib/python3*/shutil.py | head -1 | cut -d ':' -f 1 | tr -d ',')
+python_bin=$(readlink -f /usr/bin/python3)
+python_deb=$(dpkg -S $python_bin | head -1 | cut -d ':' -f 1 | tr -d ',')
+python_ver=$(python3 -V | cut -d ' ' -f 2 | cut -d '.' -f1,2)
+
+for deb in mlxbf-scripts mft mft-oem mft-nvredfish mft-mlx5 dosfstools e2fsprogs fdisk kmod pciutils \
+		   usbutils tar coreutils nvme-cli mmc-utils iputils-ping uuid-runtime \
+		   sshpass openssh-client util-linux ipmitool procps debianutils \
+		   iproute2 findutils perl-base $libperl $perl_modules \
+		   $libpython3_minimal $libpython3_stdlib $python3_distutils $python3_lib2to3 $python3 $python_deb \
+		   $libpython3 bsdutils libexpat1 wget net-tools isc-dhcp-client hostname zip $ADDON_DEBS
+do
+	for pfile in $(dpkg -L $deb)
+	do
+		case "$pfile" in
+			*/man*|*doc*)
+				continue
+				;;
+			*share*)
+				case "$deb" in
+					perl*|mft*)
+						;;
+					*)
+						continue
+						;;
+				esac
+				;;
+		esac
+		if [[ -d $pfile && ! -h $pfile ]]; then
+			continue
+		fi
+		/bin/rm -f .${pfile}
+		copy_file $pfile
+	done
+done
+
+for mod in mlxbf_tmfifo dw_mmc dw_mmc-pltfm mmc_block sdhci sdhci-of-dwcmshc nvme-rdma nvme-tcp nvme mlx5_ib mlxfw ib_umad ib_ipoib ib_iser mst_pci mst_pciconf bf3_livefish ipmi_devintf ipmb_host ipmi_ssif i2c-mlxbf nls_ascii nls_iso8859-1 nls_cp437 $ADDON_KERNEL_MODULES
+do
+	copy_module $mod
+done
+sudo depmod -a -b ./ $kernel
+
+sudo mkdir -p usr/share/misc/ bin/ var/log/watchdog
+sudo cp /usr/share/misc/pci.ids usr/share/misc/
+sudo cp /etc/watchdog.conf etc
+if ! [ -e usr/bin/python ]; then
+	ln -s python${python_ver} usr/bin/python
+fi
+if ! [ -e usr/bin/python3 ]; then
+	ln -s python${python_ver} usr/bin/python3
+fi
+
+# Make sure we can load mlx-bootctl
+bootctl_ko=""
+for driver in mlxbf-bootctl mlx-bootctl
+do
+	bootctl_ko=$(modinfo -F filename -k $kernel $driver || true)
+	if [ ! -z $bootctl_ko ]; then
+		break
+	fi
+done
+if [ -z "$bootctl_ko" ]; then
+	echo "ERROR: Cannot find mlxbf-bootctl or mlx-bootctl drivers"
+	exit 1
+fi
+sudo cp $bootctl_ko ./mlx-bootctl.ko
+sudo cp /lib/modules/$kernel/kernel/drivers/watchdog/sbsa_gwdt.ko.xz .
+sudo unxz sbsa_gwdt.ko.xz
+sudo mkdir -p ./lib/firmware/mellanox/boot/
+sudo cp /lib/firmware/mellanox/boot/default.bfb ./lib/firmware/mellanox/boot/default.bfb
+sudo cp -a /lib/firmware/mellanox/boot/capsule ./lib/firmware/mellanox/boot/
+dpkg-query -W -f='${Version}' $(dpkg -S $CAPSULE | cut -d: -f1) | tr -s '-' '.' > ./lib/firmware/mellanox/boot/atf_uefi.version
+if [ -d /lib/firmware/swissbit/ ]; then
+	sudo cp -a /lib/firmware/swissbit/ ./lib/firmware/
+fi
+
+sudo mkdir -p ./lib/udev/rules.d
+sudo cp /lib/udev/rules.d/82-net-setup-link.rules ./lib/udev/rules.d/82-net-setup-link.rules
+sudo mkdir -p ./etc/infiniband
+sudo cp /etc/infiniband/vf-net-link-name.sh ./etc/infiniband/vf-net-link-name.sh
+
+sudo mkdir -p mnt
+
+# Remove hostname that includes docker container's id
+/bin/rm -f ./etc/hostname
+echo localhost > /etc/hostname
+
+ex mkdir -p debian
+# Tar the image
+XZ_OPT="--threads=0 -9 --verbose" tar -cJp --exclude='./workspace' --exclude='./signing-local' --exclude='./signing-shared' --exclude='./var/run/docker.sock' --exclude='./root/workspace' --exclude='./tmp/*' --exclude='./run/*' --exclude='./sys/*' --exclude='./proc/*' --exclude='./dev/*' --exclude='./.dockerenv' --exclude='./root/.bash_history' --exclude='./var/tmp/*' --exclude='./bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-aarch64-static' --exclude='./usr/bin/qemu-arm-static' --exclude='./var/cache/apt/*' --exclude='./var/lib/apt/lists/*' -f ./debian/image.tar.xz -C / .
+ex install -m 0755 ${SDIR}/install.sh ./debian/install.sh
+ex cp -a ${SDIR}/install.env ./debian/
+
+mkdir -p scripts
+cat > scripts/initrd-install << EOF
+#!/bin/bash
+
+printf_msg()
+{
+	echo "\$@" > /dev/kmsg
+	return 0
+}
+
+modprobe nls_iso8859-1 > /dev/null 2>&1
+modprobe -a sdhci-of-dwcmshc > /dev/null 2>&1
+modprobe mlxbf_tmfifo > /dev/null 2>&1
+modprobe -a ipmi_msghandler ipmi_devintf i2c-mlxbf
+modprobe ipmb_host slave_add=0x10
+echo ipmb-host 0x1011 > /sys/bus/i2c/devices/i2c-1/new_device
+modprobe -a mlx5_ib mlxfw ib_umad
+modprobe nvme > /dev/null 2>&1
+insmod /mlx-bootctl.ko > /dev/null 2>&1
+insmod /sbsa_gwdt.ko > /dev/null 2>&1
+/usr/sbin/watchdog > /dev/null 2>&1
+
+printf_msg "================================="
+printf_msg "Installing Debian Please wait..."
+printf_msg "================================="
+
+/bin/bash /debian/install.sh
+if [ \$? -eq 0 ]; then
+	printf_msg "==================================="
+	printf_msg "Installation finished. Rebooting..."
+	printf_msg "==================================="
+	printf_msg
+	sleep 3
+	reboot -f
+else
+	printf_msg "========================"
+	printf_msg "Failed to install debian"
+	printf_msg "========================"
+fi
+EOF
+
+chmod +x scripts/initrd-install
+
+cat > usr/lib/systemd/system/install-debian.service << EOF
+[Unit]
+Description=Install Debian Linux
+After=initrd-root-fs.target initrd-parse-etc.service
+After=dracut-initqueue.service dracut-mount.service
+
+[Service]
+Type=oneshot
+ExecStart=/scripts/initrd-install
+StandardInput=null
+StandardOutput=journal
+StandardError=journal+console
+EOF
+
+mkdir -p etc/systemd/system/initrd.target.wants
+ln -s /usr/lib/systemd/system/install-debian.service etc/systemd/system/initrd.target.wants/install-debian.service
+
+# Make initramfs with new debian
+find . -print0 | sudo cpio --null -o --format=newc | zstd -9 > "$initramfs"
+
+# Make initramfs with new ubuntu
+find . -print0 | sudo cpio --null -o --format=newc | gzip -9 > "$initramfs"
+
+ATF_UEFI_VERSION="$(cat ./lib/firmware/mellanox/boot/atf_uefi.version 2> /dev/null)"
+
+bfver_out="$( bfver --file ${BFB} )"
+
+ATF_VERSION=$( echo "$bfver_out" | grep -m 1 "ATF" | cut -d':' -f 3 | \
+    sed -e 's/[[:space:]]//' )
+UEFI_VERSION=$( echo "$bfver_out" | grep -m 1 "UEFI" | cut -d':' -f 2 | \
+    sed -e 's/[[:space:]]//' )
+
+# Create JSON using jq
+json_output=$(jq -n \
+  --arg bf3_bsp_version "$ATF_UEFI_VERSION" \
+  --arg bf3_bsp_source "${CAPSULE##*/}" \
+  --arg bf2_bsp_version "$ATF_UEFI_VERSION" \
+  --arg bf2_bsp_source "${CAPSULE##*/}" \
+  --arg bf3_atf_version "$ATF_VERSION" \
+  --arg bf3_atf_source "${CAPSULE##*/}" \
+  --arg bf2_atf_version "$ATF_VERSION" \
+  --arg bf2_atf_source "${CAPSULE##*/}" \
+  --arg bf3_uefi_version "$UEFI_VERSION" \
+  --arg bf3_uefi_source "${CAPSULE##*/}" \
+  --arg bf2_uefi_version "$UEFI_VERSION" \
+  --arg bf2_uefi_source "${CAPSULE##*/}" \
+'{
+	"//": "This JSON represents a Redfish Software Inventory collection containing multiple software components.",
+	"@odata.type": "#SoftwareInventoryCollection.SoftwareInventoryCollection",
+	"@odata.id": "/redfish/v1/UpdateService/SoftwareInventory",
+	"Name": "BFB File Content",
+	"Members": [
+		{
+		"@odata.id": "/redfish/v1/UpdateService/SoftwareInventory/1",
+		"Id": "1",
+		"Name": "BF3_BSP",
+		"Version": $bf3_bsp_version,
+		"SoftwareId": $bf3_bsp_source,
+		},
+		{
+		"@odata.id": "/redfish/v1/UpdateService/SoftwareInventory/2",
+		"Id": "2",
+		"Name": "BF2_BSP",
+		"Version": $bf2_bsp_version,
+		"SoftwareId": $bf2_bsp_source,
+		},
+		{
+		"@odata.id": "/redfish/v1/UpdateService/SoftwareInventory/3",
+		"Id": "3",
+		"Name": "BF3_ATF",
+		"Version": $bf3_atf_version,
+		"SoftwareId": $bf3_atf_source,
+		},
+		{
+		"@odata.id": "/redfish/v1/UpdateService/SoftwareInventory/4",
+		"Id": "4",
+		"Name": "BF2_ATF",
+		"Version": $bf2_atf_version,
+		"SoftwareId": $bf2_atf_source,
+		},
+		{
+		"@odata.id": "/redfish/v1/UpdateService/SoftwareInventory/5",
+		"Id": "5",
+		"Name": "BF3_UEFI",
+		"Version": $bf3_uefi_version,
+		"SoftwareId": $bf3_uefi_source,
+		},
+		{
+		"@odata.id": "/redfish/v1/UpdateService/SoftwareInventory/6",
+		"Id": "6",
+		"Name": "BF2_UEFI",
+		"Version": $bf2_uefi_version,
+		"SoftwareId": $bf2_uefi_source,
+		}
+	],
+	"Members@odata.count": 6
+}')
+
+odata_count=6
+
+if [ -e "/opt/mellanox/mlnx-fw-updater/firmware/mlxfwmanager_sriov_dis_aarch64_41686" ]; then
+	let odata_count++
+	BF2_NIC_FW_VERSION=$(/opt/mellanox/mlnx-fw-updater/firmware/mlxfwmanager_sriov_dis_aarch64_41686 --list 2> /dev/null | grep FW | head -1 | awk '{print $4}')
+	BF2_NIC_FW="mlxfwmanager_sriov_dis_aarch64_41686"
+	json_output=$( echo $json_output | jq \
+		--arg odata_count "$odata_count" \
+		--arg odata_id "/redfish/v1/UpdateService/SoftwareInventory/$odata_count" \
+		--arg bf2_nic_fw_version "${BF2_NIC_FW_VERSION}" \
+		--arg bf2_nic_fw_source "${BF2_NIC_FW##*/}" \
+		'.Members += [{
+			"@odata.id": $odata_id,
+			"Id": $odata_count,
+			"Name": "BF2_NIC_FW",
+			"Version": $bf2_nic_fw_version,
+			"SoftwareId": $bf2_nic_fw_source,
+			}] | .["Members@odata.count"] += 1')
+fi
+
+if [ -e "/usr/lib/firmware/mellanox/bmc/bf2-bmc-fw.tar" ]; then
+	let odata_count++
+	BF2_BMC_FW="/usr/lib/firmware/mellanox/bmc/bf2-bmc-fw.tar"
+	BF2_BMC_FW_VERSION=$(cat /usr/lib/firmware/mellanox/bmc/bf2-bmc-fw.version 2> /dev/null)
+	json_output=$( echo $json_output | jq \
+		--arg odata_count "$odata_count" \
+		--arg odata_id "/redfish/v1/UpdateService/SoftwareInventory/$odata_count" \
+		--arg bf2_bmc_fw_version "${BF2_BMC_FW_VERSION}" \
+		--arg bf2_bmc_fw_source "${BF2_BMC_FW##*/}" \
+		'.Members += [{
+			"@odata.id": $odata_id,
+			"Id": $odata_count,
+			"Name": "BF2_BMC_FW",
+			"Version": $bf2_bmc_fw_version,
+			"SoftwareId": $bf2_bmc_fw_source,
+			}] | .["Members@odata.count"] += 1')
+fi
+
+if [ -e "/usr/lib/firmware/mellanox/cec/bf2-cec-fw.bin" ]; then
+	let odata_count++
+	BF2_CEC_FW="/usr/lib/firmware/mellanox/cec/bf2-cec-fw.bin"
+	BF2_CEC_FW_VERSION=$(cat /usr/lib/firmware/mellanox/cec/bf2-cec-fw.version 2> /dev/null)
+	json_output=$( echo $json_output | jq \
+		--arg odata_count "$odata_count" \
+		--arg odata_id "/redfish/v1/UpdateService/SoftwareInventory/$odata_count" \
+		--arg bf2_cec_fw_version "${BF2_CEC_FW_VERSION}" \
+		--arg bf2_cec_fw_source "${BF2_CEC_FW##*/}" \
+		'.Members += [{
+			"@odata.id": $odata_id,
+			"Id": $odata_count,
+			"Name": "BF2_CEC_FW",
+			"Version": $bf2_cec_fw_version,
+			"SoftwareId": $bf2_cec_fw_source,
+		}] | .["Members@odata.count"] += 1')
+fi
+
+if [ -e "/opt/mellanox/mlnx-fw-updater/firmware/mlxfwmanager_sriov_dis_aarch64_41692" ]; then
+	let odata_count++
+	BF3_NIC_FW_VERSION=$(/opt/mellanox/mlnx-fw-updater/firmware/mlxfwmanager_sriov_dis_aarch64_41692 --list 2> /dev/null | grep FW | head -1 | awk '{print $4}')
+	BF3_NIC_FW="mlxfwmanager_sriov_dis_aarch64_41692"
+    json_output=$( echo $json_output | jq \
+		--arg odata_count "$odata_count" \
+		--arg odata_id "/redfish/v1/UpdateService/SoftwareInventory/$odata_count" \
+		--arg bf3_nic_fw_version "${BF3_NIC_FW_VERSION}" \
+		--arg bf3_nic_fw_source "${BF3_NIC_FW##*/}" \
+		'.Members += [{
+			"@odata.id": $odata_id,
+			"Id": $odata_count,
+			"Name": "BF3_NIC_FW",
+			"Version": $bf3_nic_fw_version,
+			"SoftwareId": $bf3_nic_fw_source,
+			}] | .["Members@odata.count"] += 1')
+fi
+
+if [ -e "/usr/lib/firmware/mellanox/bmc/bf3-bmc-fw.fwpkg" ]; then
+	let odata_count++
+	BF3_BMC_FW="/usr/lib/firmware/mellanox/bmc/bf3-bmc-fw.fwpkg"
+	BF3_BMC_FW_VERSION=$(cat /usr/lib/firmware/mellanox/bmc/bf3-bmc-fw.version 2> /dev/null)
+	json_output=$( echo $json_output | jq \
+		--arg odata_count "$odata_count" \
+		--arg odata_id "/redfish/v1/UpdateService/SoftwareInventory/$odata_count" \
+		--arg bf3_bmc_fw_version "${BF3_BMC_FW_VERSION}" \
+		--arg bf3_bmc_fw_source "${BF3_BMC_FW##*/}" \
+		'.Members += [{
+			"@odata.id": $odata_id,
+			"Id": $odata_count,
+			"Name": "BF3_BMC_FW",
+			"Version": $bf3_bmc_fw_version,
+			"SoftwareId": $bf3_bmc_fw_source,
+			}] | .["Members@odata.count"] += 1')
+fi
+
+if [ -e "/usr/lib/firmware/mellanox/cec/bf3-cec-fw.fwpkg" ]; then
+	let odata_count++
+	BF3_CEC_FW="/usr/lib/firmware/mellanox/cec/bf3-cec-fw.fwpkg"
+	BF3_CEC_FW_VERSION=$(cat /usr/lib/firmware/mellanox/cec/bf3-cec-fw.version 2> /dev/null)
+	json_output=$( echo $json_output | jq \
+		--arg odata_count "$odata_count" \
+		--arg odata_id "/redfish/v1/UpdateService/SoftwareInventory/$odata_count" \
+		--arg bf3_cec_fw_version "${BF3_CEC_FW_VERSION}" \
+		--arg bf3_cec_fw_source "${BF3_CEC_FW##*/}" \
+		'.Members += [{
+			"@odata.id": $odata_id,
+			"Id": $odata_count,
+			"Name": "BF3_CEC_FW",
+			"Version": $bf3_cec_fw_version,
+			"SoftwareId": $bf3_cec_fw_source,
+			}] | .["Members@odata.count"] += 1')
+fi
+
+BF3_DPU_GI=""
+if [ -e "/usr/lib/firmware/mellanox/bmc/bf3-bmc-preboot-install.pldm" ]; then
+	BF3_DPU_GI="/usr/lib/firmware/mellanox/bmc/bf3-bmc-preboot-install.pldm"
+elif [ -e "/usr/lib/firmware/mellanox/bmc/bf3-bmc-preboot-install.bfb" ]; then
+	BF3_DPU_GI="/usr/lib/firmware/mellanox/bmc/bf3-bmc-preboot-install.bfb"
+fi
+
+if [ -n "$BF3_DPU_GI" ]; then
+	let odata_count++
+	BF3_DPU_GI_VERSION=$(cat /usr/lib/firmware/mellanox/bmc/bf3-bmc-preboot-install.version 2> /dev/null)
+	json_output=$( echo $json_output | jq \
+		--arg odata_count "$odata_count" \
+		--arg odata_id "/redfish/v1/UpdateService/SoftwareInventory/$odata_count" \
+		--arg bf3_dpu_gi_version "${BF3_DPU_GI_VERSION}" \
+		--arg bf3_dpu_gi_source "${BF3_DPU_GI##*/}" \
+		'.Members += [{
+			"@odata.id": $odata_id,
+			"Id": $odata_count,
+			"Name": "BF3_DPU_GI",
+			"Version": $bf3_dpu_gi_version,
+			"SoftwareId": $bf3_dpu_gi_source,
+			}] | .["Members@odata.count"] += 1')
+fi
+
+BF3_NIC_FW_GI_VERSION=""
+if (/bin/ls -1 /usr/lib/firmware/mellanox/bmc/fw-BlueField-3-rel-*.pldm > /dev/null 2>&1); then
+	BF3_NIC_FW_GI_VERSION=$(/bin/ls -1 /usr/lib/firmware/mellanox/bmc/fw-BlueField-3-rel-*.pldm 2> /dev/null | head -1 | grep -oP '(?<=BlueField-3-rel-)\d+_\d+_\d+')
+elif (/bin/ls -1 /usr/lib/firmware/mellanox/bmc/fw-BlueField-3-rel-*.bfb > /dev/null 2>&1); then
+	BF3_NIC_FW_GI_VERSION=$(/bin/ls -1 /usr/lib/firmware/mellanox/bmc/fw-BlueField-3-rel-*.bfb 2> /dev/null | head -1 | grep -oP '(?<=BlueField-3-rel-)\d+_\d+_\d+')
+fi
+
+if [ -n "$BF3_NIC_FW_GI_VERSION" ]; then
+	let odata_count++
+	BF3_NIC_FW_GI=""
+	json_output=$( echo $json_output | jq \
+		--arg odata_count "$odata_count" \
+		--arg odata_id "/redfish/v1/UpdateService/SoftwareInventory/$odata_count" \
+		--arg bf3_nic_fw_gi_version "${BF3_NIC_FW_GI_VERSION}" \
+		--arg bf3_nic_fw_gi_source "${BF3_NIC_FW_GI##*/}" \
+		'.Members += [{
+			"@odata.id": $odata_id,
+			"Id": $odata_count,
+			"Name": "BF3_NIC_FW_GI",
+			"Version": $bf3_nic_fw_gi_version,
+			"SoftwareId": $bf3_nic_fw_gi_source,
+			}] | .["Members@odata.count"] += 1')
+fi
+
+if [ "$(/usr/bin/dpkg-query -l doca-runtime 2> /dev/null | awk '/^[rhi][iU]/{print $2}')" == "doca-runtime" ]; then
+	DOCA_VERSION=$(dpkg-query -W -f='${Version}\n' doca-runtime  | awk -F '-' '{print $2}')
+	let odata_count++
+	DOCA_SOURCE=$(dpkg-query -W -f='${Package}_${Version}\n' doca-runtime)
+
+	json_output=$( echo $json_output | jq \
+		--arg odata_count "$odata_count" \
+		--arg odata_id "/redfish/v1/UpdateService/SoftwareInventory/$odata_count" \
+		--arg doca_version "${DOCA_VERSION}" \
+		--arg doca_source "${DOCA_SOURCE}" \
+		'.Members += [{
+			"@odata.id": $odata_id,
+			"Id": $odata_count,
+			"Name": "DOCA",
+			"Version": $doca_version,
+			"SoftwareId": $doca_source,
+			}] | .["Members@odata.count"] += 1')
+fi
+
+echo "$json_output" > ${WDIR}/info.json
+
+# Make bfb
+cd ..
+if [ ! -e $CAPSULE ]; then
+	echo "ERROR: Capsule file $CAPSULE does not exist"
+	exit 1
+fi
+
+boot_args=$(mktemp)
+boot_args2=$(mktemp)
+boot_path=$(mktemp)
+boot_desc=$(mktemp)
+printf "console=ttyAMA1 console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 earlycon=pl011,0x01800000 initrd=initramfs" > \
+	"$boot_args"
+printf "console=hvc0 console=ttyAMA0 earlycon=pl011,0x13010000 initrd=initramfs" > \
+	"$boot_args2"
+
+printf "VenHw(F019E406-8C9C-11E5-8797-001ACA00BFC4)/Image" > "$boot_path"
+printf "Linux from rshim" > "$boot_desc"
+vmlinuz=$WDIR/vmlinuz
+if [ -e $SDIR/vmlinuz ]; then
+	case "$(file --brief --mime-type $SDIR/vmlinuz)" in
+		application/x-dosexec|application/octet-stream)
+			CAT=cat
+			;;
+		application/gzip)
+			CAT=zcat
+			;;
+		*)
+			CAT=cat
+			;;
+	esac
+	sudo $CAT $SDIR/vmlinuz > "$vmlinuz"
+else
+	case "$(file --brief --mime-type /boot/vmlinuz-$kernel)" in
+		application/x-dosexec|application/octet-stream)
+			CAT=cat
+			;;
+		application/gzip)
+			CAT=zcat
+			;;
+		*)
+			CAT=cat
+			;;
+	esac
+	sudo $CAT /boot/vmlinuz-$kernel > "$vmlinuz"
+fi
+
+mkdir -p /workspace
+
+ex $mkbfb \
+	--image "$vmlinuz" --initramfs "$initramfs" \
+	--capsule "$CAPSULE" \
+	--boot-args-v0 "$boot_args" \
+	--boot-args-v2 "$boot_args2" \
+	--boot-path "$boot_path" \
+	--boot-desc "$boot_desc" \
+	--info "${WDIR}/info.json" \
+	${BFB} /workspace/${debian_BFB}
+
+# ISO 9660 image
+type=$(cat /etc/mlnx-release | grep -o "unsigned\|dev\|prod")
+ISO_DIR=/workspace/iso_$type
+mkdir -p $ISO_DIR
+
+# fonts
+mkdir -p $ISO_DIR/boot/grub/fonts
+cp /usr/share/grub/unicode.pf2 $ISO_DIR/boot/grub/fonts
+
+mkdir -p $ISO_DIR/boot/grub/arm64-efi
+# *.mod files, e.g.: http.mod
+# without .efi files in monolithic
+cp -r /usr/lib/grub/arm64-efi/* $ISO_DIR/boot/grub/arm64-efi
+rm -r $ISO_DIR/boot/grub/arm64-efi/monolithic
+
+# FAT ESP image file on ISO 9660 (mtools: no loop mount; works when /dev/loop* is unavailable, e.g. Docker)
+dd if=/dev/zero of=efi.img bs=1M count=4
+mkfs.vfat -F 12 efi.img -n "ESP"
+mmd -i efi.img ::/efi
+mmd -i efi.img ::/efi/boot
+mcopy -i efi.img /usr/lib/grub/arm64-efi/monolithic/grubnetaa64.efi ::/efi/boot/bootaa64.efi
+
+# bootaa64.efi: the EFI firmware used in boot sequence
+# grubnetaa64.efi uses an embedded (memdisk)/grub.cfg
+# that sets prefix=(cd0)/grub and runs: source $prefix/grub.cfg
+# => the file that must exist is /grub/grub.cfg on the ISO9660 tree (see below), not on FAT.
+
+mkdir -p $ISO_DIR/grub
+cat > $ISO_DIR/grub/grub.cfg << EOF
+loadfont unicode
+
+set menu_color_normal=white/black
+set menu_color_highlight=black/light-gray
+
+set default=0
+set timeout=3
+
+menuentry "${debian_IMAGE/.iso/} installation" {
+  linux /boot/vmlinuz keep_bootcon ip=dhcp
+  initrd /boot/initrd
+}
+EOF
+
+cp /boot/vmlinuz-$kernel $ISO_DIR/boot/vmlinuz
+cp $initramfs $ISO_DIR/boot/initrd
+
+xorriso -as mkisofs \
+  -iso-level 3 \
+  -allow-lowercase \
+  -volid "BF_BUNDLE_ISO" \
+  -J \
+  -joliet-long \
+  -l \
+  -c boot/boot.cat \
+  -partition_offset 16 \
+  -append_partition 2 0xef efi.img \
+  -e --interval:appended_partition_2:all:: \
+  -no-emul-boot \
+  -partition_cyl_align all \
+  "$ISO_DIR" \
+  -output "/workspace/${debian_ISO}"
+
+cd ..
+
+rm -r $ISO_DIR
+
+echo "BFB is ready: $(readlink -f /workspace/${debian_BFB})"
+echo "ISO is ready: $(readlink -f /workspace/${debian_ISO})"

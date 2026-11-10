@@ -153,9 +153,13 @@ if [ -n "${OFED_SRC_TARBALL}" ] && [ -e "${SDIR}/${OFED_SRC_TARBALL}" ]; then
 	mkdir -p ${OFED_BUILD_DIR}
 	cd ${OFED_BUILD_DIR}
 	ex tar xzf ${SDIR}/${OFED_SRC_TARBALL}
-	# MLNX_OFED_SRC-debian-<ver>.tgz extracts to a directory WITHOUT 'debian'
-	# in its name, so discover it rather than deriving it from the filename.
+	# MLNX_OFED_SRC-debian-<ver>.tgz holds <dir>/SOURCES/*.orig.tar.*;
+	# DOCA_BASE_SRC-debian-<ver>.tar.gz (DOCA 3.6.0 on) holds <dir>/*.orig.tar.*.
 	ofed_sources=`/bin/ls -1d ${OFED_BUILD_DIR}/*/SOURCES 2>/dev/null | head -1`
+	if [ -z "${ofed_sources}" ]; then
+		first=`/bin/ls -1 ${OFED_BUILD_DIR}/*/*.orig.tar.* 2>/dev/null | head -1`
+		[ -n "${first}" ] && ofed_sources=${first%/*}
+	fi
 elif [ -n "${OFED_SOURCES_URL}" ]; then
 	# A directory of orig tarballs, e.g. an unpacked OFED-internal-debian tree.
 	ofed_sources=${OFED_BUILD_DIR}/SOURCES
@@ -173,8 +177,8 @@ fi
 
 if [ -z "${ofed_sources}" ] || [ ! -d "${ofed_sources}" ]; then
 	echo "ERROR: no MLNX_OFED sources. Provide MLNX_OFED_SRC_URL/_LOCAL (a"
-	echo "       MLNX_OFED_SRC-debian-<ver>.tgz) or OFED_SOURCES_URL (a"
-	echo "       directory of <pkg>_<ver>.orig.tar.* files)."
+	echo "       MLNX_OFED_SRC-debian-<ver>.tgz or DOCA_BASE_SRC-debian-<ver>.tar.gz)"
+	echo "       or OFED_SOURCES_URL (a directory of <pkg>_<ver>.orig.tar.* files)."
 	exit 1
 fi
 

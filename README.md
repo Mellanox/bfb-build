@@ -220,7 +220,7 @@ from eMMC.
 | `CUSTOM_KERNEL_DEBS` | - | directory holding the kernel `.deb` files |
 | `CUSTOM_KERNEL_VERSION` | auto-detect | kernel release string, e.g. `6.8.0-1022-bluefield`. Set it when more than one kernel ends up installed |
 | `MLNX_OFED_SRC_URL` | `<BASE_URL>/doca/<DOCA_VERSION>-<BSP_VERSION>/SOURCES/mlnx_ofed/MLNX_OFED_SRC-debian-<ver>.tgz` | MLNX_OFED debian sources |
-| `MLNX_OFED_SRC_LOCAL` | - | use an already-downloaded tarball instead of fetching it |
+| `MLNX_OFED_SRC_LOCAL` | - | use an already-downloaded tarball instead of fetching it. Both `MLNX_OFED_SRC-debian-<ver>.tgz` and the flat `DOCA_BASE_SRC-debian-<ver>.tar.gz` used from DOCA 3.6.0 are accepted |
 | `OFED_KERNEL_EXTRA_ARGS` | BlueField DPU flag set | passed as `configure_options` to each OFED kernel package build |
 | `OFED_KERNEL_PACKAGES` | `mlnx-ofed-kernel iser isert srp mlnx-nvme mlnx-nfsrdma kernel-mft` | OFED kernel sources to rebuild, `mlnx-ofed-kernel` always first |
 | `OFED_SOURCES_URL` | - | directory of `<pkg>_<ver>.orig.tar.*` files, used instead of the source tarball |

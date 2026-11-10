@@ -688,7 +688,7 @@ set default=0
 set timeout=3
 
 menuentry "${ubuntu_IMAGE/.iso/} Installation" {
-  linux /bfb/vmlinuz keep_bootcon biosdevname=0 ip=dhcp
+  linux /bfb/vmlinuz keep_bootcon ip=dhcp
   initrd /bfb/initrd
 }
 EOF

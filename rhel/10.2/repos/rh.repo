@@ -1,0 +1,32 @@
+####################  NOTE ##################################
+# THIS FILE IS A PLACEHOLDER FOR RedHat REPOSITORIES.
+#
+# Fill the file with repositories before building RHEL BFB
+#############################################################
+
+[RH-BaseOS]
+name=BaseOS
+baseurl=<PLACEHOLDER>
+enabled=1
+gpgcheck=1
+gpgkey=<PLACEHOLDER>
+priority=15
+cost=15
+
+[RH-AppStream]
+name=AppStream
+baseurl=<PLACEHOLDER>
+enabled=1
+gpgcheck=1
+gpgkey=<PLACEHOLDER>
+priority=15
+cost=15
+
+[RH-CRB]
+name=CRB
+baseurl=<PLACEHOLDER>
+enabled=1
+gpgcheck=1
+gpgkey=<PLACEHOLDER>
+priority=15
+cost=15

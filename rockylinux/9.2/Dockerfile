@@ -8,6 +8,9 @@ ARG MLNX_FW_UPDATER=mlnx-fw-updater-signed
 ARG BMC_FW_PACKAGES="bf2-bmc-fw-signed bf3-bmc-fw-signed bf3-bmc-gi-signed bf3-bmc-nic-fw*"
 ARG CEC_FW_PACKAGES="bf2-cec-fw-signed bf3-cec-fw-signed"
 ADD bootimages bootimages/
+# Create /var/log/journal so journald keeps logs across reboots
+RUN mkdir -p /var/log/journal
+
 ADD 10-mlx-console-messages.conf /etc/sysctl.d/
 ADD install.env /root/workspace/install.env/
 ADD install.sh create_bfb /root/workspace/

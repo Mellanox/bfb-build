@@ -173,5 +173,9 @@ RUN systemctl disable containerd || true
 RUN systemctl enable openvswitch || true
 RUN systemctl enable mlnx_snap || true
 RUN systemctl enable watchdog || true
+RUN systemctl disable rngd || true
+
+# Create /var/log/journal so journald keeps logs across reboots
+RUN mkdir -p /var/log/journal
 
 RUN sed -i -E "s/(_unsigned|_prod|_dev)/_@IMAGE_TYPE@@CUSTOM_VERSION@/;" /etc/mlnx-release

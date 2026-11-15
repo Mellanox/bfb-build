@@ -17,7 +17,6 @@ RUN echo "install_weak_deps=False" >> /etc/dnf/dnf.conf && \
 RUN dnf -y install systemd && \
     dnf  --allowerasing -y group install Core && \
     dnf  -y install \
-        kernel \
         kernel-headers \
         acpid \
         audit \

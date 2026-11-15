@@ -464,6 +464,17 @@ EOF
 		err_msg="SFC-HBN provisioning install (provisioning-install.sh) failed"
 		log "ERROR: SFC-HBN provisioning install (provisioning-install.sh) failed with rc=$rc; see /var/log/sfc-install.log on the target"
 	fi
+
+	# Without CLOUD_OPTION, place oob_net0 into the mgmt VRF so OOB
+	# management traffic is isolated from the data-plane. With
+	# CLOUD_OPTION, drop the unused mgmt VRF device.
+	if [[ -z "$CLOUD_OPTION" ]]; then
+		if [ -f /mnt/usr/lib/systemd/network/02-oob.network ]; then
+			sed -i '/^\[Network\]/a VRF=mgmt' /mnt/usr/lib/systemd/network/02-oob.network
+		fi
+	else
+		/bin/rm -f /mnt/usr/lib/systemd/network/03-mgmt.netdev
+	fi
 }
 
 create_initramfs()

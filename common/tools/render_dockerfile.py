@@ -37,7 +37,7 @@ The same template describes two build modes:
 Usage:
     render_dockerfile.py --template Dockerfile.j2 --output Dockerfile \\
         [--custom-kernel] [--kernel-packages kernel-packages] \\
-        [--ofed-src-tarball MLNX_OFED_SRC-debian-<ver>.tgz]
+        [--ofed-src-tarball <tarball>]
 """
 
 import argparse

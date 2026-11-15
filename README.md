@@ -219,8 +219,9 @@ from eMMC.
 | `CUSTOM_KERNEL` | `no` | set to `yes` to enable the custom kernel flow |
 | `CUSTOM_KERNEL_DEBS` | - | directory holding the kernel `.deb` files |
 | `CUSTOM_KERNEL_VERSION` | auto-detect | kernel release string, e.g. `6.8.0-1022-bluefield`. Set it when more than one kernel ends up installed |
-| `MLNX_OFED_SRC_URL` | `<BASE_URL>/doca/<DOCA_VERSION>-<BSP_VERSION>/SOURCES/mlnx_ofed/MLNX_OFED_SRC-debian-<ver>.tgz` | MLNX_OFED debian sources |
-| `MLNX_OFED_SRC_LOCAL` | - | use an already-downloaded tarball instead of fetching it. Both `MLNX_OFED_SRC-debian-<ver>.tgz` and the flat `DOCA_BASE_SRC-debian-<ver>.tar.gz` used from DOCA 3.6.0 are accepted |
+| `DOCA_VERSION`, `BSP_VERSION` | the release pinned in `bfb-build` | the published DOCA release to build from, e.g. `DOCA_VERSION=3.6.0 BSP_VERSION=4.17.0-14122` |
+| `MLNX_OFED_SRC_URL` | the `*-debian-*` tarball listed under `<BASE_URL>/doca/<DOCA_VERSION>-<BSP_VERSION>/SOURCES/mlnx_ofed/` | MLNX_OFED debian sources: `DOCA_BASE_SRC-debian-<ver>.tar.gz` from DOCA 3.6.0, `MLNX_OFED_SRC-debian-<ver>.tgz` before that |
+| `MLNX_OFED_SRC_LOCAL` | - | use an already-downloaded copy of that tarball instead of fetching it |
 | `OFED_KERNEL_EXTRA_ARGS` | BlueField DPU flag set | passed as `configure_options` to each OFED kernel package build |
 | `OFED_KERNEL_PACKAGES` | `mlnx-ofed-kernel iser isert srp mlnx-nvme mlnx-nfsrdma kernel-mft` | OFED kernel sources to rebuild, `mlnx-ofed-kernel` always first |
 | `OFED_SOURCES_URL` | - | directory of `<pkg>_<ver>.orig.tar.*` files, used instead of the source tarball |
@@ -229,10 +230,10 @@ from eMMC.
 | `SOC_SRC_URL` | `<BASE_URL>/doca/<DOCA_VERSION>-<BSP_VERSION>/SOURCES/SoC` | SoC driver sources |
 | `SOC_MODULES_SKIP` | - | space separated SoC package names to leave out |
 
-The MLNX_OFED version is paired with the DOCA release, so `MLNX_OFED_VERSION` in
-`bfb-build` must match what is published for `DOCA_VERSION` (DOCA 3.4.0 pairs
-with MLNX_OFED 26.04-0.8.5.0, DOCA 3.4.1 with 26.04-1.1.0.0). If the source
-download fails, check that pairing first, or supply a local copy with
+The MLNX_OFED sources are paired with the DOCA release and are taken from that
+release's `SOURCES/mlnx_ofed/` directory. If the download fails, check that
+`DOCA_VERSION` and `BSP_VERSION` name a published release, point
+`MLNX_OFED_SRC_URL` at the tarball, or supply a local copy with
 `MLNX_OFED_SRC_LOCAL`.
 
 **Example for RPM based Distros:**

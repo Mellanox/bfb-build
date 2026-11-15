@@ -58,7 +58,7 @@ DISTRO_BASE_URL="https://cloud-images.ubuntu.com/noble/current/noble-server-clou
 ARCH=${ARCH:-"arm64-dpu"}
 DOCA_VERSION=${DOCA_VERSION:-"3.5.0"}
 BSP_VERSION=${BSP_VERSION:-"4.16.0-14075"}
-# Must match the published MLNX_OFED_SRC-debian-<ver>.tgz exactly.
+# Only names the OFED source tarball when SOURCES/mlnx_ofed/ cannot be listed.
 MLNX_OFED_VERSION=${MLNX_OFED_VERSION:-"26.07-0.7.7.0"}
 IMAGE_TYPE=${IMAGE_TYPE:-"prod"}
 CUSTOM_VERSION=${CUSTOM_VERSION:-""}
@@ -79,7 +79,10 @@ LEAVE_CONTAINER=${LEAVE_CONTAINER:-"no"}
 #                          linux-headers are required)
 #   CUSTOM_KERNEL_VERSION  kernel release string, e.g. 6.8.0-1022-bluefield.
 #                          Optional; auto-detected from /lib/modules when unset.
-#   MLNX_OFED_SRC_URL      URL of MLNX_OFED_SRC-debian-<ver>.tgz
+#   MLNX_OFED_SRC_URL      URL of the MLNX_OFED debian source tarball. Default:
+#                          the one listed under the release's SOURCES/mlnx_ofed/
+#                          (DOCA_BASE_SRC-debian-<ver>.tar.gz from DOCA 3.6.0,
+#                          MLNX_OFED_SRC-debian-<ver>.tgz before that)
 #   MLNX_OFED_SRC_LOCAL    path to an already-downloaded copy of that tarball
 #                          (takes precedence over MLNX_OFED_SRC_URL)
 ###############################################################################
@@ -87,7 +90,7 @@ CUSTOM_KERNEL=${CUSTOM_KERNEL:-"no"}
 CUSTOM_KERNEL_DEBS=${CUSTOM_KERNEL_DEBS:-""}
 CUSTOM_KERNEL_VERSION=${CUSTOM_KERNEL_VERSION:-""}
 MLNX_OFED_SRC_LOCAL=${MLNX_OFED_SRC_LOCAL:-""}
-MLNX_OFED_SRC_URL=${MLNX_OFED_SRC_URL:-"${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/SOURCES/mlnx_ofed/MLNX_OFED_SRC-debian-${MLNX_OFED_VERSION}.tgz"}
+MLNX_OFED_SRC_URL=${MLNX_OFED_SRC_URL:-""}
 
 # MLNX_OFED kernel configure flags for the BlueField DPU.
 OFED_KERNEL_EXTRA_ARGS=${OFED_KERNEL_EXTRA_ARGS:-"--with-core-mod --with-user_mad-mod --with-user_access-mod --with-addr_trans-mod --with-mlxfw-mod --with-mlx5-mod --with-mlx5-ipsec --with-ipoib-mod --with-mlxdevm-mod --with-srp-mod --with-iser-mod --with-isert-mod --with-gds --with-sf-cfg-drv --with-sf-sfc --without-xdp --without-odp --with-nfsrdma-mod"}
@@ -220,6 +223,13 @@ if [ "X${CUSTOM_KERNEL}" == "Xyes" ]; then
 		ofed_src_tarball=""
 		echo "Using MLNX_OFED source directory: ${OFED_SOURCES_URL}"
 	else
+		if [ -z "${MLNX_OFED_SRC_URL}" ]; then
+			ofed_src_dir="${BASE_URL}/doca/${DOCA_VERSION}-${BSP_VERSION}/SOURCES/mlnx_ofed"
+			ofed_src_tarball=$(wget -qO- "${ofed_src_dir}/" 2> /dev/null | \
+				grep -oE '(DOCA_BASE_SRC|MLNX_OFED_SRC)-debian-[A-Za-z0-9._-]+\.(tar\.gz|tgz)' | \
+				sort -u | head -1)
+			MLNX_OFED_SRC_URL="${ofed_src_dir}/${ofed_src_tarball:-MLNX_OFED_SRC-debian-${MLNX_OFED_VERSION}.tgz}"
+		fi
 		ofed_src_tarball=$(basename ${MLNX_OFED_SRC_URL})
 		echo "Downloading MLNX_OFED sources: ${MLNX_OFED_SRC_URL}"
 		if ! wget -q -O $WDIR/${ofed_src_tarball} ${MLNX_OFED_SRC_URL}; then
@@ -228,10 +238,10 @@ if [ "X${CUSTOM_KERNEL}" == "Xyes" ]; then
 			echo ""
 			echo "MLNX_OFED sources for each DOCA release are published under"
 			echo "  ${BASE_URL}/doca/<doca-version>-<bsp-version>/SOURCES/mlnx_ofed/"
-			echo "Check that MLNX_OFED_VERSION (${MLNX_OFED_VERSION}) matches what is"
-			echo "published for DOCA ${DOCA_VERSION}, point MLNX_OFED_SRC_URL at the"
-			echo "right tarball, supply a local copy with MLNX_OFED_SRC_LOCAL=<path>,"
-			echo "or point OFED_SOURCES_URL at a directory of orig tarballs."
+			echo "Check that DOCA_VERSION (${DOCA_VERSION}) and BSP_VERSION (${BSP_VERSION})"
+			echo "name a published release, point MLNX_OFED_SRC_URL at the right"
+			echo "tarball, supply a local copy with MLNX_OFED_SRC_LOCAL=<path>, or"
+			echo "point OFED_SOURCES_URL at a directory of orig tarballs."
 			exit 1
 		fi
 	fi

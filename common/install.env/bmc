@@ -19,6 +19,8 @@ OOB_IP=${OOB_IP:-"192.168.240.2"}
 OOB_NETPREFIX=${OOB_NETPREFIX:-"29"}
 BMC_IP_TIMEOUT=${BMC_IP_TIMEOUT:-90}
 BMC_TASK_TIMEOUT=${BMC_TASK_TIMEOUT:-"1800"}
+BMC_UPDATE_MAX_ATTEMPTS=${BMC_UPDATE_MAX_ATTEMPTS:-4}
+BMC_LAST_TASK_OUTPUT=""
 BMC_HTTPS_READY_TIMEOUT=${BMC_HTTPS_READY_TIMEOUT:-300}
 UPDATE_BMC_FW=${UPDATE_BMC_FW:-"yes"}
 BMC_REBOOT=${BMC_REBOOT:-"no"}
@@ -33,7 +35,7 @@ GI_INVENTORY_TIMEOUT=${GI_INVENTORY_TIMEOUT:-300}
 CEC_MIN_RESET_VERSION="00.02.0180.0000"
 UPDATE_DPU_GOLDEN_IMAGE=${UPDATE_DPU_GOLDEN_IMAGE:-"yes"}
 UPDATE_NIC_FW_GOLDEN_IMAGE=${UPDATE_NIC_FW_GOLDEN_IMAGE:-"yes"}
-UPDATE_CERTIFICATES=${UPDATE_CERTIFICATES:-"yes"}
+UPDATE_CERTIFICATES=${UPDATE_CERTIFICATES:-"no"}
 RESET_BMC_RSHIM_LOG=${RESET_BMC_RSHIM_LOG:-"yes"}
 bmc_pref=""
 cec_sfx=""
@@ -370,8 +372,21 @@ bmc_get_task_id()
 	ilog "Task id: $task_id"
 }
 
+redfish_has_erot()
+{
+	local erot_id=$(curl -sSk -u "$BMC_USER:$BMC_PASSWORD" https://${BMC_IP}/redfish/v1/Chassis/Bluefield_ERoT | jq -r ' .Id' 2>/dev/null)
+	if [ "X$erot_id" == "XBluefield_ERoT" ]; then
+		return 0
+	fi
+	return 1
+}
+
 wait_bmc_background_copy()
 {
+	if ! redfish_has_erot; then
+		ilog "Redfish does not expose ERoT (BMC likely too old)."
+		return 0
+	fi
 	copy_status=$(curl -sSk -u "$BMC_USER:$BMC_PASSWORD" -X GET https://${BMC_IP}/redfish/v1/Chassis/Bluefield_ERoT | jq -r ' .Oem.Nvidia.BackgroundCopyStatus')
 	if [ "X$copy_status" == "Xnull" ]; then
 		return 0
@@ -397,6 +412,7 @@ wait_bmc_background_copy()
 wait_bmc_task_complete()
 {
 	local tid=$1
+	BMC_LAST_TASK_OUTPUT=""
 
 	if [ ! -z "$tid" ]; then
 		task_id=$tid
@@ -455,6 +471,7 @@ wait_bmc_task_complete()
 		cat $output >> $LOG
 		RC=$((RC+1))
 	fi
+	BMC_LAST_TASK_OUTPUT=$(cat $output)
 	/bin/rm -f $output
 }
 
@@ -586,7 +603,6 @@ wait_for_fw_inventory_device()
 
 update_bmc_fw()
 {
-	rc=0
 	wait_bmc_background_copy
 	wait_bmc_task_complete
 	log "Updating BMC firmware"
@@ -631,30 +647,64 @@ update_bmc_fw()
 
 	ilog "Proceeding with the BMC firmware update."
 
-	if [[ $(echo -e "${BMC_MIN_MULTIPART_VERSION}\n${BMC_INSTALLED_VERSION}" | sort -V | head -n1) == "${BMC_MIN_MULTIPART_VERSION}" ]]; then
-		ilog "curl -sSk -u <BMC_USER:BMC_PASSWORD> https://${BMC_IP}/redfish/v1/UpdateService/update-multipart -F 'UpdateParameters={\"ForceUpdate\":true};type=application/octet-stream' -F UpdateFile=@${image}"
-		output=$(curl -sSk -u "$BMC_USER:$BMC_PASSWORD" https://${BMC_IP}/redfish/v1/UpdateService/update-multipart -F 'UpdateParameters={"ForceUpdate":true};type=application/octet-stream' -F UpdateFile=@${image} 2>&1)
-	else
-		ilog "curl -sSk -u <BMC_USER:BMC_PASSWORD> -H "Content-Type: application/octet-stream" -X POST -T ${image} https://${BMC_IP}/redfish/v1/UpdateService"
-		output=$(curl -sSk -u "$BMC_USER:$BMC_PASSWORD" -H "Content-Type: application/octet-stream" -X POST -T ${image} https://${BMC_IP}/redfish/v1/UpdateService 2>&1)
-	fi
-	ilog "BMC Firmware update: $output"
-	if (echo $output | grep -q "internal service error"); then
-		rc=1
-		RC=$((RC+1))
-		log "ERR Failed to update BMC firmware"
-		return $rc
-	fi
+	local attempt=0
+	local max_attempts=$BMC_UPDATE_MAX_ATTEMPTS
+	local save_RC=$RC
+	local retry_delay=30s
+	while [ $attempt -lt $max_attempts ]; do
+		RC=$save_RC
+		if [[ $(echo -e "${BMC_MIN_MULTIPART_VERSION}\n${BMC_INSTALLED_VERSION}" | sort -V | head -n1) == "${BMC_MIN_MULTIPART_VERSION}" ]]; then
+			ilog "curl -sSk -u <BMC_USER:BMC_PASSWORD> https://${BMC_IP}/redfish/v1/UpdateService/update-multipart -F 'UpdateParameters={\"ForceUpdate\":true};type=application/octet-stream' -F UpdateFile=@${image}"
+			output=$(curl -sSk -u "$BMC_USER:$BMC_PASSWORD" https://${BMC_IP}/redfish/v1/UpdateService/update-multipart -F 'UpdateParameters={"ForceUpdate":true};type=application/octet-stream' -F UpdateFile=@${image} 2>&1)
+		else
+			ilog "curl -sSk -u <BMC_USER:BMC_PASSWORD> -H "Content-Type: application/octet-stream" -X POST -T ${image} https://${BMC_IP}/redfish/v1/UpdateService"
+			output=$(curl -sSk -u "$BMC_USER:$BMC_PASSWORD" -H "Content-Type: application/octet-stream" -X POST -T ${image} https://${BMC_IP}/redfish/v1/UpdateService 2>&1)
+		fi
+		ilog "BMC Firmware update: $output"
+		if (echo $output | grep -q "internal service error"); then
+			RC=$((RC+1))
+			break
+		fi
 
-	tid=$(echo $output | jq -r '."@odata.id"')
-	ilog "BMC Firmware update task id: $tid"
+		tid=$(echo $output | jq -r '."@odata.id"' 2>/dev/null)
+		if [[ -z "$tid" || "$tid" == "null" ]]; then
+			log "ERR Cannot find BMC firmware update task id"
+			RC=$((RC+1))
+			break
+		fi
+		ilog "BMC Firmware update task id: $tid"
 
-	if ! wait_bmc_task_complete_check_rc $tid; then
+		if wait_bmc_task_complete_check_rc $tid; then
+			BMC_FIRMWARE_UPDATED="yes"
+			break
+		fi
+
+		# If ERoT is busy doing background copy, update task fails quickly. This is retryable.
+		if echo "$BMC_LAST_TASK_OUTPUT" | grep -qi 'ERoT is busy'; then
+			ilog "BMC Firmware update task failed due to ERoT being busy."
+			if redfish_has_erot; then
+				wait_bmc_background_copy
+			else
+				retry_delay=5m
+			fi
+		else
+			# Non-retryable error, exit.
+			break
+		fi
+
+		attempt=$((attempt+1))
+		if [ $attempt -lt $max_attempts ]; then
+			ilog "Retrying BMC firmware update in $retry_delay..."
+			sleep $retry_delay
+		else
+			log "Exhausted all BMC update retry attempts."
+		fi
+	done
+
+	if [ "$BMC_FIRMWARE_UPDATED" != "yes" ]; then
 		log "ERR Failed to update BMC firmware"
 		return 1
 	fi
-
-	BMC_FIRMWARE_UPDATED="yes"
 
 	post_bmc_install_message="INFO: BMC firmware was updated to: ${BMC_IMAGE_VERSION}"
 	if [ "$BMC_REBOOT" != "yes" ]; then
@@ -665,7 +715,7 @@ update_bmc_fw()
 		BMC_UPGRADE_RESET=1 bfcfg -f /dev/null
 	fi
 
-	return $rc
+	return 0
 }
 
 update_cec_fw()
@@ -753,6 +803,10 @@ update_cec_fw()
 			status=$(echo $output | jq '."@Message.ExtendedInfo"[0].Message')
 			if [ "$status" == "\"The request completed successfully."\" ]; then
 				log "INFO: CEC firmware was updated to ${CEC_IMAGE_VERSION}."
+				ilog "Waiting for BMC to recover after CEC/ERoT reset..."
+				wait_for_bmc_ip
+				wait_for_bmc_https
+				get_bmc_token
 			else
 				rc=1
 				rlog "ERR Failed to reset CEC"

@@ -189,8 +189,6 @@ libpython3_minimal=$(dpkg -S /usr/lib/python3*/os.py | head -1 | cut -d ':' -f 1
 libpython3=$(dpkg -S /usr/lib/aarch64-linux-gnu/libpython3.*.so.1 | head -1 | cut -d ':' -f 1 | tr -d ',')
 python3_distutils=$(dpkg -S /usr/lib/python3.*/distutils | head -1 | cut -d ':' -f 1 | tr -d ',')
 python3_lib2to3=$(dpkg -S /usr/lib/python3.*/lib2to3 | head -1 | cut -d ':' -f 1 | tr -d ',')
-# python3.12+ removed distutils (and 3.13 removed lib2to3), so the lookups above
-# no longer resolve to the package holding the full stdlib. Resolve it directly:
 libpython3_stdlib=$(dpkg -S /usr/lib/python3*/shutil.py | head -1 | cut -d ':' -f 1 | tr -d ',')
 python_bin=$(readlink -f /usr/bin/python)
 python_deb=$(dpkg -S $python_bin | head -1 | cut -d ':' -f 1 | tr -d ',')
@@ -722,7 +720,7 @@ set default=0
 set timeout=3
 
 menuentry "${ubuntu_IMAGE/.iso/} Installation" {
-  linux /bfb/vmlinuz keep_bootcon biosdevname=0 ip=dhcp
+  linux /bfb/vmlinuz keep_bootcon ip=dhcp
   initrd /bfb/initrd
 }
 EOF

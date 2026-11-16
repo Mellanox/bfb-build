@@ -1,4 +1,146 @@
 DPU_TMP_DIR=${DPU_TMP_DIR:-"/tmp"}
+# FORCE_ATF_UEFI_UPDATE=yes - update ATF/UEFI (bootctl and capsule) even
+# if the provided ATF and UEFI versions are the same as the installed ones.
+# Only checked on a runtime upgrade (RUNTIME_UPGRADE=yes, set by
+# bf-upgrade); a full BFB install always updates them.
+FORCE_ATF_UEFI_UPDATE=${FORCE_ATF_UEFI_UPDATE:-"no"}
+
+# Normalise an ATF/UEFI version string for comparison.
+# Strips surrounding whitespace and a leading "vX.Y(<tag>):" ATF prefix,
+# e.g. "v2.2(release):4.17.0-3-gd8c6958be" -> "4.17.0-3-gd8c6958be".
+normalize_fw_version()
+{
+	local v="$1"
+	local re='^v[0-9]+(\.[0-9]+)*\([^)]*\):[[:space:]]*(.*)$'
+
+	v="${v#"${v%%[![:space:]]*}"}"
+	v="${v%"${v##*[![:space:]]}"}"
+	if [[ $v =~ $re ]]; then
+		v="${BASH_REMATCH[2]}"
+	fi
+	echo "$v"
+}
+
+# Extract the ATF build type tag ("release"/"debug") if present
+atf_build_type()
+{
+	local re='^[[:space:]]*v[0-9]+(\.[0-9]+)*\(([^)]*)\):'
+
+	if [[ $1 =~ $re ]]; then
+		echo "${BASH_REMATCH[2]}"
+	fi
+}
+
+# Parse "BlueField ATF version:" and "BlueField UEFI version:" from bfver
+# output (same lines bfrec uses to set the pending versions; the last
+# match wins, as in bfrec). Sets BFVER_ATF and BFVER_UEFI.
+parse_bfver_output()
+{
+	local line
+	BFVER_ATF=""
+	BFVER_UEFI=""
+	while IFS= read -r line; do
+		case "$line" in
+			*"BlueField ATF version:"*)
+				read -r BFVER_ATF <<< "${line#*BlueField ATF version:}"
+				;;
+			*"BlueField UEFI version:"*)
+				read -r BFVER_UEFI <<< "${line#*BlueField UEFI version:}"
+				;;
+		esac
+	done <<< "$1"
+}
+
+# Return 0 if a capsule update is already pending in OsIndications
+# (EFI_OS_INDICATIONS_FILE_CAPSULE_DELIVERY_SUPPORTED bit set by bfrec).
+# Absent variable: not pending. Unreadable or truncated variable: treated
+# as pending, so the capsule is staged (fail safe).
+atf_uefi_capsule_pending()
+{
+	local os_var=/sys/firmware/efi/efivars/OsIndications-8be4df61-93ca-11d2-aa0d-00e098032b8c
+	local val
+
+	[ -e "$os_var" ] || return 1
+	if ! val=$(od -An -tu1 -j4 -N1 "$os_var" 2>/dev/null); then
+		ilog "Cannot read $os_var. Assuming a capsule update is pending."
+		return 0
+	fi
+	val=$(echo "$val" | tr -d '[:space:]')
+	if [[ ! $val =~ ^[0-9]+$ ]]; then
+		ilog "Cannot parse $os_var. Assuming a capsule update is pending."
+		return 0
+	fi
+	[ $(( val & 4 )) -ne 0 ]
+}
+
+# Return 0 if the ATF/UEFI update is required, 1 if the capsule contains
+# the same ATF and UEFI versions as installed.
+# If any version cannot be determined, the update is required.
+is_atf_uefi_update_required()
+{
+	local capsule="$1"
+	local output
+	local cap_atf cap_uefi run_atf run_uefi
+	local cap_atf_type run_atf_type
+
+	if [ "${FORCE_ATF_UEFI_UPDATE}" == "yes" ]; then
+		ilog "FORCE_ATF_UEFI_UPDATE is set."
+		return 0
+	fi
+
+	if ! command -v bfver > /dev/null 2>&1; then
+		ilog "bfver was not found. Cannot compare ATF/UEFI versions."
+		return 0
+	fi
+
+	if ! output=$(bfver -f "$capsule" 2> /dev/null); then
+		ilog "Failed to get ATF/UEFI versions from $capsule"
+		return 0
+	fi
+	parse_bfver_output "$output"
+	cap_atf="$BFVER_ATF"
+	cap_uefi="$BFVER_UEFI"
+
+	if ! output=$(bfver 2> /dev/null); then
+		ilog "Failed to get installed ATF/UEFI versions"
+		return 0
+	fi
+	parse_bfver_output "$output"
+	run_atf="$BFVER_ATF"
+	run_uefi="$BFVER_UEFI"
+
+	ilog "Provided ATF version: $cap_atf, UEFI version: $cap_uefi"
+	ilog "Installed ATF version: $run_atf, UEFI version: $run_uefi"
+
+	cap_atf_type=$(atf_build_type "$cap_atf")
+	run_atf_type=$(atf_build_type "$run_atf")
+	cap_atf=$(normalize_fw_version "$cap_atf")
+	cap_uefi=$(normalize_fw_version "$cap_uefi")
+	run_atf=$(normalize_fw_version "$run_atf")
+	run_uefi=$(normalize_fw_version "$run_uefi")
+
+	if [[ -z "$cap_atf" || -z "$cap_uefi" || -z "$run_atf" || -z "$run_uefi" ]]; then
+		ilog "Could not determine ATF/UEFI versions. Proceeding with the update."
+		return 0
+	fi
+
+	if [ "$cap_atf_type" != "$run_atf_type" ]; then
+		ilog "ATF build type differs (provided: '${cap_atf_type}', installed: '${run_atf_type}'). Proceeding with the update."
+		return 0
+	fi
+
+	if [[ "$cap_atf" != "$run_atf" || "$cap_uefi" != "$run_uefi" ]]; then
+		return 0
+	fi
+
+	if atf_uefi_capsule_pending; then
+		ilog "Installed ATF/UEFI version is the same as provided, but another capsule update is pending. Proceeding with the update."
+		return 0
+	fi
+
+	ilog "Installed ATF/UEFI version is the same as provided. Skipping ATF/UEFI update."
+	return 1
+}
 
 update_atf_uefi()
 {
@@ -12,12 +154,27 @@ update_atf_uefi()
 		ilog "Updating ATF/UEFI:"
 		efivars=/sys/firmware/efi/efivars
 		test "$(ls -A $efivars)" || mount -t efivarfs efivarfs $efivars
-		if [ ! -e "$efivars/PK-8be4df61-93ca-11d2-aa0d-00e098032b8c" ]; then
-			# Secure Boot is disabled
-			ilog "$(bfrec --bootctl || true)"
+
+		# On a runtime upgrade, skip the boot image update if the capsule
+		# carries the installed ATF/UEFI. Decide before "bfrec --bootctl":
+		# it rewrites the primary boot partition, after which bfver would
+		# report the new image as installed. A full BFB install always
+		# updates.
+		boot_update_cap=/lib/firmware/mellanox/boot/capsule/boot_update2.cap
+		update_boot_image=1
+		if [ "${RUNTIME_UPGRADE}" == "yes" ] && [ -e $boot_update_cap ] && \
+			! is_atf_uefi_update_required $boot_update_cap; then
+			update_boot_image=0
 		fi
-		if [ -e /lib/firmware/mellanox/boot/capsule/boot_update2.cap ]; then
-			ilog "$(bfrec --capsule /lib/firmware/mellanox/boot/capsule/boot_update2.cap)"
+
+		if [ $update_boot_image -eq 1 ]; then
+			if [ ! -e "$efivars/PK-8be4df61-93ca-11d2-aa0d-00e098032b8c" ]; then
+				# Secure Boot is disabled
+				ilog "$(bfrec --bootctl || true)"
+			fi
+			if [ -e $boot_update_cap ]; then
+				ilog "$(bfrec --capsule $boot_update_cap)"
+			fi
 		fi
 
 		if [ -e /lib/firmware/mellanox/boot/capsule/efi_sbkeysync.cap ]; then

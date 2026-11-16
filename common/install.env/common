@@ -205,8 +205,16 @@ cat >> $LOG << EOF
 $(dmesg -x)
 EOF
 	sync
-	for pw in $(grep "PASSWORD=" $LOG | cut -d '=' -f 2- | sed 's/["'\'']//'g)
+	# Extract only well-formed KEY_PASSWORD=value tokens instead of grepping
+	# whole lines: a bf.cfg generated from a kubectl-applied DPUFlavor embeds
+	# the entire spec (incl. unrelated ". other_config" OVS args) on one
+	# PASSWORD=-matching line, and word-splitting that line turned each
+	# whitespace-separated fragment into a "password", including bare "."
+	# tokens that made "sed -i -e s,.,xxxxxx,g" rewrite the whole log
+	# repeatedly and fill /tmp (bug 5253896).
+	for pw in $(grep -oE "[A-Za-z0-9_]*PASSWORD=[^\"',[:space:]]+" $LOG | cut -d '=' -f 2-)
 	do
+		[ -z "$pw" ] && continue
 		sed -i -e "s,$pw,xxxxxx,g" $LOG
 	done
 	sync
@@ -541,6 +549,12 @@ mount_target_partition()
 	sync
 	sleep 1
 
+	# Let udev reprocess the partitions before their new UUIDs are read back.
+	if command -v udevadm > /dev/null 2>&1; then
+		udevadm settle --timeout=30 >> $LOG 2>&1 || \
+			ilog "WARNING: udevadm settle did not complete within 30s; partition UUIDs reported by lsblk may be stale"
+	fi
+
 	fsck.vfat -a ${device}p1
 
 	root_device=${device/\/dev\/}p3
@@ -551,13 +565,26 @@ mount_target_partition()
 	mount ${device}p1 /mnt/boot/efi
 }
 
+# lsblk answers from the udev cache, which can still hold the UUID of the
+# filesystem that was here before the reformat; blkid -c /dev/null reads the
+# on-disk superblock. Prefer the superblock and report any disagreement.
 get_part_id()
 {
 	local part_id=$1
-	if [ -n "$(lsblk -o UUID ${part_id} 2> /dev/null | tail -1)" ]; then
-		echo $(lsblk -o UUID -P ${part_id})
-	elif [ -n "$(blkid -o value -s UUID ${part_id} 2> /dev/null)" ]; then
-		echo "UUID=$(blkid -o value -s UUID ${part_id})"
+	local uuid_udev uuid_disk
+
+	uuid_udev=$(lsblk -no UUID ${part_id} 2> /dev/null | tail -1)
+	uuid_disk=$(blkid -c /dev/null -o value -s UUID ${part_id} 2> /dev/null)
+
+	if [ -n "$uuid_disk" ] && [ -n "$uuid_udev" ] && [ "$uuid_disk" != "$uuid_udev" ]; then
+		ilog "WARNING: stale UUID for ${part_id}: udev cache reports ${uuid_udev}, on-disk superblock reports ${uuid_disk}. Using the superblock value."
+	fi
+
+	if [ -n "$uuid_disk" ]; then
+		echo "UUID=\"${uuid_disk}\""
+	elif [ -n "$uuid_udev" ]; then
+		ilog "INFO: ${part_id} UUID resolved from the udev cache; the superblock returned nothing"
+		echo "UUID=\"${uuid_udev}\""
 	else
 		echo "${part_id}"
 	fi
@@ -885,17 +912,15 @@ update_default_bfb()
 configure_default_grub()
 {
 	ilog "Configure /etc/default/grub:"
-	# Then, set boot arguments: Read current 'console' and 'earlycon'
-	# parameters, and append the root filesystem parameters.
-	bootarg="$(cat /proc/cmdline | sed 's/initrd=initramfs//;s/console=.*//')"
+	bootarg="$(cat /proc/cmdline | sed 's/initrd=initramfs//;s/console=.*//;s/BOOT_IMAGE=[^[:space:]]*[[:space:]]*//g')"
 	redfish_osarg="$(bfcfg --dump-osarg 2> /dev/null)"
 	if [ -n "$redfish_osarg" ]; then
 		bootarg="$bootarg $redfish_osarg"
 	fi
 	if (lscpu 2>&1 | grep -wq Grace); then
-		sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=1024M $bootarg keep_bootcon earlycon modprobe.blacklist=mlx5_core,mlx5_ib selinux=0 biosdevname=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
+		sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=1024M $bootarg keep_bootcon earlycon modprobe.blacklist=mlx5_core,mlx5_ib selinux=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
 	else
-		sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=1024M $bootarg console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 modprobe.blacklist=mlx5_core,mlx5_ib selinux=0 biosdevname=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
+		sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=1024M $bootarg console=hvc0 console=ttyAMA0 earlycon=pl011,0x01000000 modprobe.blacklist=mlx5_core,mlx5_ib selinux=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
 	fi
 	if (grep -q MLNXBF33 /sys/firmware/acpi/tables/SSDT*); then
 		# BlueField-3
@@ -903,6 +928,11 @@ configure_default_grub()
 		if /bin/ls /mnt/boot/loader/entries/*.conf > /dev/null 2>&1; then
 			sed -i -e "s/0x01000000/0x13010000/g" /mnt/boot/loader/entries/*.conf
 		fi
+	fi
+
+	if /bin/ls /mnt/boot/efi/EFI/*/arm64-efi/tpm.mod > /dev/null 2>&1 && \
+	   ! grep -q 'GRUB_PRELOAD_MODULES.*tpm' /mnt/etc/default/grub; then
+		echo 'GRUB_PRELOAD_MODULES="$GRUB_PRELOAD_MODULES tpm"' >> /mnt/etc/default/grub
 	fi
 
 	if (lspci -vv | grep -wq SimX); then

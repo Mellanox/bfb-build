@@ -138,5 +138,9 @@ RUN systemctl enable mst || true
 RUN systemctl enable mlnx_snap.service || true 
 RUN systemctl disable kubelet || true
 RUN systemctl disable containerd || true
+RUN systemctl disable lm_sensors || true
+
+# Create /var/log/journal so journald keeps logs across reboots
+RUN mkdir -p /var/log/journal
 
 RUN sed -i -E "s/(_unsigned|_prod|_dev)/_@IMAGE_TYPE@@CUSTOM_VERSION@/;" /etc/mlnx-release

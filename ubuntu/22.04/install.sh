@@ -487,6 +487,17 @@ enable_sfc_hbn()
 	log "INFO: Installing SFC HBN environment"
 	ilog "$(BR_HBN_UPLINKS=${BR_HBN_UPLINKS} BR_HBN_REPS=${BR_HBN_REPS} BR_HBN_SFS=${BR_HBN_SFS} BR_SFC_UPLINKS=${BR_SFC_UPLINKS} BR_SFC_REPS=${BR_SFC_REPS} BR_SFC_SFS=${BR_SFC_SFS} BR_HBN_SFC_PATCH_PORTS=${BR_HBN_SFC_PATCH_PORTS} LINK_PROPAGATION=${LINK_PROPAGATION} ENABLE_BR_SFC=${ENABLE_BR_SFC} ENABLE_BR_SFC_DEFAULT_FLOWS=${ENABLE_BR_SFC_DEFAULT_FLOWS} HUGEPAGE_SIZE=${HUGEPAGE_SIZE} HUGEPAGE_COUNT=${HUGEPAGE_COUNT} CLOUD_OPTION=${CLOUD_OPTION} HBN_PROFILE=${HBN_PROFILE} HBN_CPU_CORE=${HBN_CPU_CORE} HBN_RAM_MEMORY=${HBN_RAM_MEMORY} OVS_CPU_CORE=${OVS_CPU_CORE} chroot /mnt /opt/mellanox/sfc-hbn/install.sh ${ARG_PORT0} ${ARG_PORT1} 2>&1)"
 	NIC_FW_RESET_REQUIRED=1
+
+	# Without CLOUD_OPTION, place oob_net0 into the mgmt VRF so OOB
+	# management traffic is isolated from the data-plane. With
+	# CLOUD_OPTION, drop the unused mgmt VRF device.
+	if [[ -z "$CLOUD_OPTION" ]]; then
+		if [ -f /mnt/usr/lib/systemd/network/02-oob.network ]; then
+			sed -i '/^\[Network\]/a VRF=mgmt' /mnt/usr/lib/systemd/network/02-oob.network
+		fi
+	else
+		/bin/rm -f /mnt/usr/lib/systemd/network/03-mgmt.netdev
+	fi
 }
 
 create_initramfs()
@@ -509,7 +520,7 @@ configure_grub()
 	fi
 
 	if (lscpu 2>&1 | grep -wq Grace); then
-		sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=1024M $bootarg keep_bootcon earlycon modprobe.blacklist=mlx5_core,mlx5_ib selinux=0 biosdevname=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
+		sed -i -e "s@GRUB_CMDLINE_LINUX=.*@GRUB_CMDLINE_LINUX=\"rw crashkernel=1024M $bootarg keep_bootcon earlycon modprobe.blacklist=mlx5_core,mlx5_ib selinux=0 iommu.passthrough=1\"@" /mnt/etc/default/grub
 	elif (grep -q MLNXBF33 /sys/firmware/acpi/tables/SSDT*); then
 		# BlueField-3
 		sed -i -e "s/0x01000000/0x13010000/g" /mnt/etc/default/grub

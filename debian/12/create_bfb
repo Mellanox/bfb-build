@@ -708,7 +708,7 @@ set default=0
 set timeout=3
 
 menuentry "${debian_IMAGE/.iso/} installation" {
-  linux /boot/vmlinuz net.ifnames=0 keep_bootcon biosdevname=0 ip=dhcp
+  linux /boot/vmlinuz keep_bootcon ip=dhcp
   initrd /boot/initrd
 }
 EOF

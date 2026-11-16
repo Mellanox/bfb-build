@@ -86,6 +86,10 @@ update_efi_bootmgr()
 configure_grub()
 {
 	ilog "Configure grub:"
+	# Copy modules
+	if [ -d /mnt/usr/lib/grub/arm64-efi ]; then
+		cp -r /mnt/usr/lib/grub/arm64-efi /mnt/boot/efi/EFI/ctyunos/
+	fi
 	configure_default_grub
 	ilog "$(chroot /mnt grub2-mkconfig -o /boot/efi/EFI/ctyunos/grub.cfg 2>&1)"
 }

@@ -86,6 +86,10 @@ update_efi_bootmgr()
 configure_grub()
 {
 	ilog "Configure grub:"
+	# Copy modules
+	if [ -d /mnt/usr/lib/grub/arm64-efi ]; then
+		cp -r /mnt/usr/lib/grub/arm64-efi /mnt/boot/efi/EFI/redhat/
+	fi
 	configure_default_grub
 	find /mnt/boot/loader/entries/ -type f -name "*.conf" -exec sed -i 's/\/boot//g' {} +
 	ilog "$(chroot /mnt grub2-mkconfig -o /boot/efi/EFI/redhat/grub.cfg 2>&1)"

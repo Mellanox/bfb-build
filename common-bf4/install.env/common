@@ -118,6 +118,12 @@ configure_services()
 	ilog "$(chroot /mnt /bin/systemctl disable getty@tty0.service rshim-getty.service 2>&1)"
 	ilog "$(chroot /mnt /bin/systemctl add-wants default.target getty.target 2>&1)"
 
+	# Disable bfvcheck and bfup on BF-4 where they are not supported
+	if is_bf4; then
+		ilog "$(chroot /mnt /bin/systemctl disable bfvcheck.service 2>&1)"
+		ilog "$(chroot /mnt /bin/systemctl disable bfup.service 2>&1)"
+	fi
+
 	# Disable Firewall services
 	/bin/rm -f /mnt/etc/systemd/system/multi-user.target.wants/firewalld.service
 	/bin/rm -f /mnt/etc/systemd/system/dbus-org.fedoraproject.FirewallD1.service
